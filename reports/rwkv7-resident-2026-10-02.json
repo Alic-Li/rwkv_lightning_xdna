@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-02",
+  "timezone": "Asia/Shanghai",
+  "environment": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "7.0.0-38-generic",
+    "hardware": "Ryzen AI 350 / AIE2P",
+    "xrt": "2.25.00",
+    "mlir_aie": "1.4.4.dev53+gd53582d",
+    "peano": "22.0.0.2026091701+773413fb",
+    "memlock_soft": "unlimited",
+    "memlock_hard": "unlimited"
+  },
+  "reference": {
+    "repository": "FastFlowLM",
+    "commit": "b0d41a03411470373f849b25e3ce9356d716a483",
+    "files": [
+      "docs/linux-getting-started.md",
+      "src/include/buffer.hpp",
+      "src/include/npu_utils/npu_utils_xrt.hpp",
+      "src/include/npu_utils/npu_instr_utils.hpp"
+    ],
+    "scope": "BO/run/DMA interfaces inspected; Qwen3 forward implementation is supplied as a prebuilt library in this checkout. No FastFlowLM source copied."
+  },
+  "implementation": {
+    "mode": "--backend npu --decode resident",
+    "compute": "existing FP32 kernels; new offline DMA interfaces; C++17 dispatch only",
+    "resident": "projection weights, constants, intermediate activations in persistent NPU-accessible HOST_ONLY BOs (shared DDR, not AIE SRAM)",
+    "boundary": "upload embedding and State; download logits and State; no application host intermediate transfers",
+    "submission": "individual prepared xrt::run start/wait; NOT whole-graph single submission",
+    "runs_per_token": 4280,
+    "nodes": 960,
+    "graph_buffers": 1492,
+    "data_bo_bytes": 5793261632,
+    "upload_bytes_per_token": 12984320,
+    "download_bytes_per_token": 13238272,
+    "byte_count_scope": "logical application bytes, excludes XRT internal resources and cache/DMA granularity"
+  },
+  "model": {
+    "path": "/home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "layers": 24,
+    "channels": 2048,
+    "heads": 32,
+    "ffn": 8192,
+    "vocabulary": 65536
+  },
+  "benchmark": {
+    "method": "same process, serial NPU; baseline then resident per token; token 1 warmup excluded; all logits and all layer states compared after every token",
+    "resident_prepare_seconds": 2.1375,
+    "samples": [
+      {
+        "token": 1,
+        "baseline_seconds": 7.54231,
+        "resident_seconds": 5.80814,
+        "max_abs_error": 0.0
+      },
+      {
+        "token": 2,
+        "baseline_seconds": 7.66535,
+        "resident_seconds": 5.90501,
+        "max_abs_error": 0.0
+      },
+      {
+        "token": 7,
+        "baseline_seconds": 7.74609,
+        "resident_seconds": 5.90755,
+        "max_abs_error": 0.0
+      },
+      {
+        "token": 9,
+        "baseline_seconds": 7.66045,
+        "resident_seconds": 5.91036,
+        "max_abs_error": 0.0
+      }
+    ],
+    "measured_tokens": 3,
+    "baseline_total_seconds": 23.0719,
+    "resident_total_seconds": 17.7229,
+    "speedup": 1.30181,
+    "resident_tokens_per_second": 0.169272,
+    "max_abs_error": 0,
+    "atol": 2e-06,
+    "rtol": 2e-05
+  },
+  "validation": {
+    "ctest": "5/5 rwkv.* passed",
+    "graph": "CPU, legacy NPU and resident NPU; 11 replays each; changed tokens, reset, branch, sequence-prefill continuation, invalid token and malformed state; max_abs_error=0",
+    "resident_runtime": "device-only two-run chain; three changed-input replays; nested slices; invalid slice rejection; first/last WKV head; in-place state replay; state/output guards passed",
+    "prefill": "lengths 1/15/16/17/33; logits/state/decode continuation; max_abs_error=0",
+    "package": "installed consumer configured, linked and executed",
+    "cli": {
+      "prompt": "The capital of France is",
+      "prefill_mode": "sequence",
+      "decode_mode": "resident",
+      "generated_text": " Paris.\n\n",
+      "prefill_tokens": 5,
+      "prefill_seconds": 39.7658,
+      "sampled_tokens": 3,
+      "decode_forward_calls": 2,
+      "generation_loop_seconds": 11.8408
+    }
+  },
+  "limitations": [
+    "Short-sequence latency measurements, not long-context or concurrent throughput validation.",
+    "Prefill remains the existing host-staged sequence implementation.",
+    "State still crosses the host boundary at every token; host FP32 weights remain allocated.",
+    "head_size=64; channels<=2048 and dividing 2048; required GEMV K artifacts must exist.",
+    "4280 individual runs/token remain; native runlist was not enabled or retested.",
+    "No driver, firmware or system-limit changes made in this task."
+  ],
+  "sources_sha256": {
+    "include/rwkv/xdna/session.hpp": "1cea725fbe6038057331201a49cb977acf561a89ceb324ae9810613cae195f87",
+    "src/runtime/session.cpp": "11eadc2687dc4158ad9d9c9deaa6d901d46634d58e078284be97dbc111152b3b",
+    "include/rwkv/inference/graph.hpp": "ac18c4e28a5b26278df9345a0642c0ea65caa8891eb5d3e46e65791ad84d6519",
+    "src/inference/graph.cpp": "f5a8bfdc7f6ce8250500bef3a5a2c5227585cf92cdd47a5cc8617b91b737f69e",
+    "tools/compile/rwkv7_resident.py": "7e27aa9c3b7ae0de29ef29ad7c0a43c9bb90d6c672dabb6111233e3fbac25e0b",
+    "kernels/rwkv/ops_fp32.cc": "5542fa3381f9f4f52b899ba19ab5b744027f615927f2cdc913a650713c99120d",
+    "kernels/rwkv/wkv7_fp32.cc": "3f84c3ddaf37899708dd840684033f7dcdb2a2c89c87a7827848d3648df441b5",
+    "kernels/rwkv/gemv_fp32.cc": "9a4c8a1c42ecf7a8e00ddd43230e485981618988986275164a19221138768a78",
+    "tests/inference/resident_test.cpp": "0240956e8f42df6d92ded8264f3183cb71d0eecc7a16951b7b71e6e278fa3a5a",
+    "tests/inference/graph_test.cpp": "09d4fd66590c3a1db8e2620083a605ee391ef38adb1b59b0b32c1ce5010ef393",
+    "tests/inference/resident_benchmark.cpp": "863c67f982dc4850aefb0c0bc4b89e8c5719ba4f629b40a1a704243d0f45b8e8"
+  }
+}

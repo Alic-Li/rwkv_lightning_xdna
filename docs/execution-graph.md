@@ -5,8 +5,15 @@
 细节及使用方法见 [inference.md](inference.md)。
 
 当前使用已验证的 `xrt::run` 复用。它复用对象和参数绑定，但仍逐个提交 run，
-不是整个 decode 的单次硬件图提交。图中间结果目前仍有主机传输。
-未来可保留图和状态接口，替换成共享设备缓冲区及受支持的批量执行后端。
+不是整个 decode 的单次硬件图提交。默认 `--decode graph` 的中间结果仍有主机传输；
+新增 `--decode resident` 使用持久 BO、预排布权重和 DMA 拼接/拆分，中间节点之间
+不再进行应用层主机传输，状态和 logits 在 token 边界同步。
+真实 1.5B 模型短序列实测从 7.691 降到 5.908 秒/token，全部 logits/状态最大误差为 0。
+编译、运行、测量条件及限制见 [resident decode](inference.md#resident-decode中间数据保留在设备缓冲区)。
+
+此实现参考 FastFlowLM 的 BO、run 和 DMA 工具接口，仍使用本项目 RWKV FP32 kernel。
+没有启用原生 runlist，也没有修改驱动参数；以下 runlist/capture 结果为此前的历史探针记录，
+不应理解为本轮重新测试或对所有硬件版本的判断。
 
 ## 本机实验记录（2026-10-02，XRT 2.25）
 

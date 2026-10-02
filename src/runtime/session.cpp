@@ -61,8 +61,85 @@ struct Session::Impl {
 Session::Session(const std::filesystem::path &binary,
                  const std::filesystem::path &inst, const std::string &name,
                  unsigned index)
-    : impl_(std::make_unique<Impl>(binary, inst, name, index)) {}
+    : impl_(std::make_shared<Impl>(binary, inst, name, index)) {}
 Session::~Session() = default;
+
+struct DeviceBuffer::Impl {
+  std::shared_ptr<xrt::bo> root;
+  size_t offset = 0;
+  xrt::bo bo;
+  explicit Impl(xrt::bo value)
+      : root(std::make_shared<xrt::bo>(std::move(value))), bo(*root) {}
+  Impl(std::shared_ptr<xrt::bo> allocation, size_t start, size_t bytes)
+      : root(std::move(allocation)), offset(start), bo(*root, bytes, start) {}
+};
+size_t DeviceBuffer::size() const { return impl_ ? impl_->bo.size() : 0; }
+DeviceBuffer DeviceBuffer::slice(size_t offset, size_t bytes) const {
+  if (!bytes || offset > size() || bytes > size() - offset)
+    throw std::invalid_argument("Device buffer slice out of bounds");
+  // Flatten against the root: nesting XRT sub-BOs can lose parent offsets.
+  return DeviceBuffer(
+      std::make_shared<Impl>(impl_->root, impl_->offset + offset, bytes));
+}
+void DeviceBuffer::upload(const void *data, size_t bytes, size_t offset) {
+  if (!data || !bytes || offset > size() || bytes > size() - offset)
+    throw std::invalid_argument("Device upload out of bounds");
+  impl_->root->write(data, bytes, impl_->offset + offset);
+  impl_->root->sync(XCL_BO_SYNC_BO_TO_DEVICE, bytes, impl_->offset + offset);
+}
+void DeviceBuffer::download(void *data, size_t bytes, size_t offset) const {
+  if (!data || !bytes || offset > size() || bytes > size() - offset)
+    throw std::invalid_argument("Device download out of bounds");
+  impl_->root->sync(XCL_BO_SYNC_BO_FROM_DEVICE, bytes, impl_->offset + offset);
+  impl_->root->read(data, bytes, impl_->offset + offset);
+}
+struct DeviceRun::Impl {
+  // Retain the owning context and every BO for the lifetime of the run.
+  std::shared_ptr<void> owner;
+  std::vector<DeviceBuffer> buffers;
+  xrt::run run;
+  Impl(std::shared_ptr<void> o, std::vector<DeviceBuffer> b, xrt::kernel &k)
+      : owner(std::move(o)), buffers(std::move(b)), run(k) {}
+};
+DeviceBuffer Session::allocate(size_t bytes, unsigned argument) {
+  if (!bytes || argument < 3 || argument > 34)
+    throw std::invalid_argument("Invalid device allocation");
+  return DeviceBuffer(std::make_shared<DeviceBuffer::Impl>(
+      xrt::bo(impl_->device, bytes, XRT_BO_FLAGS_HOST_ONLY,
+              impl_->kernel.group_id(static_cast<int>(argument)))));
+}
+DeviceRun Session::prepare(const std::vector<DeviceBuffer> &buffers) {
+  if (buffers.empty() || buffers.size() > 32)
+    throw std::invalid_argument("Invalid prepared buffer count");
+  auto p = std::make_shared<DeviceRun::Impl>(impl_, buffers, impl_->kernel);
+  p->run.set_arg(0, 3u);
+  p->run.set_arg(1, impl_->instruction_buffer);
+  p->run.set_arg(2, static_cast<uint32_t>(impl_->instructions.size()));
+  for (size_t i = 0; i < buffers.size(); ++i) {
+    if (!buffers[i].size())
+      throw std::invalid_argument("Empty prepared buffer");
+    p->run.set_arg(static_cast<int>(3 + i), buffers[i].impl_->bo);
+  }
+  return DeviceRun(std::move(p));
+}
+void DeviceRun::execute(unsigned timeout_ms) {
+  if (!timeout_ms)
+    throw std::invalid_argument("Invalid device timeout");
+  impl_->run.start();
+  try {
+    auto state = impl_->run.wait(timeout_ms);
+    if (state != ERT_CMD_STATE_COMPLETED)
+      throw std::runtime_error("Resident NPU dispatch failed: ERT state=" +
+                               std::to_string(static_cast<int>(state)));
+  } catch (...) {
+    // Do not release/rebind BOs while a timed-out command may still use them.
+    try {
+      impl_->run.abort();
+    } catch (...) {
+    }
+    throw;
+  }
+}
 
 Timing Session::execute(std::vector<Buffer> &buffers, unsigned timeout_ms) {
   if (buffers.empty() || buffers.size() > 32 || timeout_ms == 0)

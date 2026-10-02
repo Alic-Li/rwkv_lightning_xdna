@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rwkv/inference/graph.hpp"
+#include "rwkv/xdna/session.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 
 namespace rwkv::inference {
@@ -37,7 +40,122 @@ struct DecodeGraph::Impl {
   std::map<const Vector *, Id> constants;
   Id embedding, logits;
   size_t replays = 0;
+  bool device_failed = false;
   const Vector empty;
+  std::map<std::string, std::unique_ptr<xdna::Session>> sessions;
+  std::vector<xdna::DeviceBuffer> device_buffers;
+  std::vector<xdna::DeviceRun> runs;
+  size_t resident_bytes = 0, upload_bytes = 0, download_bytes = 0;
+  xdna::Session &session(const std::filesystem::path &root,
+                         const std::string &name) {
+    auto &s = sessions[name];
+    if (!s)
+      s = std::make_unique<xdna::Session>(root / name / "design.xclbin",
+                                          root / name / "instructions.bin");
+    return *s;
+  }
+  xdna::DeviceBuffer initialized(xdna::Session &s, const Vector &v) {
+    auto b = s.allocate(v.size() * sizeof(float));
+    b.upload(v.data(), v.size() * sizeof(float));
+    resident_bytes += b.size();
+    return b;
+  }
+  void prepare_resident(const std::filesystem::path &root) {
+    for (const auto &name : {"resident-ops", "resident-decode"}) {
+      std::ifstream in(root / name / "config.json");
+      nlohmann::json j;
+      if (!in || !(in >> j) || j.at("schema_version") != 1 ||
+          j.at("abi") != name || j.at("dtype") != "float32")
+        throw std::runtime_error("Missing/incompatible resident ABI: " +
+                                 std::string(name));
+    }
+    if (weights.head_size() != 64 || weights.channels() > 2048 ||
+        2048 % weights.channels())
+      throw std::runtime_error(
+          "Resident graph requires head_size=64 and channels dividing 2048");
+    auto &ops = session(root, "resident-ops");
+    auto &wkv = session(root, "resident-decode");
+    device_buffers.resize(buffers.size());
+    std::map<Id, xdna::DeviceBuffer> recurrent_vectors;
+    for (const auto &node : nodes) {
+      if (node.kind != Kind::Recurrent)
+        continue;
+      auto packed = initialized(ops, Vector(6 * 2048, 0));
+      recurrent_vectors.emplace(node.output, packed);
+      for (size_t i = 1; i < 7; ++i) {
+        Id id = node.inputs[i];
+        if (device_buffers[id].size() || buffers[id].size > 2048)
+          throw std::runtime_error("Unsupported recurrent vector alias");
+        device_buffers[id] = packed.slice((i - 1) * 2048 * 4, 2048 * 4);
+      }
+    }
+    for (size_t id = 0; id < buffers.size(); ++id) {
+      if (device_buffers[id].size())
+        continue;
+      const auto &b = buffers[id];
+      Vector value(((b.size + 2047) / 2048) * 2048, 0);
+      if (b.constant)
+        std::copy(b.constant->begin(), b.constant->end(), value.begin());
+      device_buffers[id] = initialized(ops, value);
+    }
+    auto zero = initialized(ops, Vector(2048, 0));
+    auto slice = [&](Id id, size_t start, size_t count) {
+      return device_buffers.at(id).slice(start * 4, count * 4);
+    };
+    for (const auto &node : nodes) {
+      const auto &a = node.inputs;
+      if (node.kind == Kind::Element) {
+        for (size_t start = 0; start < buffers[node.output].size;
+             start += 2048) {
+          Vector meta(16, 0);
+          meta[0] = static_cast<int>(node.op);
+          meta[1] = std::min(size_t(2048), buffers[node.output].size - start);
+          meta[2] = node.group;
+          meta[3] = node.epsilon;
+          std::vector<xdna::DeviceBuffer> args{initialized(ops, meta)};
+          for (size_t i = 0; i < 4; ++i)
+            args.push_back(a[i] == none ? zero : slice(a[i], start, 2048));
+          args.push_back(slice(node.output, start, 2048));
+          runs.push_back(ops.prepare(args));
+        }
+      } else if (node.kind == Kind::Linear) {
+        const auto &w = *node.weight;
+        size_t inputs = buffers[a[0]].size, outputs = buffers[node.output].size;
+        size_t k = ((inputs + 255) / 256) * 256;
+        auto &gemv = session(root, "gemv-" + std::to_string(k));
+        for (size_t start = 0; start < outputs; start += 256) {
+          Vector packed(256 * k, 0);
+          for (size_t r = 0; r < std::min(size_t(256), outputs - start); ++r)
+            for (size_t col = 0; col < inputs; ++col) {
+              size_t pos = ((r / 16) * (k / 256) + col / 256) * 4096 +
+                           (r % 16) * 256 + col % 256;
+              packed[pos] = w.data[node.transpose ? col * outputs + start + r
+                                                  : (start + r) * inputs + col];
+            }
+          auto weight = initialized(gemv, packed);
+          runs.push_back(gemv.prepare(
+              {slice(a[0], 0, k), weight, slice(node.output, start, 256)}));
+        }
+      } else {
+        for (size_t h = 0; h < weights.heads(); ++h) {
+          std::vector<xdna::DeviceBuffer> args{
+              slice(a[0], h * 4096, 4096),
+              recurrent_vectors.at(node.output).slice(h * 64 * 4, 10304 * 4),
+              slice(node.output, h * 64, 64)};
+          runs.push_back(wkv.prepare(args));
+        }
+      }
+    }
+    upload_bytes = weights.channels() * 4;
+    download_bytes = weights.vocabulary() * 4;
+    for (const auto &s : states) {
+      size_t bytes = (buffers[s.old_attention].size + buffers[s.old_ffn].size +
+                      buffers[s.matrix].size) *
+                     4;
+      upload_bytes += bytes;
+      download_bytes += bytes;
+    }
+  }
   Id allocate(size_t size) {
     Id id = buffers.size();
     buffers.push_back({size, nullptr, Vector(size)});
@@ -96,7 +214,9 @@ struct DecodeGraph::Impl {
     nodes.push_back(node);
     return node.output;
   }
-  Impl(const Weights &w, RecurrentBackend &b) : weights(w), backend(b) {
+  Impl(const Weights &w, RecurrentBackend &b,
+       const std::filesystem::path &resident)
+      : weights(w), backend(b) {
     const size_t c = w.channels(), n = w.head_size();
     embedding = allocate(c);
     Id x = norm(embedding, w.at("blocks.0.ln0.weight"),
@@ -164,8 +284,13 @@ struct DecodeGraph::Impl {
           throw std::runtime_error("Non-topological graph dependency");
       ready[node.output] = true;
     }
+    if (!resident.empty())
+      prepare_resident(resident);
   }
   Vector replay(int token, State &state) {
+    if (device_failed)
+      throw std::runtime_error(
+          "Recreate resident graph after a device dispatch failure");
     const size_t c = weights.channels(), n = weights.head_size();
     if (token < 0 || size_t(token) >= weights.vocabulary() ||
         state.layers.size() != states.size())
@@ -189,23 +314,54 @@ struct DecodeGraph::Impl {
       bind(states[i].old_ffn, state.layers[i].ffn_shift);
       bind(states[i].matrix, state.layers[i].matrix);
     }
-    for (const auto &node : nodes) {
-      const auto &a = node.inputs;
-      Vector result;
-      if (node.kind == Kind::Element)
-        result = backend.element(node.op, read(a[0]), read(a[1]), read(a[2]),
-                                 read(a[3]), node.group, node.epsilon);
-      else if (node.kind == Kind::Linear)
-        result = backend.linear(read(a[0]), *node.weight, node.transpose);
-      else
-        result = backend.step(buffers[a[0]].value, read(a[1]), read(a[2]),
-                              read(a[3]), read(a[4]), read(a[5]), read(a[6]),
-                              node.group);
-      if (result.size() != buffers[node.output].size)
-        throw std::runtime_error("Graph output shape mismatch");
-      std::copy(result.begin(), result.end(),
-                buffers[node.output].value.begin());
-    }
+    if (!device_buffers.empty()) {
+      auto upload = [&](Id id) {
+        const auto &v = read(id);
+        device_buffers[id].upload(v.data(), v.size() * 4);
+      };
+      upload(embedding);
+      for (const auto &s : states) {
+        upload(s.old_attention);
+        upload(s.old_ffn);
+        upload(s.matrix);
+      }
+      for (size_t i = 0; i < runs.size(); ++i) {
+        try {
+          runs[i].execute();
+        } catch (const std::exception &e) {
+          device_failed = true;
+          throw std::runtime_error("Resident run " + std::to_string(i) + ": " +
+                                   e.what());
+        }
+      }
+      auto download = [&](Id id) {
+        auto &v = buffers[id].value;
+        device_buffers[id].download(v.data(), v.size() * 4);
+      };
+      download(logits);
+      for (const auto &s : states) {
+        download(s.new_attention);
+        download(s.new_ffn);
+        download(s.matrix);
+      }
+    } else
+      for (const auto &node : nodes) {
+        const auto &a = node.inputs;
+        Vector result;
+        if (node.kind == Kind::Element)
+          result = backend.element(node.op, read(a[0]), read(a[1]), read(a[2]),
+                                   read(a[3]), node.group, node.epsilon);
+        else if (node.kind == Kind::Linear)
+          result = backend.linear(read(a[0]), *node.weight, node.transpose);
+        else
+          result = backend.step(buffers[a[0]].value, read(a[1]), read(a[2]),
+                                read(a[3]), read(a[4]), read(a[5]), read(a[6]),
+                                node.group);
+        if (result.size() != buffers[node.output].size)
+          throw std::runtime_error("Graph output shape mismatch");
+        std::copy(result.begin(), result.end(),
+                  buffers[node.output].value.begin());
+      }
     for (float f : read(logits))
       if (!std::isfinite(f))
         throw std::runtime_error("Nonfinite graph logits");
@@ -220,13 +376,16 @@ struct DecodeGraph::Impl {
     return read(logits);
   }
 };
-DecodeGraph::DecodeGraph(const Weights &w, RecurrentBackend &b)
-    : impl_(std::make_unique<Impl>(w, b)) {}
+DecodeGraph::DecodeGraph(const Weights &w, RecurrentBackend &b,
+                         const std::filesystem::path &resident)
+    : impl_(std::make_unique<Impl>(w, b, resident)) {}
 DecodeGraph::~DecodeGraph() = default;
 Vector DecodeGraph::replay(int token, State &state) {
   return impl_->replay(token, state);
 }
 GraphStats DecodeGraph::stats() const {
-  return {impl_->nodes.size(), impl_->buffers.size(), impl_->replays};
+  return {impl_->nodes.size(),  impl_->buffers.size(), impl_->replays,
+          impl_->runs.size(),   impl_->resident_bytes, impl_->upload_bytes,
+          impl_->download_bytes};
 }
 } // namespace rwkv::inference

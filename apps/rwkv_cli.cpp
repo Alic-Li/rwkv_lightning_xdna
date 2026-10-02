@@ -34,8 +34,8 @@ void usage() {
          "  --presence-penalty F    default 0\n"
          "  --frequency-penalty F   default 0\n"
          "  --penalty-decay F       [0,1], default 0.996\n"
-         "  --decode graph|eager       default graph: in-process fixed decode "
-         "plan\n"
+         "  --decode graph|resident|eager  default graph; resident keeps "
+         "intermediates in NPU BOs\n"
          "  --prefill sequence|decode  sequence kernel or decode reference\n"
          "  --threads N             CPU threads, default 8\n"
          "  --tokens 1,2,3 --dump-logits FILE  diagnostic: dump FP32 logits "
@@ -171,12 +171,25 @@ int main(int argc, char **argv) {
             : rwkv::inference::full_npu_backend(opts["--kernel-dir"]);
     rwkv::inference::Model model(weights, *backend);
     auto state = model.initial_state();
-    if (opts["--decode"] != "graph" && opts["--decode"] != "eager")
-      throw std::runtime_error("--decode must be graph or eager");
+    if (opts["--decode"] != "graph" && opts["--decode"] != "resident" &&
+        opts["--decode"] != "eager")
+      throw std::runtime_error("--decode must be graph, resident or eager");
     std::unique_ptr<rwkv::inference::DecodeGraph> graph;
-    if (opts["--decode"] == "graph") {
-      graph = std::make_unique<rwkv::inference::DecodeGraph>(weights, *backend);
+    if (opts["--decode"] == "graph" || opts["--decode"] == "resident") {
+      if (opts["--decode"] == "resident" && opts["--backend"] != "npu")
+        throw std::runtime_error("resident decode requires --backend npu");
+      graph = std::make_unique<rwkv::inference::DecodeGraph>(
+          weights, *backend,
+          opts["--decode"] == "resident"
+              ? std::filesystem::path(opts["--kernel-dir"])
+              : std::filesystem::path{});
       auto stats = graph->stats();
+      if (stats.device_runs)
+        std::cerr << "Resident decode: " << stats.device_runs << " runs/token, "
+                  << stats.resident_bytes
+                  << " BO bytes; replay upload/download "
+                  << stats.replay_upload_bytes << "/"
+                  << stats.replay_download_bytes << " bytes\n";
       std::cerr << "Captured decode graph: " << stats.nodes << " nodes, "
                 << stats.buffers << " buffers (native run submissions)\n";
     }

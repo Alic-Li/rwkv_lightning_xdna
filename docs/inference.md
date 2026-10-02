@@ -3,26 +3,31 @@
 默认 `--backend npu`：**embedding 查表、tokenizer、sampler 在 CPU，模型的线性投影、
 LayerNorm/GroupNorm、混合、门控、激活、残差、WKV 和输出 head 全部在 NPU 计算**。
 CPU 还负责加载权重、布局整理、传输、图调度和有限值检查，没有静默 CPU 算子回退。
-这是正确性优先的 FP32 实现；仍有大量主机传输和逐算子提交，尚不是性能优化版本。
+这是 FP32 实现；新增 `--decode resident` 将 decode 的中间激活和预排布投影权重保留在
+NPU 可访问 BO 中。仍逐算子提交，prefill 仍使用原序列实现。
 
 ## 构建和运行
 
-环境部署见 [environment.md](environment.md)。从仓库根目录运行：
+环境部署见 [environment.md](environment.md)。本机 memlock 已按 FastFlowLM 的 Linux 指南
+解决，2026-10-02 复查软/硬限制均为 `unlimited`；记录及配置见该文档第 4 节。
+从仓库根目录运行：
 
 ```bash
-source /opt/xilinx/xrt/setup.sh
+test ! -f /opt/xilinx/xrt/setup.sh || source /opt/xilinx/xrt/setup.sh
 ./tools/bootstrap.sh
 export PATH="$PWD/.venv/bin:$PATH"
 cmake --preset dev
 cmake --build --preset dev
 # 离线编译 decode、prefill、通用算子和 GEMV；不从 Python 调用 NPU。
 .venv/bin/python tools/compile/rwkv7_full.py
+# resident decode 的 DMA 接口；复用上述 GEMV 产物。
+.venv/bin/python tools/compile/rwkv7_resident.py
 
 ./build/host/rwkv-cli \
   --model /home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth \
   --vocab assets/rwkv_vocab_v20230424.txt \
   --backend npu --kernel-dir build/kernels/rwkv7-full \
-  --prefill sequence --decode graph \
+  --prefill sequence --decode resident \
   --prompt 'The capital of France is' \
   --max-tokens 32 --top-k 1
 ```
@@ -49,10 +54,10 @@ PyTorch、CUDA 或相邻仓库。权重支持原始 state_dict 的 ZIP PTH/PT �
 `replay(token, state)` 更新 embedding/状态输入，重放相同计划，完整 token 成功后才提交状态。
 固定图和主机缓冲区池在多个 token、不同请求以及分支状态间复用；同一图实例串行调用。
 
-CLI 默认 `--decode graph`，可选 `--decode eager` 对照。底层 `Session` 复用 XRT BO、
-`xrt::run` 和参数绑定。当前图执行器逐节点调用后端，各节点可能拆成多个 NPU run。
-**它不是一次硬件提交的 CUDA Graph 等价实现**：中间结果目前仍通过主机缓冲区传递，
-整个模型的权重、激活和状态尚未常驻设备；不能据此宣称已经消除了提交或传输开销。
+CLI 默认仍为 `--decode graph`，可选 `--decode eager` 对照，或显式开启
+`--decode resident`。三种模式都复用 `Session` 的 XRT 资源；`graph` 逐节点调用后端，
+中间结果通过主机传递，`resident` 使用下节的设备缓冲区计划。
+**两种图模式都不是整图一次硬件提交**，各节点仍可能拆成多个 NPU run。
 
 ```cpp
 rwkv::inference::Weights weights(model_path);
@@ -68,6 +73,62 @@ auto logits = graph.replay(next_token, state); // updated token and state
 Weights/backend 必须比 Model/DecodeGraph 活得更久。State 是显式对象，可复制用于分支，
 通过 `initial_state()` 清零。Model eager/prefill 执行异常后应丢弃该请求状态。
 
+## Resident decode：中间数据保留在设备缓冲区
+
+```cpp
+rwkv::inference::DecodeGraph graph(weights, *backend, kernel_directory);
+auto logits = graph.replay(next_token, state);
+```
+
+构造时分配并初始化 BO、预排布/上传全部投影矩阵，绑定每个 run。重放期间：
+
+1. 上传当前 embedding 和显式 State。
+2. 按拓扑运行预绑定命令。通用算子由 DMA join 拼接输入；WKV 的六组输入分配在
+   同一个 BO 的六个 2048-float 槽位，DMA 按步长抽取各 head，输出由 DMA split
+   写入状态和激活。GEMV 直接读取前一节点的 BO，写入下一节点使用的 BO。
+3. 只下载 logits 和最终 State，检查 logits 有限后更新调用者状态。
+
+节点之间没有应用层 `upload/download`、`bo.sync`、CPU 打包或中间张量读回。
+`HOST_ONLY` 在这里表示 NPU 可访问的共享系统 DDR；“常驻”指 BO 的分配与内容持续复用，
+不表示整个模型驻留 AIE 片上 SRAM，也不表示消除了 DDR/AIE 间 DMA。
+同一图可重复处理新请求、复制后的分支和 prefill 接续状态；状态在 token 边界仍往返主机。
+设备 dispatch 失败后须重建图，调用者 State 在正常错误返回前不被提交。
+
+当前支持 head_size=64、channels 不超过 2048 且整除 2048，线性层所需 GEMV K
+必须有离线产物。`resident` 只接受 CLI `--backend npu`，无 CPU 算子回退。
+旧 `graph/eager` 仍可用于未编译 resident 接口的环境。
+
+### 本机结果（2026-10-02）
+
+同一进程、同一 FP32 1.5B 模型，串行对照原图和 resident 图，依次输入 `1,2,7,9`。
+第一轮作为预热，后三轮计时；每轮比较全部 logits、attention/FFN shift 和 WKV 状态。
+
+| 项目 | 结果 |
+|---|---:|
+| 原图平均 decode | 7.691 秒/token |
+| resident 平均 decode | 5.908 秒/token |
+| 吞吐提升 | 1.302×（约 0.169 token/s） |
+| logits / 全部状态最大绝对误差 | 0 |
+| resident 图准备时间（不含模型加载） | 2.138 秒 |
+| 常驻数据 BO 总字节数 | 5,793,261,632（约 5.40 GiB） |
+| 每 token run 数 | 4,280 |
+| 每 token 应用层上传 / 下载 | 12,984,320 / 13,238,272 字节 |
+
+上传/下载统计为应用传入的有效字节数，不包含驱动固定页、缓存行粒度或片上 DMA 流量。
+BO 总量不包含 XRT 内部资源，也不包含仍持有的约 6 GB 主机 FP32 权重。
+这是短序列实机对照，非长上下文或多请求吞吐基准；原图先执行、resident 后执行。
+完整记录见 [resident 验证报告](../reports/rwkv7-resident-2026-10-02.json)。
+
+参考的是本地 FastFlowLM `b0d41a03411470373f849b25e3ce9356d716a483` 中的
+`src/include/buffer.hpp`、`src/include/npu_utils/npu_utils_xrt.hpp` 与
+`src/include/npu_utils/npu_instr_utils.hpp`：持久 BO、显式同步、固定参数的 run 和 DMA 地址绑定。
+该 checkout 的 Qwen3 实际 forward 实现在预编译库中，不能据头文件声称已检查其完整执行过程。
+本实现保留现有 RWKV FP32 kernel，新增的是运行时内存计划与离线 DMA 接口。
+
+下一步重点是减少 4,280 次提交：融合通用算子、多 head WKV，以及一次覆盖更多输出行的
+GEMV。整图 runlist 还需要共用硬件 context 的设计，现有多个 xclbin/context
+不能直接拼成一个原生 runlist；既有探针的限制见 [execution-graph.md](execution-graph.md)。
+
 ## Prefill：独立序列路径
 
 `Model::prefill` 按最多 16 token 的 chunk 分层执行：先准备一层的投影和门控序列，
@@ -77,7 +138,7 @@ Weights/backend 必须比 Model/DecodeGraph 活得更久。State 是显式对象
 
 这是稳定的顺序状态递推 prefill kernel，不是 CUDA 仓库中所有 chunk/GEMM/scan 优化的移植。
 非 WKV 投影目前仍逐 token 使用 GEMV，尚未实现多 token GEMM 的权重复用。
-`--prefill decode` 提供逐 token 参考路径，可结合 `--decode eager|graph` 对照。
+`--prefill decode` 提供逐 token 参考路径，可结合 `--decode eager|graph|resident` 对照。
 CLI 分块处理提示词，避免保存整个长提示词的所有 logits。
 
 ## 计算实现与约束
@@ -110,12 +171,13 @@ y     = r[None,:] @ S_new
 | `include/rwkv/inference/graph.hpp` | 固定 decode 图记录/replay API |
 | `src/inference/weights.cpp` | PTH/safetensors 适配与检查 |
 | `src/inference/model.cpp` | eager decode / 分层 prefill 流程 |
-| `src/inference/graph.cpp` | 固定图、依赖和状态绑定，不包含设备实现 |
+| `src/inference/graph.cpp` | 固定图、依赖、状态绑定和 resident BO/run 计划 |
 | `src/inference/ops.cpp` | CPU 对照基础算子 |
 | `src/inference/backend.cpp` | CPU / NPU decode WKV |
 | `src/inference/npu_ops.cpp` | 全 NPU 算子和 prefill 适配 |
 | `kernels/rwkv/` | 自研 AIE C++ kernel |
-| `src/runtime/session.cpp` | XRT 资源和 run 复用 |
+| `src/runtime/session.cpp` | XRT 资源、持久 BO、无复制切片及 run 复用 |
+| `tools/compile/rwkv7_resident.py` | resident 算子的 DMA join/strided gather/split 接口 |
 | `src/utils/`, `apps/rwkv_cli.cpp` | 用户 tokenizer/sampler 适配及 CLI |
 
 `--backend cpu` 为全部 CPU 对照；`--backend hybrid` 保留先前仅 WKV 上 NPU 的实现。
@@ -132,11 +194,16 @@ ctest --test-dir build/host -R '^rwkv\.' --output-on-failure
 .venv/bin/python tools/validation/rwkv7_reference.py --npu
 ./build/host/rwkv-prefill-test build/tests/rwkv7/f32.pth build/kernels/rwkv7-full
 ./build/host/rwkv-graph-test build/tests/rwkv7/f32.pth build/kernels/rwkv7-full
+./build/host/rwkv-resident-test build/kernels/rwkv7-full
+./build/host/rwkv-resident-benchmark \
+  /home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth \
+  build/kernels/rwkv7-full
 ```
 
 包括独立 FP64 参考、FP32/F16/BF16 PTH 与 safetensors、非连续 stride、非法文件、
 非线性饱和/常量归一化、GEMV、状态 reset，以及 1/15/16/17/33 token prefill 与 decode
 的全部 logits、最终状态和后续 decode 对照。图测试覆盖动态 token、清零、分支状态、
-prefill 接续、图结构不变和非法输入不修改状态。Python 仅做离线参考与编译，NPU 由 C++ 调用。
+prefill 接续、图结构不变和非法输入不修改状态；同时覆盖 resident 模式。
+设备缓冲区测试覆盖无主机读回的链式运算、嵌套切片、首/末 head、原位状态重放及边界哨兵。Python 仅做离线参考与编译，NPU 由 C++ 调用。
 
 真实模型测试是短序列正确性和生成检查，不代表已验证完整 25600 上下文或长文本质量。

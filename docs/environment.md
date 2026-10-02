@@ -94,13 +94,22 @@ getconf PAGESIZE              # 单页大小，单位字节
 grep 'Max locked memory' /proc/$$/limits  # 当前 shell 的限制，单位字节
 ```
 
-本轮助手 shell 实测：软/硬限制均为 `3993344 KiB`，即 `4089184256` 字节、约
-`3.81 GiB`；页大小为 `4096` 字节。不同 IDE、终端和服务可能继承不同限制，
-应在真正启动程序的环境检查，不能假定所有 Linux 都是某个固定默认值。
+**2026-10-02 更新：本机 memlock 限制已由用户解决。** 当前 IDE 启动的助手进程
+实测软/硬限制均为 `unlimited`，`/proc/self/limits` 也显示两者均为 `unlimited`。
+此前记录的 `3993344 KiB`（约 `3.81 GiB`）是旧会话的历史值，不再是当前阻塞项。
 
-当前算子测试已通过；本项目此前未通过修改 memlock 解决命令中止。
-后续 RWKV 大模型长期固定较多权重/状态缓冲区时，应重新检查这个上限。
-设置 unlimited 只解除资源上限，不会预分配物理内存。
+用户采用的方案见相邻仓库 [FastFlowLM Linux Getting Started](../../FastFlowLM/docs/linux-getting-started.md)
+的 Ubuntu 第 5 步：在 `/etc/security/limits.conf` 中加入以下配置，然后重启：
+
+```text
+*    soft    memlock    unlimited
+*    hard    memlock    unlimited
+```
+
+该参考仓库本次版本为 `b0d41a03411470373f849b25e3ce9356d716a483`。
+这里只记录用户已完成的修复和当前进程的复查结果，本轮未修改系统设置。
+设置 unlimited 只解除资源上限，不会预分配物理内存；它与下节的历史命令中止问题分别处理。
+不同 IDE、终端和服务可能继承不同限制，新环境仍应在实际启动推理的进程里复查。
 
 ### 临时提高当前 shell 的限制
 

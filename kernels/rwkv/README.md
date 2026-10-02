@@ -9,6 +9,8 @@
 
 Build the complete runtime artifact bundle with
 `.venv/bin/python tools/compile/rwkv7_full.py` from the repository root.
+For resident decode, also compile `.venv/bin/python tools/compile/rwkv7_resident.py`.
+This adds DMA joins/strided gathers/splits around the same FP32 C++ kernels.
 C++ calls XRT at runtime; Python only compiles and computes offline references.
 See [inference.md](../../docs/inference.md) for layout, numerical methods,
 constraints, graph/prefill separation and tests.

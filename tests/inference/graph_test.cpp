@@ -10,10 +10,13 @@ int main(int argc, char **argv) {
     if (argc != 3)
       throw std::runtime_error("weights and kernel directory required");
     Weights w(argv[1]);
-    for (bool hardware : {false, true}) {
+    for (int mode : {0, 1, 2}) {
+      bool hardware = mode != 0;
       auto b = hardware ? full_npu_backend(argv[2]) : cpu_backend();
       Model eager(w, *b);
-      DecodeGraph graph(w, *b);
+      DecodeGraph graph(w, *b,
+                        mode == 2 ? std::filesystem::path(argv[2])
+                                  : std::filesystem::path{});
       const auto captured = graph.stats();
       double worst = 0;
       auto check = [&](const Vector &a, const Vector &b) {
@@ -22,7 +25,8 @@ int main(int argc, char **argv) {
         for (size_t i = 0; i < a.size(); ++i) {
           double error = std::abs(a[i] - b[i]);
           worst = std::max(worst, error);
-          if (!std::isfinite(a[i]) || error > 2e-6 + 2e-5 * std::abs(b[i]))
+          if (!std::isfinite(a[i]) || !std::isfinite(b[i]) ||
+              error > 2e-6 + 2e-5 * std::abs(b[i]))
             throw std::runtime_error("Graph/eager mismatch");
         }
       };
@@ -62,12 +66,40 @@ int main(int argc, char **argv) {
       if (!rejected)
         throw std::runtime_error("Invalid graph token accepted");
       statecheck(a, saved);
+      rejected = false;
+      try {
+        graph.replay(static_cast<int>(w.vocabulary()), a);
+      } catch (const std::exception &) {
+        rejected = true;
+      }
+      if (!rejected)
+        throw std::runtime_error("Out-of-range token accepted");
+      statecheck(a, saved);
+      auto malformed = a;
+      malformed.layers.back().matrix.pop_back();
+      auto malformed_saved = malformed;
+      rejected = false;
+      try {
+        graph.replay(1, malformed);
+      } catch (const std::exception &) {
+        rejected = true;
+      }
+      if (!rejected)
+        throw std::runtime_error("Malformed state accepted");
+      statecheck(malformed, malformed_saved);
+      if (mode == 2 &&
+          (!captured.device_runs || !captured.resident_bytes ||
+           !captured.replay_upload_bytes || !captured.replay_download_bytes))
+        throw std::runtime_error("Resident graph statistics missing");
       if (graph.stats().nodes != captured.nodes ||
           graph.stats().buffers != captured.buffers ||
           graph.stats().replays != 11)
         throw std::runtime_error("Graph was rebuilt or replay count wrong");
-      std::cout << (hardware ? "NPU" : "CPU") << " graph: " << captured.nodes
-                << " nodes, " << captured.buffers
+      std::cout << (mode == 2  ? "Resident NPU"
+                    : hardware ? "NPU"
+                               : "CPU")
+                << " graph: " << captured.nodes << " nodes, "
+                << captured.buffers
                 << " buffers; token changes, reset, branch, prefill/decode "
                    "passed; max_abs_error="
                 << worst << '\n';
