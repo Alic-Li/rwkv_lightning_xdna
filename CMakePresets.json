@@ -1,0 +1,13 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "dev",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/host",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "RelWithDebInfo", "BUILD_TESTING": "ON"}
+    }
+  ],
+  "buildPresets": [{"name": "dev", "configurePreset": "dev"}],
+  "testPresets": [{"name": "dev", "configurePreset": "dev", "output": {"outputOnFailure": true}}]
+}

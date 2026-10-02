@@ -1,0 +1,67 @@
+# Local Python environments and caches
+.venv/
+venv/
+ironenv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.cache/
+.npu/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Host/NPU build products and generated test inputs/outputs
+build/
+build-*/
+cmake-build-*/
+_build/
+dist/
+compile_commands.json
+CMakeUserPresets.json
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
+*.exe
+*.elf
+*.xclbin
+*.bin
+
+# Detailed local run logs; keep the dated validation summaries in reports/
+reports/runs/
+*.log
+/core
+core.[0-9]*
+
+# Model downloads and weights
+/models/
+/weights/
+/checkpoints/
+*.safetensors
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.ckpt
+
+# Local editor and machine configuration
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Local environment credentials; retain shareable configuration examples
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# third_party/ is intentionally tracked: it contains copied kernel sources,
+# headers, licenses and provenance required to reproduce the build.
