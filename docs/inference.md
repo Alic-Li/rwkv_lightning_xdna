@@ -258,6 +258,10 @@ logits/state 最大误差0，平均约0.324→0.298秒/token。单核合并曾�
 321→273 runs/token，32步对照 logits/state 最大误差0，约0.299→0.291秒/token；
 收益较小，详见[记录](../reports/rwkv7-norm-mix-2026-10-03.json)。
 
+`--ffn-pipeline` 将 BF16 key/ReLU²/value/残差合并为一次运行（15核），中间激活在片上
+交给第二个投影，同时保留诊断输出。273→225 runs/token，128步同精度 logits/state
+最大误差0，约0.293→0.271秒/token；见[FFN记录](../reports/rwkv7-ffn-pipeline-2026-10-03.json)。
+
 同精度比较时可给 `rwkv-precision-benchmark` 设置
 `RWKV_XDNA_REFERENCE_BF16=1` 和 `RWKV_XDNA_REFERENCE_KERNEL_DIR=基线目录`。
 oracle的 `--bf16-all-projections` 使用BF16低秩参考；`--bf16-projections` 保留FP32低秩

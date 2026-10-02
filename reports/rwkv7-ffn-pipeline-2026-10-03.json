@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "f907706",
+  "change": "BF16 key/ReLU^2/value/residual in one 15-core program; four key workers, eight value workers, two relay workers and residual worker; five data BOs",
+  "precision": "Same BF16 rounding and FP32 accumulation/nonlinear/residual order; all intermediates retained for tracing",
+  "hardware_software_provenance": "Same XDNA2/XRT2.25/firmware1.0.0.63 as baseline report",
+  "builds": [
+    {
+      "arm": 0,
+      "bf16_projections": true,
+      "build_seconds": 3.965618514,
+      "kernels": "build/kernels/rwkv7-norm-mix",
+      "resident_bytes": 2914744384,
+      "runs": 273
+    },
+    {
+      "arm": 1,
+      "bf16_projections": true,
+      "build_seconds": 3.47855671,
+      "kernels": "build/kernels/rwkv7-ffn-pipeline",
+      "resident_bytes": 2916710464,
+      "runs": 225
+    }
+  ],
+  "summaries": [
+    {
+      "arm": 0,
+      "greedy_matches": 0,
+      "measured_tokens": 127,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 3.438116561639124,
+      "total_seconds": 36.93882907200001
+    },
+    {
+      "arm": 1,
+      "greedy_matches": 128,
+      "measured_tokens": 127,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 3.687942714041224,
+      "total_seconds": 34.436543582000006
+    }
+  ],
+  "max_logits_abs": 0,
+  "state_checkpoints": [
+    {
+      "arm": 1,
+      "greedy": 59,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.272742947,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 1
+    },
+    {
+      "arm": 1,
+      "greedy": 22590,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.285538055,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 8
+    },
+    {
+      "arm": 1,
+      "greedy": 52095,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.268695551,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 32
+    },
+    {
+      "arm": 1,
+      "greedy": 22590,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.268244817,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 128
+    }
+  ],
+  "microbenchmark": "FFN pipeline same-precision/oracle/replay/guards passed max_abs=3.63952e-07 before_min_us=3713.42 before_median_us=3801.62 after_min_us=1838.35 after_median_us=1912.62",
+  "validation": [
+    "Three changed random inputs: full intermediate/output same-precision equality, local independent CPU dot/nonlinear/residual oracle, unchanged 2e-5 + 2e-5*abs(reference) threshold",
+    "Guards and immutable weights/input/residual checked",
+    "Depth-bounded weights, four-way activation join, eight-way multicast and hierarchical residual joins simulated numerically",
+    "128 same-token logits/state exact at 1/8/32/128 checkpoints"
+  ],
+  "constraints": [
+    "Nine-input residual join exceeded per-MemTile DMA ports. Nested direct joins are rejected because a FIFO cannot belong to two ObjectFifoLinkOps. Two small relay cores connect four-way groups to the final three-input join.",
+    "Four first-stage workers keep total shim inputs within capacity; retained only after latency improvement was measured.",
+    "No legacy strict FP32 precision pass is claimed."
+  ]
+}

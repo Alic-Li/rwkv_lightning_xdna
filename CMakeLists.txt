@@ -144,3 +144,5 @@ add_executable(rwkv-recurrence-stage-test tests/inference/recurrence_stage_test.
 target_link_libraries(rwkv-recurrence-stage-test PRIVATE rwkv_xdna)
 add_executable(rwkv-norm-mix-test tests/inference/norm_mix_test.cpp)
 target_link_libraries(rwkv-norm-mix-test PRIVATE rwkv_xdna)
+add_executable(rwkv-ffn-pipeline-test tests/inference/ffn_pipeline_test.cpp)
+target_link_libraries(rwkv-ffn-pipeline-test PRIVATE rwkv_xdna)
