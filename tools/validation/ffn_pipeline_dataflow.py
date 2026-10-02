@@ -8,13 +8,22 @@ from ml_dtypes import bfloat16
 from rkv_dataflow import Fifo
 
 
-def main():
+def main(projection_only=False):
     rng = np.random.default_rng(571)
     x = rng.integers(-4, 5, 2048).astype(np.float32) / 16
-    w1 = rng.integers(-4, 5, (8192, 2048)).astype(np.float32) / 256
-    w2 = rng.integers(-4, 5, (2048, 8192)).astype(np.float32) / 256
+    w1 = (
+        None
+        if projection_only
+        else rng.integers(-4, 5, (8192, 2048)).astype(np.float32) / 256
+    )
+    w2 = (
+        rng.integers(-4, 5, (2048, 2048 if projection_only else 8192)).astype(
+            np.float32
+        )
+        / 256
+    )
     residual = rng.integers(-4, 5, 2048).astype(np.float32) / 16
-    weights = [Fifo(2 if i < 4 else 1) for i in range(12)]
+    weights = [Fifo(2 if i < 4 or projection_only else 1) for i in range(12)]
     raw = [Fifo(1) for _ in range(4)]
     act = [Fifo(1) for _ in range(4)]
     broad = [Fifo(1) for _ in range(8)]
@@ -56,7 +65,9 @@ def main():
 
     def broadcast():
         a = (
-            np.concatenate([q.acquire() for q in act])
+            x
+            if projection_only
+            else np.concatenate([q.acquire() for q in act])
             .astype(bfloat16)
             .astype(np.float32)
         )
@@ -64,15 +75,16 @@ def main():
             q.put(a)
         for _ in range(8):
             ack.get(timeout=30)
-        for q in act:
-            q.release()
+        if not projection_only:
+            for q in act:
+                q.release()
 
     def val(i):
         a = broad[i].acquire()
         value[i].reserve()
         out = np.zeros(256, np.float32)
         for r in range(16):
-            for k in range(32):
+            for k in range(w2.shape[1] // 256):
                 w = weights[4 + i].acquire()
                 out[r * 16 : (r + 1) * 16] += (w * a[k * 256 : (k + 1) * 256]).sum(
                     axis=1
@@ -103,28 +115,33 @@ def main():
 
     with ThreadPoolExecutor(max_workers=30) as pool:
         tasks = (
-            [pool.submit(feed, i) for i in range(12)]
-            + [pool.submit(key, i) for i in range(4)]
+            [pool.submit(feed, i) for i in range(4 if projection_only else 0, 12)]
+            + [pool.submit(key, i) for i in range(0 if projection_only else 4)]
             + [pool.submit(val, i) for i in range(8)]
         )
         tasks += (
-            [pool.submit(drain_raw), pool.submit(broadcast)]
+            ([] if projection_only else [pool.submit(drain_raw)])
+            + [pool.submit(broadcast)]
             + [pool.submit(relay, i) for i in range(2)]
             + [pool.submit(add), pool.submit(drain)]
         )
         for t in tasks:
             t.result(timeout=60)
-    expected_raw = w1.astype(np.float64) @ x
-    np.testing.assert_array_equal(raw_out, expected_raw)
-    expected = w2.astype(np.float64) @ (np.maximum(expected_raw, 0) ** 2).astype(
-        bfloat16
-    ).astype(np.float64)
+    if projection_only:
+        expected = w2.astype(np.float64) @ x
+    else:
+        expected_raw = w1.astype(np.float64) @ x
+        np.testing.assert_array_equal(raw_out, expected_raw)
+        expected = w2.astype(np.float64) @ (np.maximum(expected_raw, 0) ** 2).astype(
+            bfloat16
+        ).astype(np.float64)
     np.testing.assert_allclose(result[:2048], expected, atol=1e-7, rtol=1e-6)
     np.testing.assert_allclose(result[2048:], expected + residual, atol=1e-7, rtol=1e-6)
     print(
-        "FFN: depth-two/one weights, four-way activation join, eight-way multicast, relay joins and oracle passed"
+        f"{'projection' if projection_only else 'FFN'}: bounded weight FIFOs, multicast, relay joins and oracle passed"
     )
 
 
 if __name__ == "__main__":
     main()
+    main(projection_only=True)

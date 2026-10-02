@@ -452,6 +452,30 @@ struct DecodeGraph::Impl {
         node_index += 3;
         continue;
       }
+      if (bf16 && node.kind == Kind::Linear && !node.transpose &&
+          node.weight->shape == std::vector<size_t>{2048, 2048} && node_index + 1 < nodes.size() &&
+          nodes[node_index + 1].kind == Kind::Element && nodes[node_index + 1].op == Op::Add &&
+          nodes[node_index + 1].inputs[1] == node.output &&
+          std::filesystem::exists(root / "bf16-projection-residual/config.json")) {
+        check_optional("bf16-projection-residual", {{"schema_version", 1}, {"dtype", "bfloat16"},
+            {"channels", 2048}, {"cores", 11}, {"exact_fp32", exact_fp32}});
+        auto &stage = session(root, "bf16-projection-residual");
+        Vector packed(4194304);
+        for (size_t r = 0; r < 2048; ++r)
+          for (size_t c = 0; c < 2048; ++c) {
+            size_t pos = ((r / 16) * 8 + c / 256) * 4096 + (r % 16) * 256 + c % 256;
+            packed[pos] = node.weight->data[r * 2048 + c];
+          }
+        auto result = initialized(stage, Vector(4096, 0));
+        device_buffers[node.output] = result.slice(0, 2048 * 4);
+        device_buffers[nodes[node_index + 1].output] = result.slice(2048 * 4, 2048 * 4);
+        runs.push_back(stage.prepare({device_buffers[a[0]], initialized_bf16(stage, packed),
+            device_buffers[nodes[node_index + 1].inputs[0]], result}));
+        node_run_ends.push_back(runs.size());
+        node_run_ends.push_back(runs.size());
+        ++node_index;
+        continue;
+      }
       if (bf16 && node.kind == Kind::Linear && node.transpose &&
           mixed_inputs.count(a[0])) {
         struct Branch {

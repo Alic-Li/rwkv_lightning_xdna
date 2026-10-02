@@ -266,6 +266,10 @@ logits/state 最大误差0，平均约0.324→0.298秒/token。单核合并曾�
 32步 logits/state 与原八次投影一致；整模型收益较小，单算子约7 ms，
 有效权重带宽约40.6 GB/s，详见[词表记录](../reports/rwkv7-full-head-2026-10-03.json)。
 
+`--projection-residual` 将 attention 输出投影与残差相加合并，218→194 runs/token。
+128步同精度 logits/state 最大误差0，平均约0.264秒/token（3.78 token/s），
+详见[输出投影记录](../reports/rwkv7-projection-residual-2026-10-03.json)。
+
 同精度比较时可给 `rwkv-precision-benchmark` 设置
 `RWKV_XDNA_REFERENCE_BF16=1` 和 `RWKV_XDNA_REFERENCE_KERNEL_DIR=基线目录`。
 oracle的 `--bf16-all-projections` 使用BF16低秩参考；`--bf16-projections` 保留FP32低秩

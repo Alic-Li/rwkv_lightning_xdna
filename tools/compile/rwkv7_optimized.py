@@ -38,6 +38,11 @@ p.add_argument(
     "--full-head", action="store_true", help="single-run BF16 vocabulary projection"
 )
 p.add_argument(
+    "--projection-residual",
+    action="store_true",
+    help="fuse BF16 attention output and residual",
+)
+p.add_argument(
     "--native-fp32",
     action="store_true",
     help="experimental faster arithmetic; does not meet the legacy real-model pointwise tolerance",
@@ -47,7 +52,7 @@ if (
     a.bf16_rank or a.rkv or a.rank_batch or a.ffn_pipeline or a.full_head
 ) and not a.bf16:
     p.error(
-        "--bf16-rank, --rkv, --rank-batch, --ffn-pipeline and --full-head require --bf16"
+        "--bf16-rank, --rkv, --rank-batch, --ffn-pipeline, --full-head and --projection-residual require --bf16"
     )
 env = dict(
     os.environ,
@@ -92,6 +97,8 @@ if a.ffn_pipeline:
     commands.append(("rwkv7_ffn_pipeline.py", []))
 if a.full_head:
     commands.append(("rwkv7_head.py", []))
+if a.projection_residual:
+    commands.append(("rwkv7_projection_residual.py", []))
 for script, args in commands:
     subprocess.run(
         [sys.executable, str(ROOT / "tools/compile" / script), *args],
