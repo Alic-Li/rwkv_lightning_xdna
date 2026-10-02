@@ -371,6 +371,55 @@ struct DecodeGraph::Impl {
     auto slice = [&](Id id, size_t start, size_t count) {
       return device_buffers.at(id).slice(start * 4, count * 4);
     };
+    struct Branch { size_t first, last, hidden; int activation; };
+    auto rank_branches = [&](size_t cursor) {
+      std::vector<Branch> branches;
+      for (int activation : {1, 0, 2, 0}) {
+        if (cursor >= nodes.size() || nodes[cursor].kind != Kind::Linear ||
+            !nodes[cursor].transpose || buffers[nodes[cursor].inputs[0]].size != 2048 ||
+            buffers[nodes[cursor].output].size > 256) break;
+        size_t last = cursor + 1;
+        if (activation) {
+          if (last >= nodes.size() || nodes[last].kind != Kind::Element ||
+              nodes[last].op != (activation == 1 ? Op::Tanh : Op::Sigmoid) ||
+              nodes[last].inputs[0] != nodes[cursor].output)
+            throw std::runtime_error("Unexpected batched rank activation");
+          ++last;
+        }
+        if (last >= nodes.size() || nodes[last].kind != Kind::Linear || !nodes[last].transpose ||
+            nodes[last].inputs[0] != nodes[last - 1].output || buffers[nodes[last].output].size != 2048)
+          throw std::runtime_error("Unexpected batched rank output");
+        branches.push_back({cursor,last,buffers[nodes[cursor].output].size,activation});
+        cursor=last+1;
+      }
+      return branches;
+    };
+    auto pack_rank = [&](const std::vector<Branch> &branches, size_t first_cores,
+                         size_t second_cores, const xdna::DeviceBuffer &auxiliary) {
+      const size_t count=branches.size(), first_stripe=256/first_cores, second_stripe=2048/second_cores;
+      Vector packed(count*2*256*2048,0);
+      for(size_t p=0;p<count;++p) {
+        const auto &branch=branches[p];
+        const auto &first=nodes[branch.first];
+        const auto &last=nodes[branch.last];
+        device_buffers[first.output]=auxiliary.slice(p*256*4,256*4);
+        if(branch.activation)
+          device_buffers[nodes[branch.last-1].output]=auxiliary.slice((count+p)*256*4,256*4);
+        for(size_t row=0;row<branch.hidden;++row)
+          for(size_t col=0;col<2048;++col) {
+            size_t pos=((row/first_stripe*count+p)*(first_stripe/16)+(row%first_stripe)/16)*8*4096+
+                       col/256*4096+(row%16)*256+col%256;
+            packed[pos]=first.weight->data[col*branch.hidden+row];
+          }
+        for(size_t row=0;row<2048;++row)
+          for(size_t col=0;col<branch.hidden;++col) {
+            size_t pos=((row/second_stripe*count+p)*(second_stripe/16)+(row%second_stripe)/16)*4096+
+                       (row%16)*256+col;
+            packed[count*256*2048+pos]=last.weight->data[col*2048+row];
+          }
+      }
+      return packed;
+    };
     for (size_t node_index = 0; node_index < nodes.size(); ++node_index) {
       const auto &node = nodes[node_index];
       const auto &a = node.inputs;
@@ -478,34 +527,8 @@ struct DecodeGraph::Impl {
       }
       if (bf16 && node.kind == Kind::Linear && node.transpose &&
           mixed_inputs.count(a[0])) {
-        struct Branch {
-          size_t first, last, hidden;
-          int activation;
-        };
-        std::vector<Branch> branches;
-        size_t cursor = node_index;
-        for (int activation : {1, 0, 2, 0}) {
-          if (cursor >= nodes.size() || nodes[cursor].kind != Kind::Linear ||
-              !nodes[cursor].transpose ||
-              buffers[nodes[cursor].inputs[0]].size != 2048 ||
-              buffers[nodes[cursor].output].size > 256)
-            break;
-          size_t last = cursor + 1;
-          if (activation) {
-            if (nodes[last].kind != Kind::Element ||
-                nodes[last].op != (activation == 1 ? Op::Tanh : Op::Sigmoid) ||
-                nodes[last].inputs[0] != nodes[cursor].output)
-              throw std::runtime_error("Unexpected batched rank activation");
-            ++last;
-          }
-          if (nodes[last].kind != Kind::Linear || !nodes[last].transpose ||
-              nodes[last].inputs[0] != nodes[last - 1].output ||
-              buffers[nodes[last].output].size != 2048)
-            throw std::runtime_error("Unexpected batched rank output");
-          branches.push_back(
-              {cursor, last, buffers[nodes[cursor].output].size, activation});
-          cursor = last + 1;
-        }
+        const auto branches = rank_branches(node_index);
+        const size_t cursor = branches.empty() ? node_index : branches.back().last + 1;
         const size_t count = branches.size();
         const auto name = "bf16-rank-batch-" + std::to_string(count);
         if ((count == 3 || count == 4) &&
@@ -517,33 +540,8 @@ struct DecodeGraph::Impl {
                                 {"branches", count},
                                 {"exact_fp32", exact_fp32}});
           auto &batch = session(root, name);
-          Vector w1(count * 256 * 2048, 0), w2(count * 2048 * 256, 0);
           auto auxiliary = initialized(batch, Vector(count * 512, 0));
-          auto raw = auxiliary.slice(0, count * 256 * 4);
-          auto active = auxiliary.slice(count * 256 * 4, count * 256 * 4);
-          for (size_t p = 0; p < count; ++p) {
-            const auto &branch = branches[p];
-            const auto &first = nodes[branch.first];
-            const auto &last = nodes[branch.last];
-            device_buffers[first.output] = raw.slice(p * 256 * 4, 256 * 4);
-            if (branch.activation)
-              device_buffers[nodes[branch.last - 1].output] =
-                  active.slice(p * 256 * 4, 256 * 4);
-            for (size_t row = 0; row < branch.hidden; ++row)
-              for (size_t col = 0; col < 2048; ++col) {
-                size_t pos =
-                    ((row / 64 * count + p) * 4 + (row % 64) / 16) * 8 * 4096 +
-                    col / 256 * 4096 + (row % 16) * 256 + col % 256;
-                w1[pos] = first.weight->data[col * branch.hidden + row];
-              }
-            for (size_t row = 0; row < 2048; ++row)
-              for (size_t col = 0; col < branch.hidden; ++col) {
-                size_t pos =
-                    ((row / 256 * count + p) * 16 + (row % 256) / 16) * 4096 +
-                    (row % 16) * 256 + col;
-                w2[pos] = last.weight->data[col * 2048 + row];
-              }
-          }
+          auto packed = pack_rank(branches, 4, 8, auxiliary);
           // W and A already share prepare's input BO. Keep those aliases so
           // no intermediate copy or extra dispatch is needed for the six-BO
           // ABI.
@@ -556,10 +554,9 @@ struct DecodeGraph::Impl {
               nodes[prepare_index + 1].inputs[0] !=
                   nodes[branches[1].last].output)
             throw std::runtime_error("Unexpected batched rank prepare layout");
-          w1.insert(w1.end(), w2.begin(), w2.end());
           std::vector<xdna::DeviceBuffer> args{
               mixed_inputs.at(a[0]),
-              initialized_bf16(batch, w1),
+              initialized_bf16(batch, packed),
               auxiliary,
               stage_args.at(prepare_index)[0],
               device_buffers[nodes[branches[2].last].output],
@@ -569,6 +566,49 @@ struct DecodeGraph::Impl {
           for (size_t i = node_index; i < cursor; ++i)
             node_run_ends.push_back(runs.size());
           node_index = cursor - 1;
+          continue;
+        }
+      }
+      if (bf16 && combined_recurrence && node.kind == Kind::Linear && !node.transpose &&
+          mixed_inputs.count(a[0]) && node_index + 3 < nodes.size()) {
+        const auto branches = rank_branches(node_index + 3);
+        const size_t count = branches.size();
+        const size_t cursor = branches.empty() ? node_index : branches.back().last + 1;
+        const size_t prepare_index = cursor + (count == 4 ? 1 : 0);
+        const auto name = "bf16-attention-projections-" + std::to_string(count);
+        if ((count == 3 || count == 4) && recurrence_stages.count(prepare_index) &&
+            std::filesystem::exists(root / name / "config.json")) {
+          check_optional(name, {{"schema_version", 1}, {"dtype", "bfloat16"},
+              {"channels", 2048}, {"rank", 256}, {"branches", count}, {"cores", 14},
+              {"exact_fp32", exact_fp32}});
+          if (nodes[prepare_index].inputs[0] != nodes[node_index + 1].output ||
+              nodes[prepare_index + 5].inputs[0] != nodes[branches[0].last].output ||
+              nodes[prepare_index + 1].inputs[0] != nodes[branches[1].last].output ||
+              nodes[prepare_index + 10].inputs[1] != nodes[branches[2].last].output ||
+              (count == 4 && (nodes[cursor].op != Op::ValueResidual ||
+                  nodes[cursor].inputs[0] != nodes[node_index + 2].output ||
+                  nodes[cursor].inputs[2] != nodes[branches[3].last].output)))
+            throw std::runtime_error("Unexpected attention projection arena layout");
+          auto &stage = session(root, name);
+          auto auxiliary = initialized(stage, Vector(count * 512, 0));
+          auto ranks = pack_rank(branches, 2, 4, auxiliary);
+          Vector packed(3 * 2048 * 2048);
+          for (size_t p = 0; p < 3; ++p) {
+            const auto &n = nodes[node_index + p];
+            if (n.kind != Kind::Linear || n.transpose || n.weight->shape != std::vector<size_t>{2048,2048})
+              throw std::runtime_error("Unexpected attention RKV topology");
+            for (size_t row = 0; row < 2048; ++row)
+              for (size_t col = 0; col < 2048; ++col) {
+                size_t pos=((row/256*3+p)*16+(row%256)/16)*8*4096+col/256*4096+(row%16)*256+col%256;
+                packed[pos]=n.weight->data[row*2048+col];
+              }
+          }
+          packed.insert(packed.end(), ranks.begin(), ranks.end());
+          auto value_aux = count == 4 ? stage_args.at(cursor)[0] : initialized(stage, Vector(6144,0));
+          runs.push_back(stage.prepare({mixed_inputs.at(a[0]),initialized_bf16(stage,packed),
+              recurrence_stages.at(prepare_index),value_aux,auxiliary}));
+          for (size_t j=node_index;j<cursor;++j) node_run_ends.push_back(runs.size());
+          node_index=cursor-1;
           continue;
         }
       }

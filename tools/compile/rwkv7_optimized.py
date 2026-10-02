@@ -43,6 +43,11 @@ p.add_argument(
     help="fuse BF16 attention output and residual",
 )
 p.add_argument(
+    "--attention-projections",
+    action="store_true",
+    help="combine RKV and low-rank branches",
+)
+p.add_argument(
     "--native-fp32",
     action="store_true",
     help="experimental faster arithmetic; does not meet the legacy real-model pointwise tolerance",
@@ -60,6 +65,8 @@ env = dict(
     RWKV_XDNA_EXACT="0" if a.native_fp32 else "1",
     RWKV_XDNA_KERNEL_DIR=str(a.output.resolve()),
 )
+if a.attention_projections and not (a.bf16 and a.recurrence_stage):
+    p.error("--attention-projections requires --bf16 and --recurrence-stage")
 if a.norm_mix and not a.native_fp32:
     p.error("--norm-mix requires --native-fp32")
 commands = [] if a.skip_base else [("rwkv7_full.py", [])]
@@ -99,6 +106,8 @@ if a.full_head:
     commands.append(("rwkv7_head.py", []))
 if a.projection_residual:
     commands.append(("rwkv7_projection_residual.py", []))
+if a.attention_projections:
+    commands.append(("rwkv7_attention_projections.py", []))
 for script, args in commands:
     subprocess.run(
         [sys.executable, str(ROOT / "tools/compile" / script), *args],

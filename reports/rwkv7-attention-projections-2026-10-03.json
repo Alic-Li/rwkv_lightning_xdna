@@ -1,0 +1,165 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "7cdd64e",
+  "change": "Fourteen-core RKV plus W/A/G/(V) program; shared resident input FIFOs, two first-stage rank cores and four second-stage rank cores; sixteen shim inputs, five data BOs",
+  "precision": "Same BF16 inputs/weights and native FP32 accumulation/nonlinear/state",
+  "hardware_software_provenance": "Same XDNA2/XRT2.25/firmware1.0.0.63 as baseline report",
+  "builds": [
+    {
+      "arm": 0,
+      "bf16_projections": true,
+      "build_seconds": 3.513379811,
+      "kernels": "build/kernels/rwkv7-projection-residual",
+      "resident_bytes": 2917103616,
+      "runs": 194
+    },
+    {
+      "arm": 1,
+      "bf16_projections": true,
+      "build_seconds": 3.819140319,
+      "kernels": "build/kernels/rwkv7-attention-projections",
+      "resident_bytes": 2917128192,
+      "runs": 170
+    }
+  ],
+  "summaries": [
+    {
+      "arm": 0,
+      "greedy_matches": 0,
+      "measured_tokens": 127,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 3.810897694298688,
+      "total_seconds": 33.32548134000001
+    },
+    {
+      "arm": 1,
+      "greedy_matches": 128,
+      "measured_tokens": 127,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 4.073025482987846,
+      "total_seconds": 31.18075261999999
+    }
+  ],
+  "max_logits_abs": 0,
+  "state_checkpoints": [
+    {
+      "arm": 1,
+      "greedy": 59,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.245987334,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 1
+    },
+    {
+      "arm": 1,
+      "greedy": 22590,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.244503077,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 8
+    },
+    {
+      "arm": 1,
+      "greedy": 52095,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.244126331,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 32
+    },
+    {
+      "arm": 1,
+      "greedy": 22590,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.243589156,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 128
+    }
+  ],
+  "microbenchmark": [
+    "attention_projections=3 oracle/replay/guards passed max_abs=2.97849e-07 min_us=826.763 median_us=860.617",
+    "attention_projections=4 oracle/replay/guards passed max_abs=3.12721e-07 min_us=873.371 median_us=913.667"
+  ],
+  "validation": [
+    "Three changed random inputs for both first/later-layer configurations, independent CPU projection/nonlinear oracle, unchanged threshold",
+    "Guards, immutable inputs/weights and untouched arena slots checked",
+    "Both independent FIFO groups numerically simulated with bounded ownership",
+    "128-token same-precision logits/state exact at all checkpoints"
+  ],
+  "stream_regroup_probe": {
+    "results": [
+      {
+        "case": "stream-group-3",
+        "status": "passed",
+        "bytes_each_direction": 24576,
+        "warmup": 20,
+        "repetitions": 30,
+        "min_us": 60.144,
+        "median_us": 66.716,
+        "mean_submit_us": 2.42527,
+        "mean_wait_us": 63.9275,
+        "scope": "two identity workers, regroup DMA, prepared submission and wait"
+      },
+      {
+        "case": "stream-group-4",
+        "status": "passed",
+        "bytes_each_direction": 32768,
+        "warmup": 20,
+        "repetitions": 30,
+        "min_us": 64.513,
+        "median_us": 70.123,
+        "mean_submit_us": 1.77573,
+        "mean_wait_us": 68.4961,
+        "scope": "two identity workers, regroup DMA, prepared submission and wait"
+      }
+    ],
+    "notes": [
+      "Verified 2048-element packets regroup to 6144/8192-element input on a second core; exact output and guards across replay.",
+      "Two simultaneous 8192-element input/output buffers plus stack do not fit local memory; using small output packets passed.",
+      "Probe times include two identity workers, DMA, submission and wait; not pure DMA or isolated launch latency."
+    ]
+  }
+}

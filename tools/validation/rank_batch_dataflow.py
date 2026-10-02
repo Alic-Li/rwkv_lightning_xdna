@@ -8,16 +8,17 @@ from ml_dtypes import bfloat16
 from rkv_dataflow import Fifo
 
 
-def main(count):
+def main(count, first_cores=4, second_cores=8):
+    first_stripe, second_stripe = 256 // first_cores, 2048 // second_cores
     rng = np.random.default_rng(103)
     x = rng.integers(-4, 5, (6, 2048)).astype(np.float32) / 16
     w1 = rng.integers(-4, 5, (count, 256, 2048)).astype(np.float32) / 256
     w2 = rng.integers(-4, 5, (count, 2048, 256)).astype(np.float32) / 256
     raw_out = np.empty((count, 256), np.float32)
     output = np.empty((count, 2048), np.float32)
-    raw = [Fifo(1) for _ in range(4)]
-    act = [Fifo(1) for _ in range(4)]
-    broad = [Fifo(1) for _ in range(8)]
+    raw = [Fifo(1) for _ in range(first_cores)]
+    act = [Fifo(1) for _ in range(first_cores)]
+    broad = [Fifo(1) for _ in range(second_cores)]
     acknowledgements = queue.Queue()
 
     def nonlinear(v, p):
@@ -27,9 +28,9 @@ def main(count):
         for p, slot in enumerate([1, 4, 5, 3][:count]):
             raw[worker].reserve()
             act[worker].reserve()
-            out = np.zeros(64, np.float32)
-            for row in range(4):
-                start = worker * 64 + row * 16
+            out = np.zeros(first_stripe, np.float32)
+            for row in range(first_stripe // 16):
+                start = worker * first_stripe + row * 16
                 for col in range(8):
                     out[row * 16 : (row + 1) * 16] += (
                         w1[p, start : start + 16, col * 256 : (col + 1) * 256]
@@ -49,9 +50,9 @@ def main(count):
             value = np.concatenate([q.acquire() for q in act])
             for q in broad:
                 q.put(value)
-            # The single joined object remains locked until all eight
+            # The single joined object remains locked until all downstream
             # consumers release it, exactly like the multicast ObjectFifo.
-            for _ in range(8):
+            for _ in range(second_cores):
                 acknowledgements.get(timeout=10)
             for q in act:
                 q.release()
@@ -59,17 +60,17 @@ def main(count):
     def second(worker):
         for p in range(count):
             value = broad[worker].acquire().astype(bfloat16).astype(np.float32)
-            for row in range(16):
-                start = worker * 256 + row * 16
+            for row in range(second_stripe // 16):
+                start = worker * second_stripe + row * 16
                 output[p, start : start + 16] = (w2[p, start : start + 16] * value).sum(
                     axis=1
                 )
             broad[worker].release()
             acknowledgements.put(True)
 
-    with ThreadPoolExecutor(max_workers=14) as pool:
-        tasks = [pool.submit(first, i) for i in range(4)]
-        tasks += [pool.submit(second, i) for i in range(8)]
+    with ThreadPoolExecutor(max_workers=first_cores + second_cores + 2) as pool:
+        tasks = [pool.submit(first, i) for i in range(first_cores)]
+        tasks += [pool.submit(second, i) for i in range(second_cores)]
         tasks += [pool.submit(raw_drain), pool.submit(broadcast)]
         for t in tasks:
             t.result(timeout=30)
@@ -85,7 +86,7 @@ def main(count):
     expected = np.einsum("prk,pk->pr", w2.astype(np.float64), active_ref)
     np.testing.assert_allclose(output, expected, atol=1e-7, rtol=1e-6)
     print(
-        f"rank batch {count}: depth-one join, 8-way broadcast and numeric oracle passed"
+        f"rank batch {count}: depth-one join, {second_cores}-way broadcast and numeric oracle passed"
     )
 
 
