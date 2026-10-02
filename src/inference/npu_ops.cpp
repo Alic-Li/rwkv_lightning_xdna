@@ -23,8 +23,14 @@ std::filesystem::path checked(const std::filesystem::path &p) {
 class FullNpu final : public RecurrentBackend {
   std::filesystem::path root_;
   std::unique_ptr<RecurrentBackend> recurrent_;
-  xdna::Session ops_;
-  xdna::Session prefill_;
+  std::unique_ptr<xdna::Session> ops_, prefill_;
+  xdna::Session &device_session(std::unique_ptr<xdna::Session> &s,
+                                const std::string &name) {
+    if (!s)
+      s = std::make_unique<xdna::Session>(root_ / name / "design.xclbin",
+                                          root_ / name / "instructions.bin");
+    return *s;
+  }
   struct Gemv {
     xdna::Session session;
     std::vector<xdna::Buffer> buffers;
@@ -39,14 +45,20 @@ class FullNpu final : public RecurrentBackend {
 
 public:
   explicit FullNpu(const std::filesystem::path &p)
-      : root_(checked(p)), recurrent_(npu_backend(p / "decode")),
-        ops_(p / "ops/design.xclbin", p / "ops/instructions.bin"),
-        prefill_(p / "prefill/design.xclbin", p / "prefill/instructions.bin"),
-        op_buffers_{{std::vector<uint8_t>(8208 * 4), false},
-                    {std::vector<uint8_t>(2048 * 4), true}} {}
+      : root_(checked(p)), op_buffers_{{std::vector<uint8_t>(8208 * 4), false},
+                                       {std::vector<uint8_t>(2048 * 4), true}} {
+  }
+  void release_device_cache() override {
+    recurrent_.reset();
+    ops_.reset();
+    prefill_.reset();
+    gemv_.clear();
+  }
   Vector step(Vector &s, const Vector &r, const Vector &d, const Vector &k,
               const Vector &v, const Vector &a, const Vector &b,
               size_t n) override {
+    if (!recurrent_)
+      recurrent_ = npu_backend(root_ / "decode");
     return recurrent_->step(s, r, d, k, v, a, b, n);
   }
   std::vector<Vector> prefill(Vector &state, const std::vector<Vector> &r,
@@ -89,7 +101,7 @@ public:
         }
         std::memcpy(buffers[0].bytes.data(), next.data() + h * n * n, 4096 * 4);
         std::memcpy(buffers[1].bytes.data(), packed.data(), 6400 * 4);
-        prefill_.execute(buffers);
+        device_session(prefill_, "prefill").execute(buffers);
         std::memcpy(next.data() + h * n * n, buffers[2].bytes.data(), 4096 * 4);
         for (size_t j = 0; j < count; ++j)
           std::memcpy(output[start + j].data() + h * n,
@@ -124,7 +136,7 @@ public:
       }
       std::memcpy(op_buffers_[0].bytes.data(), packed.data(),
                   packed.size() * 4);
-      ops_.execute(op_buffers_);
+      device_session(ops_, "ops").execute(op_buffers_);
       std::memcpy(out.data() + start, op_buffers_[1].bytes.data(), count * 4);
     }
     return out;

@@ -56,6 +56,28 @@ int main(int argc, char **argv) {
       auto branch_ref = branch;
       check(graph.replay(17, branch), eager.forward(17, branch_ref));
       statecheck(branch, branch_ref);
+      if (mode == 2) {
+        graph.load_state(a);
+        auto persisted = a;
+        for (int id : {3, 12, 5}) {
+          check(graph.replay_resident(id), eager.forward(id, persisted));
+          statecheck(graph.export_state(), persisted);
+        }
+        auto snapshot = graph.export_state();
+        bool bad = false;
+        try {
+          graph.replay_resident(-1);
+        } catch (const std::exception &) {
+          bad = true;
+        }
+        if (!bad)
+          throw std::runtime_error("Persistent invalid token accepted");
+        statecheck(graph.export_state(), snapshot);
+        graph.load_state(branch_ref);
+        auto resumed = branch_ref;
+        check(graph.replay_resident(6), eager.forward(6, resumed));
+        statecheck(graph.export_state(), resumed);
+      }
       auto saved = a;
       bool rejected = false;
       try {
@@ -93,7 +115,7 @@ int main(int argc, char **argv) {
         throw std::runtime_error("Resident graph statistics missing");
       if (graph.stats().nodes != captured.nodes ||
           graph.stats().buffers != captured.buffers ||
-          graph.stats().replays != 11)
+          graph.stats().replays != (mode == 2 ? 15u : 11u))
         throw std::runtime_error("Graph was rebuilt or replay count wrong");
       std::cout << (mode == 2  ? "Resident NPU"
                     : hardware ? "NPU"

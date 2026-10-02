@@ -4,7 +4,8 @@
 LayerNorm/GroupNorm、混合、门控、激活、残差、WKV 和输出 head 全部在 NPU 计算**。
 CPU 还负责加载权重、布局整理、传输、图调度和有限值检查，没有静默 CPU 算子回退。
 这是 FP32 实现；新增 `--decode resident` 将 decode 的中间激活和预排布投影权重保留在
-NPU 可访问 BO 中。仍逐算子提交，prefill 仍使用原序列实现。
+NPU 可访问 BO 中，并跨 token 保留 FP32 recurrent state。优化路径使用阵列并行与阶段融合，
+仍逐个提交预绑定 run；prefill 的 sequence 路径保持原实现。
 
 ## 构建和运行
 
@@ -18,16 +19,15 @@ test ! -f /opt/xilinx/xrt/setup.sh || source /opt/xilinx/xrt/setup.sh
 export PATH="$PWD/.venv/bin:$PATH"
 cmake --preset dev
 cmake --build --preset dev
-# 离线编译 decode、prefill、通用算子和 GEMV；不从 Python 调用 NPU。
-.venv/bin/python tools/compile/rwkv7_full.py
-# resident decode 的 DMA 接口；复用上述 GEMV 产物。
-.venv/bin/python tools/compile/rwkv7_resident.py
+# 离线编译基础与融合 kernel，默认保留原 FP32 算术；Python 不调用 NPU。
+.venv/bin/python tools/compile/rwkv7_optimized.py
+# 已有基础产物时可加 --skip-base。不要混用不同算术模式的融合产物。
 
 ./build/host/rwkv-cli \
   --model /home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth \
   --vocab assets/rwkv_vocab_v20230424.txt \
   --backend npu --kernel-dir build/kernels/rwkv7-full \
-  --prefill sequence --decode resident \
+  --prefill decode --decode resident \
   --prompt 'The capital of France is' \
   --max-tokens 32 --top-k 1
 ```
@@ -73,61 +73,107 @@ auto logits = graph.replay(next_token, state); // updated token and state
 Weights/backend 必须比 Model/DecodeGraph 活得更久。State 是显式对象，可复制用于分支，
 通过 `initial_state()` 清零。Model eager/prefill 执行异常后应丢弃该请求状态。
 
-## Resident decode：中间数据保留在设备缓冲区
+## Resident decode：固定 BO、融合与设备状态
 
 ```cpp
+backend->release_device_cache(); // prefill 后释放空闲后端 context
 rwkv::inference::DecodeGraph graph(weights, *backend, kernel_directory);
-auto logits = graph.replay(next_token, state);
+graph.load_state(state);                      // reset 或接续 prefill，一次上传
+auto logits = graph.replay_resident(token);   // 只传 embedding / logits
+state = graph.export_state();                 // 仅在 checkpoint / 分支时读回
 ```
 
-构造时分配并初始化 BO、预排布/上传全部投影矩阵，绑定每个 run。重放期间：
+构造时分配固定 arena、预排布并上传权重、创建并绑定全部 run。token 之间复用这些资源，
+state 的 `[head,key,value]` FP32 布局和地址保持固定；没有逐 token 的 BO/command 构建。
+`replay(token, State&)` 兼容接口仍每次同步完整状态，在成功后更新调用者 State。
+混用接口时，重新 `load_state` 再调用 `replay_resident`。图实例仅允许串行使用；
+设备执行失败后须重建，不能继续使用可能部分更新的设备状态。
 
-1. 上传当前 embedding 和显式 State。
-2. 按拓扑运行预绑定命令。通用算子由 DMA join 拼接输入；WKV 的六组输入分配在
-   同一个 BO 的六个 2048-float 槽位，DMA 按步长抽取各 head，输出由 DMA split
-   写入状态和激活。GEMV 直接读取前一节点的 BO，写入下一节点使用的 BO。
-3. 只下载 logits 和最终 State，检查 logits 有限后更新调用者状态。
+节点之间没有应用层中间张量读回。`HOST_ONLY` BO 是 NPU 可访问的共享系统 DDR，
+不是 AIE SRAM；权重仍需通过 DMA 送入阵列。arena 合并了分配，尚未实现完整的
+临时张量生命周期复用。960 个逻辑节点、1492 个逻辑 buffer 仍保留作依赖和诊断记录，
+不是实际 run 数和根 BO 数。`set_trace` 可读回每个逻辑节点和 WKV state；诊断传输不计入性能模式。
 
-节点之间没有应用层 `upload/download`、`bo.sync`、CPU 打包或中间张量读回。
-`HOST_ONLY` 在这里表示 NPU 可访问的共享系统 DDR；“常驻”指 BO 的分配与内容持续复用，
-不表示整个模型驻留 AIE 片上 SRAM，也不表示消除了 DDR/AIE 间 DMA。
-同一图可重复处理新请求、复制后的分支和 prefill 接续状态；状态在 token 边界仍往返主机。
-设备 dispatch 失败后须重建图，调用者 State 在正常错误返回前不被提交。
+当前优化布局针对本模型 C=2048、32×64 heads、FFN=8192；其他受支持的小形状使用
+基础 kernel。缺少可用 GEMV 形状时报错，没有静默 CPU 算子回退。
 
-当前支持 head_size=64、channels 不超过 2048 且整除 2048，线性层所需 GEMV K
-必须有离线产物。`resident` 只接受 CLI `--backend npu`，无 CPU 算子回退。
-旧 `graph/eager` 仍可用于未编译 resident 接口的环境。
+### AIE 阵列与融合
 
-### 本机结果（2026-10-02）
+- 普通投影：8 workers 并行输出行，K 维累加留在核内；65536 词表 head 使用
+  32 workers、每次8192输出行。32 workers 在小投影/FFN 上实测更慢，因此不全局启用。
+- 六路 attention mix 合并一次，并更新 shift；FFN mix 同时更新 shift。
+- 低秩投影 → activation → 投影在一次 dispatch 的多 worker 数据流中完成。
+- key normalize、alpha、decay、key scaling 合并准备阶段；32 个 WKV heads
+  用8个 workers、每个连续4 heads；state 原位写回。
+- GroupNorm、RKV residual、gate 合并结束阶段；value residual 分8 workers。
+- FFN key projection 与 ReLU² 合并，后接 value projection。RWKV-7 此模型的 FFN
+  不额外引入其他 RWKV 版本的 receptance 公式。
 
-同一进程、同一 FP32 1.5B 模型，串行对照原图和 resident 图，依次输入 `1,2,7,9`。
-第一轮作为预热，后三轮计时；每轮比较全部 logits、attention/FFN shift 和 WKV 状态。
+这些是阶段级融合，**尚未达到一层一个 NPU program，也未达到整 token 一次提交**。
+当前固定图复用 prepared `xrt::run`，没有启用原生 runlist。
 
-| 项目 | 结果 |
+### 严格默认与官方 kernel 复用
+
+默认离线编译设置 `RWKV_XDNA_EXACT=1`，保持原参考 FP32 表达式、WKV 累加顺序，
+以及 exp/tanh/norm 的原求值方法。`exact` 表示保留参考算术，不能推导所有输入或
+CPU/NPU 都逐 bit 一致。原有 `2e-6 + 2e-5*abs(reference)` 逐元素验收阈值没有放宽。
+
+`third_party/mlir-aie/aie_kernels/transformer/layer_norm_f32.cc` 已通过包装实例化
+FP32 affine 输出（上游公开 affine 包装输出 BF16），单核数值/guard 测试通过；
+`common/scalar_f32.h` 的原生标量辅助也已复用。上游文件保持不变，版本和校验值见
+[third_party/SOURCES.json](../third_party/SOURCES.json)。
+
+这些原生算法与更快的向量/FP32非线性组合在真实模型上有微小累计舍入差异，
+没有通过旧严格逐元素验收，因此仅在显式 `rwkv7_optimized.py --native-fp32` 实验模式启用。
+**不要用该模式的更快计时作为严格版本的结果。** 恢复默认须重新运行编译脚本（不加该选项）。
+运行时检查融合产物的算术标记，拒绝部分重编译造成的混用。官方 BF16/INT8/量化 kernel
+不能直接当成同精度 FP32 替换；W8A16/INT8 尚未接入。
+
+### 本机严格版本结果（2026-10-03）
+
+真实模型相同，串行先跑原逐节点 NPU 图4个 token `1,2,7,9`，释放空闲 context，
+再跑 resident 图。第一个 token 预热，后三个计时；状态校验读回排除在 decode 计时外。
+
+| 项目 | 本轮结果 |
 |---|---:|
-| 原图平均 decode | 7.691 秒/token |
-| resident 平均 decode | 5.908 秒/token |
-| 吞吐提升 | 1.302×（约 0.169 token/s） |
-| logits / 全部状态最大绝对误差 | 0 |
-| resident 图准备时间（不含模型加载） | 2.138 秒 |
-| 常驻数据 BO 总字节数 | 5,793,261,632（约 5.40 GiB） |
-| 每 token run 数 | 4,280 |
-| 每 token 应用层上传 / 下载 | 12,984,320 / 13,238,272 字节 |
+| 原逐节点图 / 新 resident 平均 decode | 7.5926 / 1.0150 秒/token |
+| 相对原逐节点图加速 | 7.48× |
+| 相对旧 resident 5.908 秒/token | 约5.82×（跨轮比较） |
+| 每 token runs | 4280 → 488 |
+| 数据根 BO 数 / 总字节 | 584 / 5,796,215,936 |
+| 每 token 应用层上传 / 下载 | 8,192 / 262,144 字节 |
+| 四步最终 logits / 全部 state 最大误差，相对原 NPU | 0 |
+| 图准备时间，不含模型加载 | 3.339 秒 |
 
-上传/下载统计为应用传入的有效字节数，不包含驱动固定页、缓存行粒度或片上 DMA 流量。
-BO 总量不包含 XRT 内部资源，也不包含仍持有的约 6 GB 主机 FP32 权重。
-这是短序列实机对照，非长上下文或多请求吞吐基准；原图先执行、resident 后执行。
-完整记录见 [resident 验证报告](../reports/rwkv7-resident-2026-10-02.json)。
+旧 resident 总数据 BO 为5,793,261,632字节；本轮主要减少分配碎片、提交和传输，
+没有减少 FP32 权重体积。传输统计为应用有效字节，不含驱动缓存粒度或片上 DMA；
+BO 不含 XRT 内部资源，也不含主机 FP32 权重。CLI 单独报告 sequence prefill 后的
+图准备耗时，避免把一次性建图算进稳态生成。短提示可用上面的 `--prefill decode`；
+sequence prefill 尚未优化。详细验证见 [本轮报告](../reports/rwkv7-decode-2026-10-03.json)。
 
-参考的是本地 FastFlowLM `b0d41a03411470373f849b25e3ce9356d716a483` 中的
-`src/include/buffer.hpp`、`src/include/npu_utils/npu_utils_xrt.hpp` 与
-`src/include/npu_utils/npu_instr_utils.hpp`：持久 BO、显式同步、固定参数的 run 和 DMA 地址绑定。
-该 checkout 的 Qwen3 实际 forward 实现在预编译库中，不能据头文件声称已检查其完整执行过程。
-本实现保留现有 RWKV FP32 kernel，新增的是运行时内存计划与离线 DMA 接口。
+原命令 `--prefill sequence` 实测：prefill39.382秒、随后建图3.304秒、32输出token生成31.454秒
+（31次decode推进；加上建图共34.758秒，对照用户原183.526秒）。四组知识题CPU/NPU
+文本逐字一致，decode-prefill路径的32输出token约31.4秒；France问答在15token遇到EOS。
 
-下一步重点是减少 4,280 次提交：融合通用算子、多 head WKV，以及一次覆盖更多输出行的
-GEMV。整图 runlist 还需要共用硬件 context 的设计，现有多个 xclbin/context
-不能直接拼成一个原生 runlist；既有探针的限制见 [execution-graph.md](execution-graph.md)。
+同一 checkpoint、相同 prompt 和 greedy 设置下，CPU 也会复读原 France 句子。
+CPU/NPU 短生成一致不等于已经改善模型质量；CLI 不会用 repetition penalty 掩盖数值错误。
+聊天格式需要匹配 checkpoint，本轮未验证长上下文或聊天质量。
+
+### 性能目标与尚未完成的工作
+
+50 INT8 TOPS 是 INT8 峰值，不是此 FP32 decode 的可用算力。扣除 embedding 查表后，
+约1.39B活跃线性权重对应每 token 约2.8G乘加计数操作，理想 INT8 纯计算上界约18k token/s；
+这忽略带宽、WKV、非线性、调度等，不能作为实际 decode 目标。
+
+batch=1 每步大致读取5.6 GB FP32权重（W8约1.4 GB）。若有效权重带宽分别为
+20/40/80 GB/s，则仅权重读取给出 FP32约3.6/7.1/14.3 token/s、W8约14/29/57 token/s。
+这是带宽假设下的估算，并非本机带宽测量。当前约0.985 token/s **尚未接近已证明的硬件极限**。
+后续仍需整层调度/共用 context、<100 runs、临时内存复用，以及保留 FP32 state 验证的
+权重量化。16-worker WKV 拆分尝试超过 MemTile DMA 通道预算，未作为可用实现保留。
+
+参考本地 FastFlowLM `b0d41a03411470373f849b25e3ce9356d716a483` 中的持久 BO、
+固定 run 参数与 DMA 地址绑定接口；其本 checkout 的 Qwen3 forward 在预编译库里，
+不能声称已读到完整实现。历史 runlist 探针限制见 [execution-graph.md](execution-graph.md)。
 
 ## Prefill：独立序列路径
 
@@ -143,10 +189,10 @@ CLI 分块处理提示词，避免保存整个长提示词的所有 logits。
 
 ## 计算实现与约束
 
-- GEMV：每次输出 256 行，内部 16×256 权重 tile，K 维累加在 NPU 内完成。
+- 基础 GEMV：每次输出256行；优化阵列路径一次2048/8192行。内部16×256权重tile，K维累加在NPU内完成。
   默认离线编译 K=256/2048/8192，较短低秩维度以零 padding 补到 256。
 - 通用算子：2048 元素一包，支持完整 2048 通道 LayerNorm 和 64 通道 GroupNorm。
-- Decode WKV：64×64 FP32 状态，一次处理一个 head，无隐含设备全局状态。
+- 基础 Decode WKV 一次一个 head；优化路径一次32 heads，状态始终为64×64 FP32，无隐含设备全局状态。
 - Prefill WKV：每 head、每 chunk 一次提交，返回最终状态和每步输出。
 - 线性投影使用 AIE FP32 向量计算，不将激活或权重再量化为 BF16。
 - 门控 exp/tanh 在 AIE 上用 double 范围缩减及多项式求值；sqrt 使用 double Newton 迭代。
@@ -206,4 +252,16 @@ ctest --test-dir build/host -R '^rwkv\.' --output-on-failure
 prefill 接续、图结构不变和非法输入不修改状态；同时覆盖 resident 模式。
 设备缓冲区测试覆盖无主机读回的链式运算、嵌套切片、首/末 head、原位状态重放及边界哨兵。Python 仅做离线参考与编译，NPU 由 C++ 调用。
 
-真实模型测试是短序列正确性和生成检查，不代表已验证完整 25600 上下文或长文本质量。
+本轮额外验证：
+
+```bash
+./build/host/rwkv-drift-test "$MODEL" build/kernels/rwkv7-full
+./build/host/rwkv-alignment-test "$MODEL" build/kernels/rwkv7-full
+.venv/bin/python tools/validation/real_alignment.py --model "$MODEL"
+.venv/bin/python tools/validation/knowledge_smoke.py --model "$MODEL"
+```
+
+`MODEL` 设置为上面的 checkpoint 路径。drift 比较原 NPU 与融合图全部960节点和WKV state；
+alignment 比较CPU与NPU的8步逐层输出/state/greedy；独立FP64 oracle比较5个提示token的logits。
+四组知识题每组最多32输出token，CPU/NPU串行生成。硬件测试请串行运行。
+真实模型测试是短序列正确性和生成检查，不代表已验证完整25600上下文或长文本质量。

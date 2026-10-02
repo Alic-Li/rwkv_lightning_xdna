@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import numpy as np
 import aie.iron as iron
@@ -21,17 +22,22 @@ def typ(n):
     return np.ndarray[(n,), np.dtype[np.float32]]
 
 
-def external(name, source, types):
+def external(name, source, types, optimization="-Oz"):
     return ExternalFunction(
         name,
         source_file=str(ROOT / "kernels/rwkv" / source),
         arg_types=types,
         compile_flags=[
-            "-Oz",
+            optimization,
             "-fno-fast-math",
             "-ffp-contract=off",
             "-D__AIE_API_FP32_EMULATION__=1",
-        ],
+        ]
+        + (
+            ["-DRWKV_EXACT_FP32=1"]
+            if os.environ.get("RWKV_XDNA_EXACT", "1") == "1"
+            else []
+        ),
         stack_size_override=8192,
     )
 

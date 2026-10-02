@@ -174,8 +174,13 @@ int main(int argc, char **argv) {
     if (opts["--decode"] != "graph" && opts["--decode"] != "resident" &&
         opts["--decode"] != "eager")
       throw std::runtime_error("--decode must be graph, resident or eager");
+    if (opts["--decode"] == "resident" && opts["--backend"] != "npu")
+      throw std::runtime_error("resident decode requires --backend npu");
     std::unique_ptr<rwkv::inference::DecodeGraph> graph;
-    if (opts["--decode"] == "graph" || opts["--decode"] == "resident") {
+    auto prepare_graph = [&]() {
+      if (graph || opts["--decode"] == "eager")
+        return;
+      backend->release_device_cache();
       if (opts["--decode"] == "resident" && opts["--backend"] != "npu")
         throw std::runtime_error("resident decode requires --backend npu");
       graph = std::make_unique<rwkv::inference::DecodeGraph>(
@@ -185,15 +190,24 @@ int main(int argc, char **argv) {
               : std::filesystem::path{});
       auto stats = graph->stats();
       if (stats.device_runs)
-        std::cerr << "Resident decode: " << stats.device_runs << " runs/token, "
-                  << stats.resident_bytes
-                  << " BO bytes; replay upload/download "
-                  << stats.replay_upload_bytes << "/"
-                  << stats.replay_download_bytes << " bytes\n";
+        std::cerr << "Resident decode: " << stats.persistent_runs
+                  << " runs/token, " << stats.resident_bytes << " BO bytes in "
+                  << stats.root_bos << " root BOs; persistent upload/download "
+                  << stats.persistent_upload_bytes << "/"
+                  << stats.persistent_download_bytes << " bytes\n";
       std::cerr << "Captured decode graph: " << stats.nodes << " nodes, "
                 << stats.buffers << " buffers (native run submissions)\n";
-    }
+    };
+    bool state_on_device = false;
     auto decode = [&](int token) {
+      prepare_graph();
+      if (opts["--decode"] == "resident") {
+        if (!state_on_device) {
+          graph->load_state(state);
+          state_on_device = true;
+        }
+        return graph->replay_resident(token);
+      }
       return graph ? graph->replay(token, state) : model.forward(token, state);
     };
     std::ofstream dump;
@@ -236,6 +250,17 @@ int main(int argc, char **argv) {
               << " s\n";
     if (diagnostic)
       return 0;
+    auto setup_start = std::chrono::steady_clock::now();
+    prepare_graph();
+    if (opts["--decode"] == "resident" && !state_on_device) {
+      graph->load_state(state);
+      state_on_device = true;
+    }
+    auto generation_start = std::chrono::steady_clock::now();
+    std::cerr
+        << "Decode setup after prefill: "
+        << std::chrono::duration<double>(generation_start - setup_start).count()
+        << " s\n";
     rwkvmobile::NucleusSampler sampler;
     sampler.set_seed(int32_t(seed));
     std::map<int, float> occurrences;
@@ -262,7 +287,7 @@ int main(int argc, char **argv) {
     std::cout << '\n';
     std::cerr << "Generated " << generated << " tokens in "
               << std::chrono::duration<double>(
-                     std::chrono::steady_clock::now() - prefilled)
+                     std::chrono::steady_clock::now() - generation_start)
                      .count()
               << " s\n";
     return 0;

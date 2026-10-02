@@ -1,0 +1,336 @@
+{
+  "date": "2026-10-03",
+  "timezone": "Asia/Shanghai",
+  "environment": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "7.0.0-38-generic",
+    "hardware": "Ryzen AI 350 / AIE2P",
+    "xrt": "2.25.00",
+    "mlir_aie": "1.4.4.dev53+gd53582d",
+    "peano": "22.0.0.2026091701+773413fb",
+    "memlock_soft": "unlimited",
+    "memlock_hard": "unlimited"
+  },
+  "model": {
+    "path": "/home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "layers": 24,
+    "channels": 2048,
+    "heads": 32,
+    "ffn": 8192,
+    "vocabulary": 65536
+  },
+  "upstream_kernels": {
+    "provenance": "third_party/SOURCES.json",
+    "modified": false,
+    "reused": [
+      "transformer/layer_norm_f32.cc (FP32 affine template wrapper; experimental mode only)",
+      "common/scalar_f32.h (experimental mode only)"
+    ],
+    "selection": "Strict default preserves original FP32 arithmetic. Native mode fails legacy full-model pointwise tolerance and is explicitly opt-in."
+  },
+  "reference": {
+    "repository": "FastFlowLM",
+    "commit": "b0d41a03411470373f849b25e3ce9356d716a483",
+    "files": [
+      "docs/linux-getting-started.md",
+      "src/include/buffer.hpp",
+      "src/include/npu_utils/npu_utils_xrt.hpp",
+      "src/include/npu_utils/npu_instr_utils.hpp"
+    ],
+    "scope": "BO/run/DMA interfaces inspected; Qwen3 forward implementation is supplied as a prebuilt library in this checkout. No FastFlowLM source copied."
+  },
+  "implementation": {
+    "mode": "FP32 strict default; C++ runtime; offline Python compiler",
+    "runs_per_token": 488,
+    "previous_resident_runs": 4280,
+    "logical_nodes": 960,
+    "logical_buffers": 1492,
+    "data_root_bos": 584,
+    "data_bo_bytes": 5796215936,
+    "persistent_upload_bytes": 8192,
+    "persistent_download_bytes": 262144,
+    "residency": "fixed shared-DDR BOs; FP32 state remains across tokens; not on-chip weight residency",
+    "submission": "prepared individual XRT runs; not whole-layer or whole-token single submit",
+    "arena": "fixed slots, not general liveness reuse",
+    "quantization": false
+  },
+  "benchmark": {
+    "method": "Same process: four baseline tokens first, release idle contexts, then four resident tokens. First token excluded. Diagnostic state export excluded from decode timing. All logits and all layer states checked after every token.",
+    "tokens": [
+      1,
+      2,
+      7,
+      9
+    ],
+    "prepare_seconds": 3.33878,
+    "samples": [
+      {
+        "token": 1.0,
+        "baseline_seconds": 7.4239,
+        "resident_seconds": 1.00154,
+        "max_abs_error": 0.0
+      },
+      {
+        "token": 2.0,
+        "baseline_seconds": 7.56007,
+        "resident_seconds": 1.01551,
+        "max_abs_error": 0.0
+      },
+      {
+        "token": 7.0,
+        "baseline_seconds": 7.64971,
+        "resident_seconds": 1.01523,
+        "max_abs_error": 0.0
+      },
+      {
+        "token": 9.0,
+        "baseline_seconds": 7.56791,
+        "resident_seconds": 1.01419,
+        "max_abs_error": 0.0
+      }
+    ],
+    "measured_baseline_seconds": 22.7777,
+    "measured_resident_seconds": 3.04492,
+    "tokens_per_second": 0.985247,
+    "speedup_vs_original_node_backend": 7.48055,
+    "comparison_to_previous_resident": "Previous separate run 5.908 s/token; current ~1.015 s/token; about 5.82x (cross-run).",
+    "legacy_tolerance": {
+      "atol": 2e-06,
+      "rtol": 2e-05
+    },
+    "max_abs_logits_and_state": 0
+  },
+  "validation": {
+    "ctest": {
+      "passed": 7,
+      "failed": 0,
+      "seconds": 2.22,
+      "includes": "guarded array8/array32 GEMV, FFN, official norm, prepare, value residual and 32-head WKV; 3 replays with changing inputs"
+    },
+    "synthetic_graph": "CPU, ordinary NPU and resident NPU; reset, branch, prefill continuation, persistent export/load and invalid token tests pass; max_abs=0",
+    "legacy_npu_trace": {
+      "nodes": 960,
+      "tokens": [
+        1
+      ],
+      "failed_node_checks": 0,
+      "includes": "node outputs and each WKV state",
+      "atol": 2e-06,
+      "rtol": 2e-05
+    },
+    "cpu_trace": {
+      "tokens": 8,
+      "nodes_per_token": 960,
+      "greedy_equal": true,
+      "max_abs": 0.00128174,
+      "max_norm_scaled_abs": 2.63751e-05,
+      "criterion": "maxabs <= 2e-5+2e-4*maxabs(reference); L2 <= 2e-5*sqrt(n)+2e-4*L2(reference)",
+      "scope": "FP32 CPU reduction differs from AIE vector reduction; does not replace legacy NPU pointwise test"
+    },
+    "independent_fp64_oracle": [
+      {
+        "backend": "cpu",
+        "tokens": [
+          6699,
+          51128,
+          4706,
+          44312,
+          4600
+        ],
+        "max_abs": 0.00021117203386467054,
+        "relative_l2": 1.8900635182132265e-06,
+        "greedy": [
+          38499,
+          4706,
+          22590,
+          4600,
+          37138
+        ],
+        "atol": 0.001,
+        "rtol": 0.0002
+      },
+      {
+        "backend": "npu",
+        "tokens": [
+          6699,
+          51128,
+          4706,
+          44312,
+          4600
+        ],
+        "max_abs": 5.002434453871274e-05,
+        "relative_l2": 5.730173835955636e-07,
+        "greedy": [
+          38499,
+          4706,
+          22590,
+          4600,
+          37138
+        ],
+        "atol": 0.001,
+        "rtol": 0.0002
+      }
+    ],
+    "knowledge_greedy": [
+      {
+        "prompt": "france",
+        "backend": "cpu",
+        "generated": 32,
+        "seconds": 6.53336,
+        "text": " Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is\n"
+      },
+      {
+        "prompt": "france",
+        "backend": "npu",
+        "generated": 32,
+        "seconds": 31.4377,
+        "text": " Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is\n"
+      },
+      {
+        "prompt": "france_qa",
+        "backend": "cpu",
+        "generated": 15,
+        "seconds": 2.91562,
+        "text": " Paris\n\nQuestion: What is the capital of France?\nAnswer: Paris\n"
+      },
+      {
+        "prompt": "france_qa",
+        "backend": "npu",
+        "generated": 15,
+        "seconds": 15.2071,
+        "text": " Paris\n\nQuestion: What is the capital of France?\nAnswer: Paris\n"
+      },
+      {
+        "prompt": "planet",
+        "backend": "cpu",
+        "generated": 32,
+        "seconds": 6.04936,
+        "text": " Jupiter\n\nQuestion: What is the name of the planet that is the largest in our solar system?\nAnswer: Jupiter\n\nQuestion: What is the name of\n"
+      },
+      {
+        "prompt": "planet",
+        "backend": "npu",
+        "generated": 32,
+        "seconds": 31.4637,
+        "text": " Jupiter\n\nQuestion: What is the name of the planet that is the largest in our solar system?\nAnswer: Jupiter\n\nQuestion: What is the name of\n"
+      },
+      {
+        "prompt": "water",
+        "backend": "cpu",
+        "generated": 32,
+        "seconds": 6.04031,
+        "text": " H2O\n\nQuestion: What is the main difference between a solid and a liquid?\nAnswer: A solid has a fixed shape and volume, while a\n"
+      },
+      {
+        "prompt": "water",
+        "backend": "npu",
+        "generated": 32,
+        "seconds": 31.4643,
+        "text": " H2O\n\nQuestion: What is the main difference between a solid and a liquid?\nAnswer: A solid has a fixed shape and volume, while a\n"
+      }
+    ],
+    "knowledge_all_cpu_npu_text_equal": true,
+    "gpu_reference_executed": false
+  },
+  "original_cli_sequence_prefill": {
+    "prompt": "The capital of France is",
+    "prefill_tokens": 5,
+    "prefill_seconds": 39.3823,
+    "decode_setup_seconds": 3.30403,
+    "generated_tokens": 32,
+    "generation_seconds": 31.4543,
+    "decode_transitions": 31,
+    "cpu_text_equal": true,
+    "user_reported_previous_generation_seconds": 183.526,
+    "note": "New generation timing excludes post-prefill graph construction; adding setup gives 34.75833 s. Repetition also occurs on CPU."
+  },
+  "profile_last_token": {
+    "element": {
+      "runs": 71,
+      "ms": 80.2881
+    },
+    "ffn_key": {
+      "runs": 24,
+      "ms": 85.9685
+    },
+    "ffn_value": {
+      "runs": 24,
+      "ms": 77.5706
+    },
+    "finish": {
+      "runs": 24,
+      "ms": 25.9976
+    },
+    "head": {
+      "runs": 8,
+      "ms": 16.7619
+    },
+    "mix": {
+      "runs": 48,
+      "ms": 38.1355
+    },
+    "norm": {
+      "runs": 50,
+      "ms": 114.69
+    },
+    "prepare": {
+      "runs": 24,
+      "ms": 176.799
+    },
+    "projection": {
+      "runs": 96,
+      "ms": 99.3308
+    },
+    "rank": {
+      "runs": 95,
+      "ms": 145.048
+    },
+    "wkv": {
+      "runs": 24,
+      "ms": 155.618
+    }
+  },
+  "limits": [
+    "Not one RWKV layer per NPU program; <100 runs not achieved.",
+    "Not near a measured hardware ceiling; 50 INT8 TOPS is not FP32 throughput.",
+    "No W8A16/INT8, no reduced-precision state.",
+    "Sequence prefill remains slow; decode-prefill is faster for these short prompts.",
+    "Short sequences only, no full 25600-context validation.",
+    "CPU reproduces prompt repetition; numerical alignment does not solve checkpoint/template/sampling quality.",
+    "16-worker WKV attempt exceeded MemTile DMA budget and was removed.",
+    "32-worker small GEMVs and FFN did not beat 8 workers; runtime selects 32 workers only for wide output head."
+  ],
+  "reproduce": [
+    ".venv/bin/cmake --preset dev -DRWKV_XDNA_HARDWARE_TESTS=ON",
+    ".venv/bin/cmake --build --preset dev",
+    ".venv/bin/python tools/compile/rwkv7_optimized.py",
+    ".venv/bin/ctest --test-dir build/host -R ^rwkv\\. --output-on-failure",
+    "See docs/inference.md for real-model C++ and oracle commands; run hardware serially."
+  ],
+  "artifact_config_sha256": {
+    "array-decode": "94b0c944628c93ed148fa15004233254804d6a949f42e482c26495856c76a5ae",
+    "array-gemv-2048": "4c73aaff135da2b4d278e57aeddb70ec3b6ecc9f1403a86d64325531dab8bc96",
+    "array-gemv-2048-8192": "e6ffbb8d2a607a29126333edcbc1424ffbd2276d1f7f1610c79ed22dd5b5fa7b",
+    "array-gemv-256": "896e1a1edb1b8b80242567278154b8d0684a1d2f8528a69bc63d9949c892531e",
+    "array-gemv-8192": "49ae2b9550eb4576a8f8c000a8d4bb7a33e4a31035b02bf1e5ae5cf17e4db580",
+    "array32-gemv-2048": "45b1d2f8fb7d737d6b6844bfe4ebbd7add2efced980914d66f11c9503e95a987",
+    "array32-gemv-2048-8192": "cccafc474f0bc5f2da50b6f75ddc637c478a56b213673abd3b364d9d49a23f05",
+    "array32-gemv-256": "f476f3ab626ef4643fd1ac5d35ec3b33b6d518a657888a49c7c3174c72d9b1f4",
+    "array32-gemv-8192": "77afa9bb7ca9ab6660ae34f0055a8fe7220acef31716aea2373b11f3fb6b9231",
+    "decode": "c19ff565167352fcddfe072f378eb67b61fc311a97ada3e06a6899d461186da0",
+    "fused-ffn-key": "ac1f64aad30401a58f60faedeff70638b349a8dd4c69c5d516fd77ee1458b0a3",
+    "fused-finish": "102dac7c0efd3a1eacd7dcffb7531d1c4c1a2bac1eadc7e34e5cd710224af107",
+    "fused-mix": "3e9c2038f994093c8a15cd9cbe040a924e355cb0f083d1a0f08feefb25f2d0c8",
+    "fused-prepare": "9a0c8d7c73c24c47054bf09e244ec2728dcf0385d567fd9fb9087f3a68a839c7",
+    "fused-rank-0": "e9fd8b18f47b99549c002bf3118a829d6d5618c9a87509d72229d64a0e4a01df",
+    "fused-rank-1": "14cef90fbfbe07daa7028ba695cbf7b71e407ac9fd290308e4d7fc29dabda874",
+    "fused-rank-2": "c3cc3e73aa934f6505dd20f23eb6840ea1040ffd1e93fe04d8e934b46e48adbe",
+    "fused-shift-mix": "0523585bf8a5ee211a9d13aca66f0e2825874141a2b9b47b89a0d09d6966182d",
+    "fused-value": "544744967f847e1fb26a4998a142fbbdefe9462810463f2376302238d38c88fd",
+    "resident-decode": "125dcab46f43df4948df7c33c96363c7c9922a9c44b048ff20f871a7f5d4b607",
+    "resident-ops": "15f6021c85e98eed8e75b21e62eeecfeae796fbe9f4113ced312bb4cacb5f81f",
+    "resident-ops-fast": "54a4b1997545ad64a2bf5e8c662e968c38c44c1bbc19406d3c3909d0a86af556",
+    "upstream-norm": "ae3ad5b02f78fb380df2852f11e8d184dde9f4af126808776d7fa7eebed02485"
+  },
+  "detailed_local_logs": "reports/runs/decode-opt/"
+}

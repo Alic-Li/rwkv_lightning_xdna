@@ -53,6 +53,9 @@ enum class Op {
 class RecurrentBackend {
 public:
   virtual ~RecurrentBackend() = default;
+  // Release idle device contexts before switching from prefill to resident
+  // decode.
+  virtual void release_device_cache() {}
   virtual std::vector<Vector>
   prefill(Vector &state, const std::vector<Vector> &r,
           const std::vector<Vector> &decay, const std::vector<Vector> &k,

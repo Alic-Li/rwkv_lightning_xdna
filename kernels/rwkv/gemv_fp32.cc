@@ -15,3 +15,9 @@ extern "C" void rwkv7_zero(float *sum) {
   for (int i = 0; i < 16; ++i)
     sum[i] = 0;
 }
+extern "C" void rwkv7_relu_squared(float *out) {
+  for (int i = 0; i < 16; ++i) {
+    float a = out[i] > 0 ? out[i] : 0;
+    out[16 + i] = a * a;
+  }
+}
