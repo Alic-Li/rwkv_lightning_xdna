@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-03",
+  "implementation_commit": "af9c73d",
+  "sha256": {
+    "build/kernels/rwkv7-channel-mix/upstream-norm/design.xclbin": "51bd2e3f09232b65195319c70be8795b5fa312845e214a2ed8e625a50fc7a65a",
+    "build/kernels/rwkv7-channel-mix/upstream-norm/instructions.bin": "643cdd1497b474b0e3af3a69a69218fd4a2565f3d44737a5fb1ab9db19d9aa3b",
+    "build/kernels/rwkv7-channel-mix/upstream-norm/config.json": "ae3ad5b02f78fb380df2852f11e8d184dde9f4af126808776d7fa7eebed02485",
+    "build/kernels/rwkv7-channel-mix/fused-norm-mix-6/design.xclbin": "10940f05f8dd0c1a04f8392af412c597408d9c1c5a359a140b517c1dd9286b4d",
+    "build/kernels/rwkv7-channel-mix/fused-norm-mix-6/instructions.bin": "d734dc0dc09e7f587b87e97c92ac2a9e7ac31c48738527644aff482a1acd1ecd",
+    "build/kernels/rwkv7-channel-mix/fused-norm-mix-6/config.json": "9bc91c1dbef7cfe5da5d556996e322c12a2ee4ac3742ee416aa86d3b2e7ac34c",
+    "build/kernels/rwkv7-channel-mix/bf16-attention-projections-3/design.xclbin": "b085c65a6fe0a7258e1233b4ab8458a44f34d31a53985b95227367ffa718cc56",
+    "build/kernels/rwkv7-channel-mix/bf16-attention-projections-3/instructions.bin": "aa00454bc201d58b2f34e7f9cc90615e2e6d36d38f0ad5771a1b9744f8a3ca5c",
+    "build/kernels/rwkv7-channel-mix/bf16-attention-projections-3/config.json": "20cc3365c00d39b085b1baa6e925a69103d8cba72294cc7323d26ba7ae8c7e6d",
+    "build/kernels/rwkv7-channel-mix/bf16-attention-projections-4/design.xclbin": "d508587e18e97aae6afeaff2fada8636563e704bf2261f5707d2f4f2f264ad68",
+    "build/kernels/rwkv7-channel-mix/bf16-attention-projections-4/instructions.bin": "ec1c7ab7aa0156d85d1e5c2c93c9841a436c96a1b19ef085e79a9cee71e54e2d",
+    "build/kernels/rwkv7-channel-mix/bf16-attention-projections-4/config.json": "eade628aa2d2479a4f5419bffe77e0ad95dc4b480aa88842144d7b95b6907bba",
+    "build/kernels/rwkv7-channel-mix/fused-value/design.xclbin": "cc58da96cbd3cdaf48f00b020d481ab21f9434ed8213ebf790977f3c5076685a",
+    "build/kernels/rwkv7-channel-mix/fused-value/instructions.bin": "9f74718e1ab18785f3e97b98a8ac2fa2d28150584d1e767e7669f094a2b47942",
+    "build/kernels/rwkv7-channel-mix/fused-value/config.json": "3ef3b119588af76e783ae75cbf96c27382b9841b4e21a88b6b16b18a2cb9f9c5",
+    "build/kernels/rwkv7-channel-mix/fused-recurrence-stage/design.xclbin": "a12ecda0e4081222d69daa35738ea7751ccdeb0b8d84f1a160bfad184e655485",
+    "build/kernels/rwkv7-channel-mix/fused-recurrence-stage/instructions.bin": "79ffef6ed180c2bbe295bd38290b6122a09d169c2dab9cadf63ee0248a2024f8",
+    "build/kernels/rwkv7-channel-mix/fused-recurrence-stage/config.json": "ec8a452d9e59ab81c48b2967cfd3213b8e77a0108a95edd3fdfdae11726d08f2",
+    "build/kernels/rwkv7-channel-mix/bf16-projection-residual/design.xclbin": "ceb565faf833a307b1b18d6e2dc1a8f4be9ece4ff58cf3585154ffd2c7c19a64",
+    "build/kernels/rwkv7-channel-mix/bf16-projection-residual/instructions.bin": "1b96334591a1bb28cfd2d66ef384d1e5bda8582c888444a9e4157a8dba92dcd5",
+    "build/kernels/rwkv7-channel-mix/bf16-projection-residual/config.json": "068bfbc10403eaa25637c81b9ce0fe0beb2e347f20dc43838540c8bb97f96222",
+    "build/kernels/rwkv7-channel-mix/bf16-channel-mix/design.xclbin": "edd0834d2b814cb7ed4e79ef4cdb10b70d373f29a91ef1e7fad2ec6af48cf9e5",
+    "build/kernels/rwkv7-channel-mix/bf16-channel-mix/instructions.bin": "677ec4aacbd62e5348c8777ec79ba8ac027675175f26cd636ca42484ae89fe0b",
+    "build/kernels/rwkv7-channel-mix/bf16-channel-mix/config.json": "d69598c40f7a1734a636529ed770e316e94aae75fff0288cfb1fcd38895e9210",
+    "build/kernels/rwkv7-channel-mix/bf16-array-gemv-2048-65536/design.xclbin": "1eb43a7a6a96165fccc785553bac768cbd3efff0f5ff268a2bfe8e40199c69c7",
+    "build/kernels/rwkv7-channel-mix/bf16-array-gemv-2048-65536/instructions.bin": "ab16f6ef77c6c350c53841213eadfd660b9ef5787856f431a3c218a82da228f2",
+    "build/kernels/rwkv7-channel-mix/bf16-array-gemv-2048-65536/config.json": "3edcaf19ad8417fff6b3e4ffc60a49d5ef3511e8f69ce6366fc9b47a135d35ab"
+  }
+}

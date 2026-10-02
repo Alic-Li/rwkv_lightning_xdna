@@ -3,9 +3,55 @@
 默认 `--backend npu`：**embedding 查表、tokenizer、sampler 在 CPU，模型的线性投影、
 LayerNorm/GroupNorm、混合、门控、激活、残差、WKV 和输出 head 全部在 NPU 计算**。
 CPU 还负责加载权重、布局整理、传输、图调度和有限值检查，没有静默 CPU 算子回退。
-这是 FP32 实现；新增 `--decode resident` 将 decode 的中间激活和预排布投影权重保留在
+默认保留严格 FP32 实现；`--decode resident` 将 decode 的中间激活和预排布投影权重保留在
 NPU 可访问 BO 中，并跨 token 保留 FP32 recurrent state。优化路径使用阵列并行与阶段融合，
 仍逐个提交预绑定 run；prefill 的 sequence 路径保持原实现。
+
+## 当前 BF16 优化路径（2026-10-03）
+
+完整 1.5B 模型、batch=1，146 runs/token，约 4.20 token/s。历史 488-run 基线
+实际为 FP32（约 0.98 token/s），不能把此次约 4.27 倍加速全部归因于同精度调度优化。
+权重和矩阵输入使用 BF16；累加、非线性输出和 recurrent state 保留 FP32。
+不使用 INT8/INT4/FP8/BFP，也没有 CPU/GPU 模型算术回退。
+
+```bash
+export MLIR_AIE_KERNEL_SOURCES="$PWD/third_party/mlir-aie"
+.venv/bin/python tools/compile/rwkv7_optimized.py \
+  --output build/kernels/rwkv7-channel-mix --native-fp32 --bf16 \
+  --bf16-rank --rkv --rank-batch --recurrence-stage --norm-mix \
+  --ffn-pipeline --full-head --projection-residual --attention-projections --channel-mix
+RWKV_XDNA_BF16=1 ./build/host/rwkv-cli --model "$MODEL" \
+  --kernel-dir build/kernels/rwkv7-channel-mix --backend npu \
+  --decode resident --prefill decode --prompt-file prompt.txt --top-k 1 --max-tokens 32
+```
+
+`MODEL` 为下文 checkpoint。新目录需要完整编译；只有已有相同算术模式的基础产物时
+才能加 `--skip-base`。不要覆盖严格 FP32 基线目录。此 BF16 模式仍显式启用：
+同精度融合通过 128 步 logits 和 1/8/32/128 步状态对照，但不同精度整模型并未满足
+旧严格 FP32 逐点误差阈值。没有放宽阈值或把 argmax 一致率当作该测试通过。
+
+32-token 生成报告区分：首 token 来自 prefill，后续只有 31 次 decode forward。
+CLI 分别打印图准备、prefill（含/不含图准备）、TTFT（进程入口/开始 prefill）、
+生成总耗时及后续 forward 耗时。`--prefill decode` 是逐 token prefill，尚非批量 GEMM prefill。
+
+微基准由 C++ 串行调用 NPU，Python 仅编排：
+
+```bash
+RWKV_XDNA_KERNEL_DIR=build/kernels/rwkv7-channel-mix RWKV_XDNA_EXACT=0 \
+  .venv/bin/python tools/compile/rwkv7_gemm_probe.py
+RWKV_XDNA_KERNEL_DIR=build/kernels/rwkv7-channel-mix RWKV_XDNA_EXACT=0 \
+  .venv/bin/python tools/compile/rwkv7_stream_group.py
+.venv/bin/python tools/validation/bench_xdna_suite.py build/kernels/rwkv7-channel-mix \
+  --log-dir reports/runs/local-micro > reports/runs/local-micro.jsonl
+./build/host/rwkv-context-switch-test build/kernels/rwkv7-channel-mix
+```
+
+覆盖 BF16 GEMV、原生 BF16 GEMM、FP32 LayerNorm/elementwise/WKV、DMA regroup
+与主机提交时间。每项预热20次、计时30次，数值和边界检查失败返回非零。
+GEMM 探针显式禁止 BFP 仿真；64×64×64 单核结果不能外推为全阵列峰值。
+主机 wait 包含计算、DMA、调度/PDI；这些数据不等于设备内核 cycle trace。
+全部自写 kernel 的官方实现复用/保留理由见
+[审计记录](../reports/rwkv7-kernel-audit-2026-10-03.json)。
 
 ## 构建和运行
 
@@ -159,17 +205,11 @@ sequence prefill 尚未优化。详细验证见 [本轮报告](../reports/rwkv7-
 CPU/NPU 短生成一致不等于已经改善模型质量；CLI 不会用 repetition penalty 掩盖数值错误。
 聊天格式需要匹配 checkpoint，本轮未验证长上下文或聊天质量。
 
-### 性能目标与尚未完成的工作
+### 历史 FP32 性能说明
 
-50 INT8 TOPS 是 INT8 峰值，不是此 FP32 decode 的可用算力。扣除 embedding 查表后，
-约1.39B活跃线性权重对应每 token 约2.8G乘加计数操作，理想 INT8 纯计算上界约18k token/s；
-这忽略带宽、WKV、非线性、调度等，不能作为实际 decode 目标。
-
-batch=1 每步大致读取5.6 GB FP32权重（W8约1.4 GB）。若有效权重带宽分别为
-20/40/80 GB/s，则仅权重读取给出 FP32约3.6/7.1/14.3 token/s、W8约14/29/57 token/s。
-这是带宽假设下的估算，并非本机带宽测量。当前约0.985 token/s **尚未接近已证明的硬件极限**。
-后续仍需整层调度/共用 context、<100 runs、临时内存复用，以及保留 FP32 state 验证的
-权重量化。16-worker WKV 拆分尝试超过 MemTile DMA 通道预算，未作为可用实现保留。
+下面各阶段记录保留各自测试条件；当前性能与编译入口以上面的 BF16 优化路径为准。
+INT8 TOPS 不适用于本任务的 BF16/FP32 计算。本轮不引入量化来替代算子和数据流优化。
+历史 16-worker WKV 拆分超过 MemTile DMA 通道预算，未作为可用实现保留。
 
 参考本地 FastFlowLM `b0d41a03411470373f849b25e3ce9356d716a483` 中的持久 BO、
 固定 run 参数与 DMA 地址绑定接口；其本 checkout 的 Qwen3 forward 在预编译库里，
@@ -178,7 +218,7 @@ batch=1 每步大致读取5.6 GB FP32权重（W8约1.4 GB）。若有效权重�
 ## BF16 主投影实验（2026-10-03）
 
 488-run 历史基线实际是 **FP32**，不能标成 FP16。新实验使用 BF16 权重和
-BF16 乘法、FP32 累加；当前低秩投影、激活和 recurrent state 仍为 FP32。
+BF16 乘法、FP32 累加；本小节首轮实验的低秩投影、激活和 recurrent state 仍为 FP32。
 它也不是 IEEE FP16 或 BFP16，不使用 INT8/INT4、CPU/GPU arithmetic fallback。
 上游 `linalg/mv_bf16.cc` 保持原样，RWKV 包装复用其四行 MAC/归约；权重加载时
 一次性按现有 tile 顺序打包为 BF16。输入在 AIE 上以 nearest-even 转为 BF16。

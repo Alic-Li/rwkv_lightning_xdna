@@ -57,6 +57,7 @@ float real(const std::string &s) {
 }
 } // namespace
 int main(int argc, char **argv) {
+  const auto process_start = std::chrono::steady_clock::now();
   try {
     std::map<std::string, std::string> opts{
         {"--backend", "npu"},
@@ -177,9 +178,11 @@ int main(int argc, char **argv) {
     if (opts["--decode"] == "resident" && opts["--backend"] != "npu")
       throw std::runtime_error("resident decode requires --backend npu");
     std::unique_ptr<rwkv::inference::DecodeGraph> graph;
+    double graph_setup_seconds = 0;
     auto prepare_graph = [&]() {
       if (graph || opts["--decode"] == "eager")
         return;
+      const auto graph_start = std::chrono::steady_clock::now();
       backend->release_device_cache();
       if (opts["--decode"] == "resident" && opts["--backend"] != "npu")
         throw std::runtime_error("resident decode requires --backend npu");
@@ -188,6 +191,9 @@ int main(int argc, char **argv) {
           opts["--decode"] == "resident"
               ? std::filesystem::path(opts["--kernel-dir"])
               : std::filesystem::path{});
+      graph_setup_seconds += std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - graph_start)
+                                 .count();
       auto stats = graph->stats();
       if (stats.device_runs)
         std::cerr << "Resident decode: " << stats.persistent_runs
@@ -217,6 +223,7 @@ int main(int argc, char **argv) {
         throw std::runtime_error("Cannot open logits output");
     }
     auto start = std::chrono::steady_clock::now();
+    const double setup_before_prefill = graph_setup_seconds;
     rwkv::inference::Vector logits;
     if (opts["--prefill"] != "sequence" && opts["--prefill"] != "decode")
       throw std::runtime_error("--prefill must be sequence or decode");
@@ -248,6 +255,10 @@ int main(int argc, char **argv) {
     std::cerr << "Prefill " << tokens.size() << " tokens: "
               << std::chrono::duration<double>(prefilled - start).count()
               << " s\n";
+    std::cerr << "Prefill excluding graph setup: "
+              << std::chrono::duration<double>(prefilled - start).count() -
+                     (graph_setup_seconds - setup_before_prefill)
+              << " s; graph setup: " << graph_setup_seconds << " s\n";
     if (diagnostic)
       return 0;
     auto setup_start = std::chrono::steady_clock::now();
@@ -264,7 +275,8 @@ int main(int argc, char **argv) {
     rwkvmobile::NucleusSampler sampler;
     sampler.set_seed(int32_t(seed));
     std::map<int, float> occurrences;
-    size_t generated = 0;
+    size_t generated = 0, decode_calls = 0;
+    double decode_seconds = 0;
     for (long i = 0; i < max_tokens; ++i) {
       rwkvmobile::Tensor1D view{logits.data(), rwkvmobile::TensorDType::F32,
                                 logits.size()};
@@ -278,11 +290,26 @@ int main(int argc, char **argv) {
       if (piece.empty())
         throw std::runtime_error("Generated token missing from vocabulary: " +
                                  std::to_string(token));
+      if (!generated) {
+        const auto first_token = std::chrono::steady_clock::now();
+        std::cerr << "TTFT from process entry: "
+                  << std::chrono::duration<double>(first_token - process_start)
+                         .count()
+                  << " s; from prefill start: "
+                  << std::chrono::duration<double>(first_token - start).count()
+                  << " s\n";
+      }
       std::cout << piece << std::flush;
       ++generated;
       occurrences[token] += 1;
-      if (i + 1 < max_tokens)
+      if (i + 1 < max_tokens) {
+        const auto decode_start = std::chrono::steady_clock::now();
         logits = decode(token);
+        decode_seconds += std::chrono::duration<double>(
+                              std::chrono::steady_clock::now() - decode_start)
+                              .count();
+        ++decode_calls;
+      }
     }
     std::cout << '\n';
     std::cerr << "Generated " << generated << " tokens in "
@@ -290,6 +317,10 @@ int main(int argc, char **argv) {
                      std::chrono::steady_clock::now() - generation_start)
                      .count()
               << " s\n";
+    std::cerr << "Generation decode forwards: " << decode_calls << " in "
+              << decode_seconds << " s; "
+              << (decode_calls ? decode_calls / decode_seconds : 0)
+              << " token/s\n";
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "rwkv-cli: " << e.what() << '\n';

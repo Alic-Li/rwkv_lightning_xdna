@@ -58,6 +58,11 @@ int main(int argc, char **argv) {
       if (prompt_tokens.empty())
         throw std::runtime_error("empty prompt");
     }
+    std::cout << nlohmann::json({{"prompt", argc == 5 ? argv[4] : ""},
+                                 {"prompt_tokens", prompt_tokens},
+                                 {"steps", steps}})
+                     .dump()
+              << std::endl;
     std::vector<Vector> refs;
     std::map<int, Vector> states;
     auto checkpoint = [](int t) {
@@ -105,6 +110,7 @@ int main(int argc, char **argv) {
         };
         nlohmann::json row = {{"arm", arm},
                               {"step", t + 1},
+                              {"input_token", tokens[t]},
                               {"seconds", seconds},
                               {"greedy", greedy(y)}};
         if (!arm) {

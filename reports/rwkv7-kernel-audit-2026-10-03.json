@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-03",
+  "mlir_aie_commit": "d53582d3e0f9f8a2b77695bbf4abbd7766d5584a",
+  "search_terms": [
+    "custom",
+    "naive",
+    "fallback",
+    "reference",
+    "scalar",
+    "slow",
+    "TODO",
+    "temporary",
+    "experimental"
+  ],
+  "search_log": "reports/runs/fp16-2026-10-03/kernel-audit-search.txt",
+  "scope": "All project device .cc files plus runtime/inference keyword scan. No third_party modifications. CPU embedding lookup/sampling/reference allowed; production model arithmetic remains NPU.",
+  "entries": [
+    {
+      "source": "kernels/rwkv/gemv_bf16.cc",
+      "official_candidate": "upstream linalg/mv_bf16.cc mac_rows4/fold_rows",
+      "decision": "Reuse native BF16 MAC/reduction; custom wrappers keep FP32 sums and implement RWKV packing, FIFO packet indexing, activation and residual fusion."
+    },
+    {
+      "source": "kernels/rwkv/head_bf16.cc",
+      "official_candidate": "upstream linalg/mv_bf16.cc mac_rows4/fold_rows",
+      "decision": "Reuse native BF16 MAC/reduction; custom wrappers keep FP32 sums and implement RWKV packing, FIFO packet indexing, activation and residual fusion."
+    },
+    {
+      "source": "kernels/rwkv/rank_bf16.cc",
+      "official_candidate": "upstream linalg/mv_bf16.cc mac_rows4/fold_rows",
+      "decision": "Reuse native BF16 MAC/reduction; custom wrappers keep FP32 sums and implement RWKV packing, FIFO packet indexing, activation and residual fusion."
+    },
+    {
+      "source": "kernels/rwkv/ffn_pipeline_bf16.cc",
+      "official_candidate": "upstream linalg/mv_bf16.cc mac_rows4/fold_rows",
+      "decision": "Reuse native BF16 MAC/reduction; custom wrappers keep FP32 sums and implement RWKV packing, FIFO packet indexing, activation and residual fusion."
+    },
+    {
+      "source": "kernels/rwkv/attention_projections_bf16.cc",
+      "official_candidate": "upstream linalg/mv_bf16.cc mac_rows4/fold_rows",
+      "decision": "Reuse native BF16 MAC/reduction; custom wrappers keep FP32 sums and implement RWKV packing, FIFO packet indexing, activation and residual fusion."
+    },
+    {
+      "source": "kernels/rwkv/channel_mix_bf16.cc",
+      "official_candidate": "upstream linalg/mv_bf16.cc mac_rows4/fold_rows",
+      "decision": "Reuse native BF16 MAC/reduction; custom wrappers keep FP32 sums and implement RWKV packing, FIFO packet indexing, activation and residual fusion."
+    },
+    {
+      "source": "kernels/rwkv/norm_fp32.cc",
+      "official_candidate": "upstream transformer/layer_norm_f32.cc",
+      "decision": "Reuse upstream affine LayerNorm; wrappers compose shift/mix, preserve diagnostic outputs and state ABI."
+    },
+    {
+      "source": "kernels/rwkv/norm_mix_fp32.cc",
+      "official_candidate": "upstream transformer/layer_norm_f32.cc",
+      "decision": "Reuse upstream affine LayerNorm; wrappers compose shift/mix, preserve diagnostic outputs and state ABI."
+    },
+    {
+      "source": "kernels/rwkv/gemm_probe_bf16.cc",
+      "official_candidate": "upstream linalg/mm.cc + mm_aie2p.h",
+      "decision": "Reuse native BF16 4x8x8 MMUL with FP32 accumulation; forbidden BFP emulation checked at compile time. Isolated 64x64x64 benchmark, not production prefill."
+    },
+    {
+      "source": "kernels/rwkv/gemv_fp32.cc",
+      "official_candidate": "upstream BF16 GEMV is not strict FP32 equivalent",
+      "decision": "Retain strict FP32 baseline/compatibility; BF16 production opt-in replaces these projection paths."
+    },
+    {
+      "source": "kernels/rwkv/rank_fp32.cc",
+      "official_candidate": "upstream BF16 GEMV is not strict FP32 equivalent",
+      "decision": "Retain strict FP32 baseline/compatibility; BF16 production opt-in replaces these projection paths."
+    },
+    {
+      "source": "kernels/rwkv/wkv7_fp32.cc",
+      "official_candidate": "No matching upstream RWKV-7 delta recurrence found",
+      "decision": "RWKV-specific state update requires custom kernel; vector lanes preserve key accumulation order and FP32 state. Scalar strict reference retained; sequence and fused decode have distinct ABIs."
+    },
+    {
+      "source": "kernels/rwkv/wkv7_prefill_fp32.cc",
+      "official_candidate": "No matching upstream RWKV-7 delta recurrence found",
+      "decision": "RWKV-specific state update requires custom kernel; vector lanes preserve key accumulation order and FP32 state. Scalar strict reference retained; sequence and fused decode have distinct ABIs."
+    },
+    {
+      "source": "kernels/rwkv/wkv7_vector_fp32.cc",
+      "official_candidate": "No matching upstream RWKV-7 delta recurrence found",
+      "decision": "RWKV-specific state update requires custom kernel; vector lanes preserve key accumulation order and FP32 state. Scalar strict reference retained; sequence and fused decode have distinct ABIs."
+    },
+    {
+      "source": "kernels/rwkv/recurrence_stage_fp32.cc",
+      "official_candidate": "No matching upstream RWKV-7 delta recurrence found",
+      "decision": "RWKV-specific state update requires custom kernel; vector lanes preserve key accumulation order and FP32 state. Scalar strict reference retained; sequence and fused decode have distinct ABIs."
+    },
+    {
+      "source": "kernels/rwkv/ops_fp32.cc",
+      "official_candidate": "upstream activation/{sigmoid,tanh,bf16_exp,exp2f_vec}.cc and common/activations.h reviewed",
+      "decision": "BF16 activation output changes FP32 nonlinear contract; retain FP32 RWKV gates and strict/native variants. Reuse norm separately; mix, prepare, value and finish are model-specific expressions combined on NPU."
+    },
+    {
+      "source": "kernels/rwkv/ops_fast_fp32.cc",
+      "official_candidate": "upstream activation/{sigmoid,tanh,bf16_exp,exp2f_vec}.cc and common/activations.h reviewed",
+      "decision": "BF16 activation output changes FP32 nonlinear contract; retain FP32 RWKV gates and strict/native variants. Reuse norm separately; mix, prepare, value and finish are model-specific expressions combined on NPU."
+    },
+    {
+      "source": "kernels/rwkv/mix_fp32.cc",
+      "official_candidate": "upstream activation/{sigmoid,tanh,bf16_exp,exp2f_vec}.cc and common/activations.h reviewed",
+      "decision": "BF16 activation output changes FP32 nonlinear contract; retain FP32 RWKV gates and strict/native variants. Reuse norm separately; mix, prepare, value and finish are model-specific expressions combined on NPU."
+    },
+    {
+      "source": "kernels/rwkv/mix_pair_fp32.cc",
+      "official_candidate": "upstream activation/{sigmoid,tanh,bf16_exp,exp2f_vec}.cc and common/activations.h reviewed",
+      "decision": "BF16 activation output changes FP32 nonlinear contract; retain FP32 RWKV gates and strict/native variants. Reuse norm separately; mix, prepare, value and finish are model-specific expressions combined on NPU."
+    },
+    {
+      "source": "kernels/rwkv/stages_fp32.cc",
+      "official_candidate": "upstream activation/{sigmoid,tanh,bf16_exp,exp2f_vec}.cc and common/activations.h reviewed",
+      "decision": "BF16 activation output changes FP32 nonlinear contract; retain FP32 RWKV gates and strict/native variants. Reuse norm separately; mix, prepare, value and finish are model-specific expressions combined on NPU."
+    },
+    {
+      "source": "kernels/rwkv/value_fp32.cc",
+      "official_candidate": "upstream activation/{sigmoid,tanh,bf16_exp,exp2f_vec}.cc and common/activations.h reviewed",
+      "decision": "BF16 activation output changes FP32 nonlinear contract; retain FP32 RWKV gates and strict/native variants. Reuse norm separately; mix, prepare, value and finish are model-specific expressions combined on NPU."
+    },
+    {
+      "source": "kernels/rwkv/stream_copy_fp32.cc",
+      "official_candidate": "Identity copy mechanism probe",
+      "decision": "Used only to validate FIFO regroup/DMA and submission latency; not a model arithmetic fallback."
+    }
+  ],
+  "FastFlowLM": {
+    "checkout": "b0d41a03411470373f849b25e3ce9356d716a483",
+    "used": "Open BO/run/DMA interfaces, persistent buffers and argument binding",
+    "limitation": "Core Qwen3 forward implementation is in precompiled library in this checkout; no claim of inspecting proprietary compute kernels."
+  }
+}

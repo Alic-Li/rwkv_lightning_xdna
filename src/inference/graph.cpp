@@ -1241,6 +1241,17 @@ struct DecodeGraph::Impl {
                          : n.op == Op::NormalizeKey ? "prepare"
                          : n.op == Op::Mix          ? "mix"
                                                     : "element";
+            const size_t span = std::upper_bound(node_run_ends.begin(),
+                node_run_ends.end(), i + 1) - node_run_ends.begin() - owner;
+            if (span > 1 && n.kind == Kind::Element && n.op == Op::Norm)
+              category = span == 6 ? "channel_mix" : "norm_mix";
+            else if (span > 1 && n.kind == Kind::Element && n.op == Op::NormalizeKey)
+              category = "recurrence_stage";
+            else if (span > 2 && n.kind == Kind::Linear && !n.transpose &&
+                     buffers[n.output].size == 2048)
+              category = "attention_projections";
+            else if (span == 2 && n.kind == Kind::Linear && !n.transpose)
+              category = "projection_residual";
             auto &t = timings[category];
             ++t.first;
             t.second += ms;

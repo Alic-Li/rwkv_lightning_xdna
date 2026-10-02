@@ -2,7 +2,9 @@
 #include "rwkv/xdna/session.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 using namespace rwkv::xdna;
@@ -39,6 +41,33 @@ void check(const std::vector<float> &a, const std::vector<float> &b,
       throw std::runtime_error("numerical element=" + std::to_string(i) +
                                " actual=" + std::to_string(a[i]) +
                                " expected=" + std::to_string(b[i]));
+}
+void bench(
+    DeviceRun &run, const std::string &name,
+    const std::function<void()> &reset = [] {}) {
+  if (!std::getenv("RWKV_XDNA_MICROBENCH"))
+    return;
+  std::vector<double> times;
+  double submit = 0, wait = 0;
+  for (int i = 0; i < 50; ++i) {
+    reset();
+    RunTiming t;
+    run.execute(30000, &t);
+    if (i >= 20) {
+      times.push_back(t.submit_us + t.wait_us);
+      submit += t.submit_us;
+      wait += t.wait_us;
+    }
+  }
+  std::sort(times.begin(), times.end());
+  std::cout << "{\"case\":\"" << name
+            << "\",\"warmups\":20,\"samples\":30,\"min_us\":" << times.front()
+            << ",\"median_us\":" << times[15]
+            << ",\"mean_submit_us\":" << submit / 30
+            << ",\"mean_wait_us\":" << wait / 30
+            << ",\"scope\":\"prepared run including DMA, compute, scheduling "
+               "and wait; reset excluded\"}"
+            << std::endl;
 }
 int main(int argc, char **argv) {
   try {
@@ -150,6 +179,8 @@ int main(int argc, char **argv) {
       }
       check(w.read(), gamma);
       check(b.read(), beta);
+      bench(run, "LayerNorm FP32 2048");
+      check(y.read(), expected);
       std::cout << "upstream FP32 affine norm replay/numerical/guards passed"
                 << std::endl;
     }
@@ -208,6 +239,8 @@ int main(int argc, char **argv) {
         check(aux.read(), a);
         check(first.read(), f);
       }
+      bench(run, "elementwise FP32 value residual 2048");
+      check(out.read(), expected);
       std::cout << "fused value replay/numerical/guards passed" << std::endl;
     }
     {
@@ -248,6 +281,10 @@ int main(int argc, char **argv) {
         check(out.read(), y, 2e-6f);
         check(packed.read(), p);
       }
+      const auto saved = state.read();
+      bench(run, "WKV FP32 32x64x64", [&] { state.upload(saved); });
+      (void)state.read();
+      (void)out.read();
       std::cout << "32-head resident WKV replay/numerical/guards passed"
                 << std::endl;
     }

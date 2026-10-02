@@ -1,0 +1,301 @@
+{
+  "date": "2026-10-03",
+  "hardware_software_provenance": "XDNA2 / XRT 2.25 / firmware 1.0.0.63 / Linux 7.0.0-38; mlir-aie d53582d3e0f9f8a2b77695bbf4abbd7766d5584a",
+  "suite": [
+    {
+      "case": "gemv-2048-2048",
+      "command": [
+        "build/host/bench_xdna_fp16",
+        "build/kernels/rwkv7-channel-mix",
+        "bf16",
+        "2048",
+        "2048"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/gemv-2048-2048.log",
+      "records": [
+        {
+          "accumulator": "fp32",
+          "case": "bf16-array-gemv-2048",
+          "cosine": 0.9999999999999971,
+          "effective_gflops": 28.865517360035785,
+          "effective_weight_GBps": 28.865517360035785,
+          "max_abs": 4.5262277126312256e-07,
+          "max_relative": 0.00021589773371792346,
+          "max_us": 348.69,
+          "mean_abs": 6.263300744713263e-08,
+          "mean_submit_us": 2.4513000000000003,
+          "mean_wait_us": 297.9417333333333,
+          "median_us": 297.252,
+          "min_us": 290.61,
+          "precision": "bf16",
+          "repetitions": 30,
+          "status": "passed",
+          "timing_scope": "host wall-clock, prepared run; includes DMA and scheduling",
+          "warmup": 20
+        }
+      ]
+    },
+    {
+      "case": "gemv-2048-8192",
+      "command": [
+        "build/host/bench_xdna_fp16",
+        "build/kernels/rwkv7-channel-mix",
+        "bf16",
+        "2048",
+        "8192"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/gemv-2048-8192.log",
+      "records": [
+        {
+          "accumulator": "fp32",
+          "case": "bf16-array-gemv-2048-8192",
+          "cosine": 0.9999999999999925,
+          "effective_gflops": 34.61953666503652,
+          "effective_weight_GBps": 34.61953666503652,
+          "max_abs": 4.5623164623975754e-07,
+          "max_relative": 0.00021589773371792346,
+          "max_us": 1186.795,
+          "mean_abs": 6.28861099166711e-08,
+          "mean_submit_us": 5.8004333333333316,
+          "mean_wait_us": 1024.7110666666667,
+          "median_us": 1026.172,
+          "min_us": 969.2339999999999,
+          "precision": "bf16",
+          "repetitions": 30,
+          "status": "passed",
+          "timing_scope": "host wall-clock, prepared run; includes DMA and scheduling",
+          "warmup": 20
+        }
+      ]
+    },
+    {
+      "case": "gemv-8192-2048",
+      "command": [
+        "build/host/bench_xdna_fp16",
+        "build/kernels/rwkv7-channel-mix",
+        "bf16",
+        "8192",
+        "2048"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/gemv-8192-2048.log",
+      "records": [
+        {
+          "accumulator": "fp32",
+          "case": "bf16-array-gemv-8192",
+          "cosine": 0.9999999999999927,
+          "effective_gflops": 35.3783635318864,
+          "effective_weight_GBps": 35.3783635318864,
+          "max_abs": 1.3164535630494356e-06,
+          "max_relative": 0.00017751967938990084,
+          "max_us": 1136.951,
+          "mean_abs": 1.761979166459149e-07,
+          "mean_submit_us": 4.293833333333334,
+          "mean_wait_us": 1008.6900666666663,
+          "median_us": 1015.501,
+          "min_us": 948.445,
+          "precision": "bf16",
+          "repetitions": 30,
+          "status": "passed",
+          "timing_scope": "host wall-clock, prepared run; includes DMA and scheduling",
+          "warmup": 20
+        }
+      ]
+    },
+    {
+      "case": "gemv-256-2048",
+      "command": [
+        "build/host/bench_xdna_fp16",
+        "build/kernels/rwkv7-channel-mix",
+        "bf16",
+        "256",
+        "2048"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/gemv-256-2048.log",
+      "records": [
+        {
+          "accumulator": "fp32",
+          "case": "bf16-array-gemv-256",
+          "cosine": 0.9999999999999991,
+          "effective_gflops": 12.21660919004567,
+          "effective_weight_GBps": 12.21660919004567,
+          "max_abs": 8.102506399154663e-08,
+          "max_relative": 0.0001580182085597248,
+          "max_us": 97.334,
+          "mean_abs": 1.3367282392096058e-08,
+          "mean_submit_us": 1.599033333333334,
+          "mean_wait_us": 93.22733333333333,
+          "median_us": 95.681,
+          "min_us": 85.83200000000001,
+          "precision": "bf16",
+          "repetitions": 30,
+          "status": "passed",
+          "timing_scope": "host wall-clock, prepared run; includes DMA and scheduling",
+          "warmup": 20
+        }
+      ]
+    },
+    {
+      "case": "gemv-2048-65536",
+      "command": [
+        "build/host/bench_xdna_fp16",
+        "build/kernels/rwkv7-channel-mix",
+        "bf16",
+        "2048",
+        "65536"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/gemv-2048-65536.log",
+      "records": [
+        {
+          "accumulator": "fp32",
+          "case": "bf16-array-gemv-2048-65536",
+          "cosine": 0.9999999999999731,
+          "effective_gflops": 38.815796810237224,
+          "effective_weight_GBps": 38.815796810237224,
+          "max_abs": 5.859765224158764e-07,
+          "max_relative": 0.0022465970662085373,
+          "max_us": 7252.091,
+          "mean_abs": 6.303296215559064e-08,
+          "mean_submit_us": 10.518266666666669,
+          "mean_wait_us": 7056.750366666664,
+          "median_us": 7080.417,
+          "min_us": 6915.624,
+          "precision": "bf16",
+          "repetitions": 30,
+          "status": "passed",
+          "timing_scope": "host wall-clock, prepared run; includes DMA and scheduling",
+          "warmup": 20
+        }
+      ]
+    },
+    {
+      "case": "gemm",
+      "command": [
+        "build/host/rwkv-gemm-probe-test",
+        "build/kernels/rwkv7-channel-mix"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/gemm.log",
+      "records": [
+        {
+          "cores": 1,
+          "dtype": "BF16 native 4x8x8 MMUL, FP32 output",
+          "end_to_end_gflops": 9.148600544426607,
+          "guards": true,
+          "k": 64,
+          "m": 64,
+          "max_abs": 5.4016709327697754e-08,
+          "mean_submit_us": 1.7235,
+          "mean_wait_us": 61.1475,
+          "median_us": 62.879,
+          "min_us": 57.308,
+          "n": 64,
+          "operation": "GEMM",
+          "samples": 30,
+          "scope": "prepared run includes DMA, scheduling, compute and wait; not isolated core cycles",
+          "warmups": 20
+        }
+      ]
+    },
+    {
+      "case": "normalization-elementwise-wkv",
+      "command": [
+        "build/host/rwkv-array-test",
+        "build/kernels/rwkv7-channel-mix",
+        "--bf16"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/normalization-elementwise-wkv.log",
+      "records": [
+        {
+          "case": "LayerNorm FP32 2048",
+          "warmups": 20,
+          "samples": 30,
+          "min_us": 69.01,
+          "median_us": 73.018,
+          "mean_submit_us": 2.11593,
+          "mean_wait_us": 71.3043,
+          "scope": "prepared run including DMA, compute, scheduling and wait; reset excluded"
+        },
+        {
+          "case": "elementwise FP32 value residual 2048",
+          "warmups": 20,
+          "samples": 30,
+          "min_us": 250.574,
+          "median_us": 258.189,
+          "mean_submit_us": 2.45803,
+          "mean_wait_us": 254.99,
+          "scope": "prepared run including DMA, compute, scheduling and wait; reset excluded"
+        },
+        {
+          "case": "WKV FP32 32x64x64",
+          "warmups": 20,
+          "samples": 30,
+          "min_us": 157.418,
+          "median_us": 167.346,
+          "mean_submit_us": 1.66927,
+          "mean_wait_us": 164.914,
+          "scope": "prepared run including DMA, compute, scheduling and wait; reset excluded"
+        }
+      ]
+    },
+    {
+      "case": "dma-submission",
+      "command": [
+        "build/host/rwkv-stream-group-test",
+        "build/kernels/rwkv7-channel-mix"
+      ],
+      "status": "passed",
+      "log": "reports/runs/fp16-2026-10-03/suite/dma-submission.log",
+      "records": [
+        {
+          "case": "stream-group-3",
+          "status": "passed",
+          "bytes_each_direction": 24576,
+          "warmup": 20,
+          "repetitions": 30,
+          "min_us": 61.887,
+          "median_us": 65.935,
+          "mean_submit_us": 1.85027,
+          "mean_wait_us": 66.636,
+          "scope": "two identity workers, regroup DMA, prepared submission and wait"
+        },
+        {
+          "case": "stream-group-4",
+          "status": "passed",
+          "bytes_each_direction": 32768,
+          "warmup": 20,
+          "repetitions": 30,
+          "min_us": 61.557,
+          "median_us": 68.87,
+          "mean_submit_us": 1.99817,
+          "mean_wait_us": 66.8598,
+          "scope": "two identity workers, regroup DMA, prepared submission and wait"
+        }
+      ]
+    }
+  ],
+  "context_probe": {
+    "alternating_pair_median_us": 388.856,
+    "alternation_excess_us": 255.654,
+    "copy_median_us": 69.181,
+    "gemm_median_us": 64.021,
+    "guards": true,
+    "samples": 30,
+    "scope": "two distinct XCLBIN/hardware contexts; excess includes scheduling/PDI/cache effects, not isolated context switch latency",
+    "warmups": 20
+  },
+  "scope": "BF16 GEMV/GEMM and FP32 state/nonlinear stages. All timings are host wall times; GEMM single core only. DMA probe includes identity kernels and packet regroup, not pure memory bandwidth.",
+  "channel_mix_context_probe": {
+    "case": "ChannelMix context alternation",
+    "norm_median_us": 79.13,
+    "channel_median_us": 2109.24,
+    "alternating_pair_median_us": 3298.17,
+    "alternation_excess_us": 1109.8,
+    "scope": "distinct programs, includes scheduling/PDI/cache effects"
+  }
+}

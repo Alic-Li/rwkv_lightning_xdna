@@ -117,16 +117,16 @@ int main(int argc, char **argv) {
         check(actual[2048 + row], actual[row] + input[row]);
       }
     }
-    auto measure = [&](bool combined) {
+    auto measure = [&](int mode) {
       std::vector<double> us;
       for (int i = 0; i < 50; ++i) {
         auto start = std::chrono::steady_clock::now();
-        if (combined)
+        if (mode == 1 || mode == 2)
           run.execute();
-        else {
+        if (mode == 0 || mode == 2 || mode == 3)
           n.execute();
+        if (mode == 0)
           f.execute();
-        }
         if (i >= 20)
           us.push_back(std::chrono::duration<double, std::micro>(
                            std::chrono::steady_clock::now() - start)
@@ -135,7 +135,8 @@ int main(int argc, char **argv) {
       std::sort(us.begin(), us.end());
       return std::make_pair(us.front(), us[15]);
     };
-    auto before = measure(false), after = measure(true);
+    auto before = measure(0), after = measure(1);
+    const auto norm_only = measure(3), alternating = measure(2);
     for (auto *p : {&x, &params, &weights, &diag, &out, &old, &npair, &mixed,
                     &hidden, &baseline})
       p->guard();
@@ -152,6 +153,14 @@ int main(int argc, char **argv) {
               << " before_median_us=" << before.second
               << " after_min_us=" << after.first
               << " after_median_us=" << after.second << '\n';
+    std::cout
+        << "{\"case\":\"ChannelMix context alternation\",\"norm_median_us\":"
+        << norm_only.second << ",\"channel_median_us\":" << after.second
+        << ",\"alternating_pair_median_us\":" << alternating.second
+        << ",\"alternation_excess_us\":"
+        << alternating.second - norm_only.second - after.second
+        << ",\"scope\":\"distinct programs, includes scheduling/PDI/cache "
+           "effects\"}\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
     return 1;
