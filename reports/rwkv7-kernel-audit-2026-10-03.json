@@ -130,5 +130,6 @@
     "checkout": "b0d41a03411470373f849b25e3ce9356d716a483",
     "used": "Open BO/run/DMA interfaces, persistent buffers and argument binding",
     "limitation": "Core Qwen3 forward implementation is in precompiled library in this checkout; no claim of inspecting proprietary compute kernels."
-  }
+  },
+  "late_experiment": "FP32 vector prepare/finish statistics using upstream scalar_invsqrt were built and passed the existing local oracle. Only 2.07% end-to-end gain with additional state drift; reverted. Existing statistics remain intentional; see rwkv7-native-stats-rejected-2026-10-03.json."
 }

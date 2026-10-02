@@ -9,6 +9,23 @@ NPU 可访问 BO 中，并跨 token 保留 FP32 recurrent state。优化路径�
 
 ## 当前 BF16 优化路径（2026-10-03）
 
+同一自然语言提示、15 个输入 token、greedy 生成32个 token 的最终实测：
+
+| 指标 | 严格 FP32 基线 | BF16 优化版 |
+|---|---:|---:|
+| runs/token | 488 | 146 |
+| 后续 decode 延迟 | 1017 ms | 238 ms |
+| decode token/s | 0.983 | 4.200 |
+| 32-token 生成（31 次 forward） | 31.54 s | 7.39 s |
+| 15-token prefill，不含图准备 | 15.24 s | 3.55 s |
+| TTFT，进程入口起计 | 22.86 s | 11.09 s |
+| 每 token 主机上传/下载 | 8192 / 262144 B | 8192 / 262144 B |
+| 常驻 BO | 5.796 GB | 2.917 GB |
+
+两次生成文本相同；这是一次短生成检查，不能推出长文本质量等价。
+全部指标、命令条件、128步跨精度漂移和停止依据见
+[最终实测报告](../reports/rwkv7-optimization-summary-2026-10-03.json)。
+
 完整 1.5B 模型、batch=1，146 runs/token，约 4.20 token/s。历史 488-run 基线
 实际为 FP32（约 0.98 token/s），不能把此次约 4.27 倍加速全部归因于同精度调度优化。
 权重和矩阵输入使用 BF16；累加、非线性输出和 recurrent state 保留 FP32。
@@ -50,6 +67,14 @@ RWKV_XDNA_KERNEL_DIR=build/kernels/rwkv7-channel-mix RWKV_XDNA_EXACT=0 \
 与主机提交时间。每项预热20次、计时30次，数值和边界检查失败返回非零。
 GEMM 探针显式禁止 BFP 仿真；64×64×64 单核结果不能外推为全阵列峰值。
 主机 wait 包含计算、DMA、调度/PDI；这些数据不等于设备内核 cycle trace。
+当前约 235 ms/token 的 host wait 包含计算、DMA、调度/PDI；host submit 仅约
+0.8 ms。真实 ChannelMix 与 norm 程序交替比各自连续运行多约1.11 ms/对。
+最近更大的 attention 前段融合仅改善0.32%，已回退；FP32统计量替代软件double
+实验改善2.07%却增加轨迹漂移，也已[回退](../reports/rwkv7-native-stats-rejected-2026-10-03.json)。
+这是当前分阶段设备程序设计的局部平台期，不是已经达到 XDNA2 理论极限。
+下一步优先验证共用设备程序/context、真正的多token BF16 GEMM prefill，以及设备
+cycle/DMA trace；<100 runs/token 尚未达成。
+
 全部自写 kernel 的官方实现复用/保留理由见
 [审计记录](../reports/rwkv7-kernel-audit-2026-10-03.json)。
 
