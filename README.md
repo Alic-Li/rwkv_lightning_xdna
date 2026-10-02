@@ -1,7 +1,10 @@
 # RWKV Lightning XDNA
 
 面向 Ryzen AI NPU 的 C++ 开发仓库。当前阶段已完成运行库基础、官方 C++
-内核导入和实机验证；尚未实现 RWKV 模型加载或推理。
+内核导入和实机验证，并提供 RWKV-7 C++ CLI 推理基线。默认除 embedding、tokenizer、sampler 外全部模型计算在 NPU 执行，
+提供独立 prefill kernel 和代码内 decode graph；支持直接加载 PTH 和 safetensors。
+
+模型运行、工程结构和验证方法见 [RWKV-7 推理说明](docs/inference.md)。
 
 首次部署请按 [完整安装、编译与运行指南](docs/environment.md) 操作：包括系统依赖、
 render 权限、memlock 锁页限制、驱动兼容设置、uv 环境、单算子和全量验证，
@@ -18,7 +21,7 @@ render 权限、memlock 锁页限制、驱动兼容设置、uv 环境、单算�
 include/rwkv/xdna/        C++ 公共 API
 src/runtime/             XRT 会话、设备缓冲区及同步调用
 apps/xdna_run.cpp        独立 C++ 测试执行器，无 Python 运行依赖
-kernels/rwkv/            后续 RWKV 专用 AIE C++ 内核
+kernels/rwkv/            RWKV-7 decode/prefill/GEMV/归一化/门控内核
 third_party/mlir-aie/    复制的完整官方内核与 LUT/运行时辅助源码
 third_party/kernel_tests/ 同版本官方测试配置和级联设计
 third_party/nlohmann/    固定版本 JSON 单头文件及许可证
@@ -110,7 +113,7 @@ cmake --build build/package-test
 - 测试采用上游数值容差，不能通过放宽容差或删掉失败配置伪造通过。
 - 新的设计编译脚本和原始数据布局必须一起维护，避免主机/设备 ABI 不一致。
 - 不提交 `.venv/`、编译产物、测试输入输出或模型权重。
-- 下一阶段先确定 RWKV 版本、模型尺寸和精度策略，再设计权重布局与循环状态接口。
+- RWKV-7 以 FP32 正确性为基线；当前 decode graph 逐节点提交原生 run，尚未实现整图单次提交或设备状态常驻。
 
 许可证：本项目基础代码为 Apache-2.0；第三方代码保留各自许可证，见
 [第三方说明](third_party/README.md)。

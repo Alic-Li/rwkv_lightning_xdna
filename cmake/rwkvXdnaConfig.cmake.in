@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 include(CMakeFindDependencyMacro)
+if(@OpenMP_CXX_FOUND@)
+  find_dependency(OpenMP COMPONENTS CXX)
+endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
 find_dependency(Threads)
 find_dependency(XRT)

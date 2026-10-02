@@ -1,0 +1,166 @@
+{
+  "date": "2026-10-02",
+  "kernel": "7.0.0-38-generic",
+  "runtime": "C++17; all model arithmetic on NPU except CPU embedding lookup/tokenizer/sampler; CPU handles loading/layout/transfers/graph orchestration",
+  "model": {
+    "path": "/home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "file_bytes": 3055444605,
+    "layers": 24,
+    "channels": 2048,
+    "heads": 32,
+    "head_size": 64,
+    "ffn": 8192,
+    "vocabulary": 65536,
+    "parameters": 1527668736,
+    "storage": "BF16",
+    "compute_and_state": "FP32"
+  },
+  "real_model": {
+    "numerical_tokens": [
+      1,
+      2
+    ],
+    "cpu_vs_npu_max_abs_logit_error": 0.0001163482666015625,
+    "cpu_argmax": [
+      1,
+      1
+    ],
+    "npu_argmax": [
+      1,
+      1
+    ],
+    "comparison_tolerance": {
+      "atol": 0.003,
+      "rtol": 0.001
+    },
+    "prompt": "The capital of France is",
+    "generation": " Paris.\n\n",
+    "prefill_tokens": 5,
+    "prefill_seconds": 37.6879,
+    "sampled_tokens": 3,
+    "decode_forward_calls": 2,
+    "generation_loop_seconds": 15.237,
+    "decode_mode": "graph",
+    "prefill_mode": "sequence",
+    "graph_nodes": 960,
+    "graph_buffers": 1492
+  },
+  "synthetic_logit_tolerance": {
+    "atol": 2e-05,
+    "rtol": 0.0002
+  },
+  "synthetic_logit_results": [
+    {
+      "fixture": "f32.pth",
+      "backend": "cpu",
+      "tokens": 16,
+      "max_abs_error": 1.1605177663298605e-06
+    },
+    {
+      "fixture": "f32.pth",
+      "backend": "npu",
+      "tokens": 16,
+      "max_abs_error": 3.817869718147904e-07
+    },
+    {
+      "fixture": "f16.pth",
+      "backend": "cpu",
+      "tokens": 16,
+      "max_abs_error": 1.233884163287513e-06
+    },
+    {
+      "fixture": "f16.pth",
+      "backend": "npu",
+      "tokens": 16,
+      "max_abs_error": 3.435291691111786e-07
+    },
+    {
+      "fixture": "bf16.pth",
+      "backend": "cpu",
+      "tokens": 16,
+      "max_abs_error": 9.217529182148354e-07
+    },
+    {
+      "fixture": "bf16.pth",
+      "backend": "npu",
+      "tokens": 16,
+      "max_abs_error": 4.14748799193454e-07
+    },
+    {
+      "fixture": "f32.safetensors",
+      "backend": "cpu",
+      "tokens": 16,
+      "max_abs_error": 1.1605177645535036e-06
+    },
+    {
+      "fixture": "f32.safetensors",
+      "backend": "npu",
+      "tokens": 16,
+      "max_abs_error": 3.8178697159274577e-07
+    }
+  ],
+  "recurrent": {
+    "steps": 64,
+    "heads": 2,
+    "reference": "FP64",
+    "reset": "passed",
+    "atol": 2e-06,
+    "rtol": 2e-05
+  },
+  "prefill_equivalence": {
+    "lengths": [
+      1,
+      15,
+      16,
+      17,
+      33
+    ],
+    "nonzero_initial_state": true,
+    "final_state": true,
+    "decode_continuation": true,
+    "max_abs_error": 0
+  },
+  "graph_equivalence": {
+    "backends": [
+      "cpu",
+      "npu"
+    ],
+    "model": "synthetic 2 layers, C=128",
+    "nodes": 80,
+    "buffers": 128,
+    "replays_per_backend": 11,
+    "dynamic_tokens": true,
+    "reset_and_state_branch": true,
+    "prefill_continuation": true,
+    "invalid_token_preserves_state": true,
+    "max_abs_error": 0
+  },
+  "regression": "14 CTest cases passed; additional prefill/graph tests, FP64 PyTorch oracle and installed-package consumer passed",
+  "execution_probes": {
+    "native_run_reuse": "passed",
+    "native_runlist": "ERT_CMD_STATE_ABORT; not enabled in inference",
+    "capture": "buffer snapshots generated; no replay.json",
+    "manual_cli_replay": "instruction buffer bank mismatch and invalid destination host buffer; not used in inference"
+  },
+  "sources_sha256": {
+    "kernels/rwkv/gemv_fp32.cc": "9a4c8a1c42ecf7a8e00ddd43230e485981618988986275164a19221138768a78",
+    "kernels/rwkv/ops_fp32.cc": "5542fa3381f9f4f52b899ba19ab5b744027f615927f2cdc913a650713c99120d",
+    "kernels/rwkv/wkv7_fp32.cc": "3f84c3ddaf37899708dd840684033f7dcdb2a2c89c87a7827848d3648df441b5",
+    "kernels/rwkv/wkv7_prefill_fp32.cc": "359452271ec2ecaa918c0f7df2a0ef835cb90e0ba82a4aba6ded6ec9d98b4d49",
+    "src/inference/backend.cpp": "8759a69a7ca6866fae023a2335a10bbe1691ba198491d944a77acccfa83ad82a",
+    "src/inference/graph.cpp": "0fa03ba21bcd8ee0c6a26e0244116f0839bf21437b22e4c8128132361e52136e",
+    "src/inference/model.cpp": "57b068ddf0be92d973fd8721e4ae66dfb1e6c82ad28ff8adbc4283ebf4dc9fcb",
+    "src/inference/npu_ops.cpp": "733c36ffb964615f232b8fc6435095b33eb195ce5a39709aeaafa8f675ec8052",
+    "src/inference/ops.cpp": "bcd728a03bca2ed0d7aba9579bfa3d0ed47bb725e3001f1f7032581b871212f1",
+    "src/inference/ops_internal.hpp": "fecab1329ad5f63a165f6e1f497983ad235e3d106a50723e89c00271a6da7b3e",
+    "src/inference/weights.cpp": "0ce73e5ac5ab7c6581e4a70ffa64a025db6fa5cd3d0b30383db267e06b0eb2e8",
+    "src/runtime/session.cpp": "5505b6233f04361ec602dd9077f72ee2160892ae2dad42bbf138bc42a83733dd"
+  },
+  "limitations": [
+    "Graph replay currently submits individual reusable runs, not one hardware graph submission.",
+    "Intermediate buffers and state still traverse host memory; model weights are not device-resident.",
+    "Prefill WKV is a distinct sequential 16-step kernel; projections are per-token GEMV, not batched GEMM.",
+    "Real-model testing covers short sequences only; full context length and long-form quality are not validated.",
+    "Timing is a functional baseline, not a controlled benchmark."
+  ]
+}

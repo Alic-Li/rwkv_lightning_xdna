@@ -44,6 +44,7 @@ struct Session::Impl {
   xrt::bo instruction_buffer;
   std::vector<xrt::bo> buffers;
   std::vector<size_t> sizes;
+  std::unique_ptr<xrt::run> run;
 
   Impl(const std::filesystem::path &binary, const std::filesystem::path &inst,
        const std::string &name, unsigned index)
@@ -79,6 +80,7 @@ Timing Session::execute(std::vector<Buffer> &buffers, unsigned timeout_ms) {
     for (size_t i = 0; i < sizes.size(); ++i)
       allocations.emplace_back(s.device, sizes[i], XRT_BO_FLAGS_HOST_ONLY,
                                s.kernel.group_id(static_cast<int>(3 + i)));
+    s.run.reset();
     s.buffers = std::move(allocations);
     s.sizes = sizes;
   }
@@ -87,12 +89,16 @@ Timing Session::execute(std::vector<Buffer> &buffers, unsigned timeout_ms) {
     s.buffers[i].write(buffers[i].bytes.data());
     s.buffers[i].sync(XCL_BO_SYNC_BO_TO_DEVICE);
   }
-  xrt::run run(s.kernel);
-  run.set_arg(0, 3u);
-  run.set_arg(1, s.instruction_buffer);
-  run.set_arg(2, static_cast<uint32_t>(s.instructions.size()));
-  for (size_t i = 0; i < buffers.size(); ++i)
-    run.set_arg(static_cast<int>(3 + i), s.buffers[i]);
+  // The fixed-shape run and argument bindings are reusable across tokens.
+  if (!s.run) {
+    s.run = std::make_unique<xrt::run>(s.kernel);
+    s.run->set_arg(0, 3u);
+    s.run->set_arg(1, s.instruction_buffer);
+    s.run->set_arg(2, static_cast<uint32_t>(s.instructions.size()));
+    for (size_t i = 0; i < buffers.size(); ++i)
+      s.run->set_arg(static_cast<int>(3 + i), s.buffers[i]);
+  }
+  auto &run = *s.run;
   auto start = Clock::now();
   run.start();
   const auto state = run.wait(timeout_ms);

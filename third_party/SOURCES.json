@@ -129,5 +129,17 @@
       "cases.py": "9b456dd17bf176a3abea76110aed7de64520678e1e54388877872b785ca9a7d2",
       "cascade_design.py": "d385d5bd7a1fd0c95c46167165dbdda36e40797bac9100fe0a5ef1b1ddfd1ea2"
     }
+  },
+  "rwkv_cuda_io": {
+    "source": "user-provided sibling repository rwkv_lightning_cuda",
+    "commit": "ec32ae411bb439f7c1894507b9b470b6d3a00f4d",
+    "note": "Copied at user request; no LICENSE file present in the source checkout. Original files retained without relicensing.",
+    "sha256": {
+      "include/rwkv/common/status.hpp": "3fd949527681cf64d680681dd42389f9f86cd3af75889c861e8e55d1605ea76e",
+      "include/rwkv/io/pth_archive.hpp": "a0a4b7a5217310d46970720d012fdcaa9524b83f3f1fcbdd4411ff007e134a3b",
+      "include/rwkv/io/pth_tensor.hpp": "ae50c5ebad35b422ea20e3737aaee1698881b42267b1031f7b817a4d75ae096e",
+      "src/pth_archive.cpp": "61bdbc1a8ac7cca8da68bfb5f3713c07484f84e7305cb1b3356af6af02c69c04",
+      "src/pth_tensor.cpp": "72239d7bff52309a9cbe7d8ce53a895798ecdec577538273de1deb21f9c28439"
+    }
   }
 }

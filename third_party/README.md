@@ -45,3 +45,11 @@ license text is in `mlir-aie/LICENSE`. File digests and versions are recorded in
 Do not update one component silently. Update compiler/kernel snapshots and
 test definitions together, preserve notices, regenerate provenance, and rerun
 the C++ hardware sweep. Put new application kernels outside this directory.
+
+## User-provided PTH loader
+
+`rwkv_cuda_io/` contains `pth_archive`, `pth_tensor` and their status header,
+copied unchanged from the user-provided sibling `rwkv_lightning_cuda` repository
+at the recorded commit in `SOURCES.json`. It has no CUDA or Python dependency.
+No LICENSE file was present in that source checkout; this snapshot retains the
+original source without assigning a new license.
