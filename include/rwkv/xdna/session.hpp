@@ -17,6 +17,12 @@ struct Timing {
   double dispatch_us = 0;
   double transfer_and_dispatch_us = 0;
 };
+// Host wall times. wait_us includes device execution, scheduling and DMA;
+// it must not be reported as pure NPU compute time.
+struct RunTiming {
+  double submit_us = 0;
+  double wait_us = 0;
+};
 
 // Persistent NPU-accessible allocation. Host access is explicit; slicing does
 // not copy or synchronize data. HOST_ONLY on XDNA is shared system DDR.
@@ -38,7 +44,7 @@ private:
 // execution and host writes to all buffers bound to it.
 class DeviceRun {
 public:
-  void execute(unsigned timeout_ms = 30000);
+  void execute(unsigned timeout_ms = 30000, RunTiming *timing = nullptr);
 
 private:
   struct Impl;

@@ -31,6 +31,7 @@ struct DecodeGraph::Impl {
     bool transpose = false;
     size_t group = 1;
     float epsilon = 0;
+    int layer = -1;
   };
   struct StateBinding {
     Id old_attention, old_ffn, matrix, new_attention, new_ffn;
@@ -39,6 +40,7 @@ struct DecodeGraph::Impl {
   RecurrentBackend &backend;
   std::vector<Buffer> buffers;
   std::vector<Node> nodes;
+  int recording_layer = -1;
   std::vector<StateBinding> states;
   std::map<const Vector *, Id> constants;
   Id embedding, logits;
@@ -562,6 +564,7 @@ struct DecodeGraph::Impl {
   Id element(Op op, Id x, Id y = none, Id z = none, Id w = none,
              size_t group = 1, float eps = 0) {
     Node node;
+    node.layer = recording_layer;
     node.kind = Kind::Element;
     node.op = op;
     node.inputs = {x, y, z, w, none, none, none};
@@ -581,6 +584,7 @@ struct DecodeGraph::Impl {
     if (buffers.at(x).size != input)
       throw std::runtime_error("Graph projection shape mismatch");
     Node node;
+    node.layer = recording_layer;
     node.kind = Kind::Linear;
     node.inputs[0] = x;
     node.weight = &w;
@@ -591,6 +595,7 @@ struct DecodeGraph::Impl {
   }
   Id recurrent(Id state, Id r, Id d, Id k, Id v, Id a, Id b) {
     Node node;
+    node.layer = recording_layer;
     node.kind = Kind::Recurrent;
     node.inputs = {state, r, d, k, v, a, b};
     node.group = weights.head_size();
@@ -607,6 +612,7 @@ struct DecodeGraph::Impl {
                 w.at("blocks.0.ln0.bias"), c, 1e-5f),
        first_v = none;
     for (size_t layer = 0; layer < w.layers(); ++layer) {
+      recording_layer = static_cast<int>(layer);
       std::string prefix = "blocks." + std::to_string(layer) + ".";
       auto get = [&](const std::string &key) -> const Tensor & {
         return w.at(prefix + key);
@@ -655,6 +661,7 @@ struct DecodeGraph::Impl {
       x = element(Op::Add, x, linear(f, get("ffn.value.weight")));
       states.push_back({old_att, old_ffn, matrix, xx, ff});
     }
+    recording_layer = -1;
     logits =
         linear(norm(x, w.at("ln_out.weight"), w.at("ln_out.bias"), c, 1e-5f),
                w.at("head.weight"));
@@ -744,6 +751,9 @@ struct DecodeGraph::Impl {
         bind(states[i].matrix, state.layers[i].matrix);
       }
     if (!device_buffers.empty()) {
+      const bool profile = std::getenv("RWKV_XDNA_PROFILE") != nullptr;
+      const auto transfer_begin = profile ? std::chrono::steady_clock::now()
+                                          : std::chrono::steady_clock::time_point{};
       auto upload = [&](Id id) {
         const auto &v = read(id);
         device_buffers[id].upload(v.data(), v.size() * 4);
@@ -757,18 +767,24 @@ struct DecodeGraph::Impl {
           upload(s.matrix);
         }
       size_t node_index = 0;
-      const bool profile = std::getenv("RWKV_XDNA_PROFILE") != nullptr;
+      const auto transfer_end = profile ? std::chrono::steady_clock::now()
+                                        : std::chrono::steady_clock::time_point{};
       std::map<std::string, std::pair<size_t, double>> timings;
+      std::map<int, std::pair<size_t, double>> layer_timings;
+      double submit_us = 0, wait_us = 0;
       for (size_t i = 0; i < runs.size(); ++i) {
         try {
           const auto start = profile ? std::chrono::steady_clock::now()
                                      : std::chrono::steady_clock::time_point{};
-          runs[i].execute();
+          xdna::RunTiming run_timing;
+          runs[i].execute(30000, profile ? &run_timing : nullptr);
           if (profile) {
             const size_t owner = std::lower_bound(node_run_ends.begin(),
                                                   node_run_ends.end(), i + 1) -
                                  node_run_ends.begin();
             const auto &n = nodes[owner];
+            submit_us += run_timing.submit_us;
+            wait_us += run_timing.wait_us;
             const auto ms = std::chrono::duration<double, std::milli>(
                                 std::chrono::steady_clock::now() - start)
                                 .count();
@@ -789,6 +805,9 @@ struct DecodeGraph::Impl {
             auto &t = timings[category];
             ++t.first;
             t.second += ms;
+            auto &layer = layer_timings[n.layer];
+            ++layer.first;
+            layer.second += ms;
           }
           while (trace && node_index < nodes.size() &&
                  i + 1 == node_run_ends[node_index]) {
@@ -822,11 +841,28 @@ struct DecodeGraph::Impl {
           std::cerr << "decode_profile " << entry.first
                     << " runs=" << entry.second.first
                     << " ms=" << entry.second.second << '\n';
+      if (profile) {
+        for (const auto &entry : layer_timings)
+          std::cerr << "decode_layer layer=" << entry.first
+                    << " runs=" << entry.second.first
+                    << " ms=" << entry.second.second << '\n';
+        std::cerr << "decode_host submit_us=" << submit_us
+                  << " wait_us=" << wait_us << " upload_us="
+                  << std::chrono::duration<double, std::micro>(transfer_end - transfer_begin).count()
+                  << '\n';
+      }
       auto download = [&](Id id) {
         auto &v = buffers[id].value;
         device_buffers[id].download(v.data(), v.size() * 4);
       };
+      const auto download_begin = profile ? std::chrono::steady_clock::now()
+                                          : std::chrono::steady_clock::time_point{};
       download(logits);
+      if (profile)
+        std::cerr << "decode_logits download_us="
+                  << std::chrono::duration<double, std::micro>(
+                         std::chrono::steady_clock::now() - download_begin).count()
+                  << '\n';
       if (!persistent)
         for (const auto &s : states) {
           download(s.new_attention);

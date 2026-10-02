@@ -122,15 +122,19 @@ DeviceRun Session::prepare(const std::vector<DeviceBuffer> &buffers) {
   }
   return DeviceRun(std::move(p));
 }
-void DeviceRun::execute(unsigned timeout_ms) {
+void DeviceRun::execute(unsigned timeout_ms, RunTiming *timing) {
   if (!timeout_ms)
     throw std::invalid_argument("Invalid device timeout");
+  const auto begin = timing ? Clock::now() : Clock::time_point{};
   impl_->run.start();
+  const auto submitted = timing ? Clock::now() : Clock::time_point{};
   try {
     auto state = impl_->run.wait(timeout_ms);
     if (state != ERT_CMD_STATE_COMPLETED)
       throw std::runtime_error("Resident NPU dispatch failed: ERT state=" +
                                std::to_string(static_cast<int>(state)));
+    if (timing)
+      *timing = {micros(begin, submitted), micros(submitted, Clock::now())};
   } catch (...) {
     // Do not release/rebind BOs while a timed-out command may still use them.
     try {
