@@ -254,6 +254,10 @@ BO，保留诊断中间结果；FP32 state 原位更新。runs/token 369→321�
 logits/state 最大误差0，平均约0.324→0.298秒/token。单核合并曾超过指令内存656字节，
 因此采用三个相连的空间阶段；见[验证记录](../reports/rwkv7-recurrence-stage-2026-10-03.json)。
 
+`--norm-mix`（需要 `--native-fp32`）将上游 LayerNorm 与 shift/mix 合成两核流水线。
+321→273 runs/token，32步对照 logits/state 最大误差0，约0.299→0.291秒/token；
+收益较小，详见[记录](../reports/rwkv7-norm-mix-2026-10-03.json)。
+
 同精度比较时可给 `rwkv-precision-benchmark` 设置
 `RWKV_XDNA_REFERENCE_BF16=1` 和 `RWKV_XDNA_REFERENCE_KERNEL_DIR=基线目录`。
 oracle的 `--bf16-all-projections` 使用BF16低秩参考；`--bf16-projections` 保留FP32低秩

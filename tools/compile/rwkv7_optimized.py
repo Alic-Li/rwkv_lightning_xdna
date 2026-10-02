@@ -29,6 +29,9 @@ p.add_argument(
     help="combine prepare/WKV/finish into a spatial pipeline",
 )
 p.add_argument(
+    "--norm-mix", action="store_true", help="fuse native upstream norm and mix/shift"
+)
+p.add_argument(
     "--native-fp32",
     action="store_true",
     help="experimental faster arithmetic; does not meet the legacy real-model pointwise tolerance",
@@ -42,6 +45,8 @@ env = dict(
     RWKV_XDNA_EXACT="0" if a.native_fp32 else "1",
     RWKV_XDNA_KERNEL_DIR=str(a.output.resolve()),
 )
+if a.norm_mix and not a.native_fp32:
+    p.error("--norm-mix requires --native-fp32")
 commands = [] if a.skip_base else [("rwkv7_full.py", [])]
 commands += [
     ("rwkv7_resident.py", []),
@@ -71,6 +76,8 @@ if a.rank_batch:
     commands.append(("rwkv7_rank_batch.py", []))
 if a.recurrence_stage:
     commands.append(("rwkv7_recurrence_stage.py", []))
+if a.norm_mix:
+    commands.append(("rwkv7_norm_mix.py", []))
 for script, args in commands:
     subprocess.run(
         [sys.executable, str(ROOT / "tools/compile" / script), *args],

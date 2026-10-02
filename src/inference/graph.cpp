@@ -374,6 +374,48 @@ struct DecodeGraph::Impl {
     for (size_t node_index = 0; node_index < nodes.size(); ++node_index) {
       const auto &node = nodes[node_index];
       const auto &a = node.inputs;
+      if (!exact_fp32 && node.kind == Kind::Element && node.op == Op::Norm &&
+          node.group == 2048 && node.epsilon == 1e-5f && node_index + 1 < nodes.size()) {
+        size_t count = 0;
+        const Id old = nodes[node_index + 1].inputs[1];
+        while (node_index + 1 + count < nodes.size()) {
+          const auto &mix = nodes[node_index + 1 + count];
+          if (mix.kind != Kind::Element || mix.op != Op::Mix ||
+              mix.inputs[0] != node.output || mix.inputs[1] != old)
+            break;
+          ++count;
+        }
+        const auto name = "fused-norm-mix-" + std::to_string(count);
+        if ((count == 1 || count == 6) && std::filesystem::exists(root / name / "config.json")) {
+          check_optional(name, {{"schema_version", 1}, {"dtype", "float32"},
+              {"channels", 2048}, {"mixes", count}, {"exact_fp32", false}});
+          if (!std::any_of(states.begin(), states.end(), [&](const StateBinding &s) {
+                return count == 6 ? s.old_attention == old : s.old_ffn == old;
+              }))
+            throw std::runtime_error("Unexpected norm/mix shift binding");
+          auto &stage = session(root, name);
+          Vector parameters((2 + count) * 2048);
+          for (size_t j = 0; j < 2 + count; ++j) {
+            const auto &value = read(j < 2 ? a[1 + j] : nodes[node_index + j - 1].inputs[2]);
+            if (value.size() != 2048) throw std::runtime_error("Unexpected norm/mix parameter shape");
+            std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
+          }
+          auto pair = initialized(stage, Vector(4096, 0));
+          auto mixed = initialized(stage, Vector(count * 2048, 0));
+          device_buffers[node.output] = pair.slice(0, 2048 * 4);
+          for (size_t j = 0; j < count; ++j)
+            device_buffers[nodes[node_index + 1 + j].output] = mixed.slice(j * 2048 * 4, 2048 * 4);
+          if (count == 6) {
+            mixed_inputs.emplace(nodes[node_index + 1].output, mixed);
+            mixed_inputs.emplace(nodes[node_index + 2].output, mixed);
+          }
+          runs.push_back(stage.prepare({device_buffers[a[0]], initialized(stage, parameters),
+                                        device_buffers[old], pair, mixed}));
+          for (size_t j = 0; j <= count; ++j) node_run_ends.push_back(runs.size());
+          node_index += count;
+          continue;
+        }
+      }
       if (bf16 && node.kind == Kind::Linear && node.transpose &&
           mixed_inputs.count(a[0])) {
         struct Branch {
