@@ -249,6 +249,11 @@ runs/token 从440降至369，128步同精度对照 logits/state 最大误差为0
 约0.394→0.324秒/token。独立随机输入、guard、未使用槽位及1340次实际输入
 投影 oracle 均通过；见[批量低秩记录](../reports/rwkv7-bf16-rank-batch-2026-10-03.json)。
 
+`--recurrence-stage` 使用24核的 prepare→WKV→finish 流水线。每层共享一个27向量
+BO，保留诊断中间结果；FP32 state 原位更新。runs/token 369→321，128步同精度
+logits/state 最大误差0，平均约0.324→0.298秒/token。单核合并曾超过指令内存656字节，
+因此采用三个相连的空间阶段；见[验证记录](../reports/rwkv7-recurrence-stage-2026-10-03.json)。
+
 同精度比较时可给 `rwkv-precision-benchmark` 设置
 `RWKV_XDNA_REFERENCE_BF16=1` 和 `RWKV_XDNA_REFERENCE_KERNEL_DIR=基线目录`。
 oracle的 `--bf16-all-projections` 使用BF16低秩参考；`--bf16-projections` 保留FP32低秩

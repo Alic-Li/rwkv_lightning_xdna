@@ -209,9 +209,71 @@ struct DecodeGraph::Impl {
     auto &wkv = session(root, array_wkv ? "array-decode" : "resident-decode");
     device_buffers.resize(buffers.size());
     std::map<Id, xdna::DeviceBuffer> recurrent_vectors;
-    for (const auto &node : nodes) {
+    std::map<size_t, std::vector<xdna::DeviceBuffer>> stage_args;
+    std::map<size_t, xdna::DeviceBuffer> recurrence_stages;
+    const bool combined_recurrence = array_wkv &&
+        std::filesystem::exists(root / "fused-recurrence-stage/config.json");
+    if (combined_recurrence)
+      check_optional("fused-recurrence-stage", {{"schema_version", 1},
+          {"dtype", "float32"}, {"channels", 2048}, {"head_size", 64},
+          {"arena_vectors", 27}, {"exact_fp32", exact_fp32}});
+    for (size_t ni = 0; ni < nodes.size(); ++ni) {
+      const auto &node = nodes[ni];
       if (node.kind != Kind::Recurrent)
         continue;
+      if (combined_recurrence) {
+        if (ni < 6 || ni + 4 >= nodes.size())
+          throw std::runtime_error("Incomplete recurrence stage");
+        const auto *pre = &nodes[ni - 6];
+        const auto *post = &nodes[ni + 1];
+        const Op prep_ops[] = {Op::NormalizeKey, Op::Sigmoid, Op::Negate,
+                              Op::Multiply, Op::KeyScale, Op::Decay};
+        const Op post_ops[] = {Op::Norm, Op::Rkv, Op::Add, Op::Multiply};
+        for (size_t j = 0; j < 6; ++j)
+          if (pre[j].kind != Kind::Element || pre[j].op != prep_ops[j])
+            throw std::runtime_error("Unexpected recurrence preparation");
+        for (size_t j = 0; j < 4; ++j)
+          if (post[j].kind != Kind::Element || post[j].op != post_ops[j])
+            throw std::runtime_error("Unexpected recurrence finishing");
+        if (pre[0].group != 64 || post[0].group != 64 ||
+            post[0].epsilon != 64e-5f || post[0].inputs[0] != node.output ||
+            pre[2].inputs[0] != pre[0].output ||
+            pre[3].inputs[0] != pre[0].output || pre[3].inputs[1] != pre[1].output ||
+            pre[4].inputs[0] != pre[0].inputs[0] || pre[4].inputs[1] != pre[1].output ||
+            post[2].inputs[0] != post[0].output || post[2].inputs[1] != post[1].output ||
+            post[3].inputs[0] != post[2].output)
+          throw std::runtime_error("Unexpected recurrence stage dependencies");
+        std::vector<Id> ids(27, none);
+        const std::vector<Id> pi{pre[0].inputs[0], pre[1].inputs[0], pre[5].inputs[0],
+            pre[0].inputs[1], pre[4].inputs[2], pre[1].inputs[1], pre[5].inputs[1]};
+        std::copy(pi.begin(), pi.end(), ids.begin());
+        const std::vector<Id> fi{node.output, post[0].inputs[1], post[0].inputs[2],
+            post[1].inputs[2], post[3].inputs[1]};
+        std::copy(fi.begin(), fi.end(), ids.begin() + 8);
+        for (size_t j = 0; j < 6; ++j) ids[13 + j] = node.inputs[1 + j];
+        ids[19] = pre[0].output;
+        ids[20] = pre[1].output;
+        for (size_t j = 0; j < 4; ++j) ids[21 + j] = post[j].output;
+        Vector values(27 * 2048, 0);
+        for (size_t j = 0; j < ids.size(); ++j)
+          if (ids[j] != none && buffers[ids[j]].constant)
+            std::copy(read(ids[j]).begin(), read(ids[j]).end(), values.begin() + j * 2048);
+        auto arena = initialized(ops, values);
+        for (size_t j = 0; j < ids.size(); ++j) {
+          if (ids[j] == none) continue;
+          if (device_buffers[ids[j]].size() || buffers[ids[j]].size != 2048)
+            throw std::runtime_error("Unsupported recurrence arena alias");
+          device_buffers[ids[j]] = arena.slice(j * 2048 * 4, 2048 * 4);
+        }
+        auto rec = arena.slice(13 * 2048 * 4, 6 * 2048 * 4);
+        recurrent_vectors.emplace(node.output, rec);
+        recurrence_stages.emplace(ni - 6, arena);
+        stage_args[ni - 6] = {arena.slice(0, 8 * 2048 * 4), rec,
+                             arena.slice(19 * 2048 * 4, 2 * 2048 * 4)};
+        stage_args[ni + 1] = {arena.slice(8 * 2048 * 4, 5 * 2048 * 4), rec,
+                             arena.slice(21 * 2048 * 4, 6 * 2048 * 4)};
+        continue;
+      }
       auto packed = initialized(ops, Vector(6 * 2048, 0));
       recurrent_vectors.emplace(node.output, packed);
       for (size_t i = 1; i < 7; ++i) {
@@ -221,7 +283,6 @@ struct DecodeGraph::Impl {
         device_buffers[id] = packed.slice((i - 1) * 2048 * 4, 2048 * 4);
       }
     }
-    std::map<size_t, std::vector<xdna::DeviceBuffer>> stage_args;
     std::map<Id, xdna::DeviceBuffer> mixed_inputs;
     auto pack_vectors = [&](const std::vector<Id> &ids, size_t slots) {
       Vector value(slots * 2048, 0);
@@ -239,7 +300,7 @@ struct DecodeGraph::Impl {
     };
     for (size_t i = 0; i < nodes.size(); ++i) {
       const auto *n = &nodes[i];
-      if (n->kind != Kind::Element)
+      if (n->kind != Kind::Element || stage_args.count(i))
         continue;
       if (n->op == Op::ValueResidual &&
           std::filesystem::exists(root / "fused-value/config.json")) {
@@ -496,6 +557,14 @@ struct DecodeGraph::Impl {
                nodes[node_index + offset].kind == Kind::Element &&
                nodes[node_index + offset].op == op;
       };
+      if (recurrence_stages.count(node_index)) {
+        auto &stage = session(root, "fused-recurrence-stage");
+        runs.push_back(stage.prepare({device_buffers[nodes[node_index + 6].inputs[0]],
+                                      recurrence_stages.at(node_index)}));
+        for (size_t j = 0; j < 11; ++j) node_run_ends.push_back(runs.size());
+        node_index += 10;
+        continue;
+      }
       if (is_op(0, Op::NormalizeKey) && is_op(1, Op::Sigmoid) &&
           is_op(2, Op::Negate) && is_op(3, Op::Multiply) &&
           is_op(4, Op::KeyScale) && is_op(5, Op::Decay) &&

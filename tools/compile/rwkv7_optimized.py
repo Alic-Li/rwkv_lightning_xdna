@@ -24,6 +24,11 @@ p.add_argument(
     "--rank-batch", action="store_true", help="batch independent BF16 low-rank branches"
 )
 p.add_argument(
+    "--recurrence-stage",
+    action="store_true",
+    help="combine prepare/WKV/finish into a spatial pipeline",
+)
+p.add_argument(
     "--native-fp32",
     action="store_true",
     help="experimental faster arithmetic; does not meet the legacy real-model pointwise tolerance",
@@ -64,6 +69,8 @@ if a.rkv:
     commands.append(("rwkv7_rkv.py", []))
 if a.rank_batch:
     commands.append(("rwkv7_rank_batch.py", []))
+if a.recurrence_stage:
+    commands.append(("rwkv7_recurrence_stage.py", []))
 for script, args in commands:
     subprocess.run(
         [sys.executable, str(ROOT / "tools/compile" / script), *args],
