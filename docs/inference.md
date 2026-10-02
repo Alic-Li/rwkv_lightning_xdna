@@ -175,6 +175,56 @@ batch=1 每步大致读取5.6 GB FP32权重（W8约1.4 GB）。若有效权重�
 固定 run 参数与 DMA 地址绑定接口；其本 checkout 的 Qwen3 forward 在预编译库里，
 不能声称已读到完整实现。历史 runlist 探针限制见 [execution-graph.md](execution-graph.md)。
 
+## BF16 主投影实验（2026-10-03）
+
+488-run 历史基线实际是 **FP32**，不能标成 FP16。新实验使用 BF16 权重和
+BF16 乘法、FP32 累加；当前低秩投影、激活和 recurrent state 仍为 FP32。
+它也不是 IEEE FP16 或 BFP16，不使用 INT8/INT4、CPU/GPU arithmetic fallback。
+上游 `linalg/mv_bf16.cc` 保持原样，RWKV 包装复用其四行 MAC/归约；权重加载时
+一次性按现有 tile 顺序打包为 BF16。输入在 AIE 上以 nearest-even 转为 BF16。
+
+```bash
+export MLIR_AIE_KERNEL_SOURCES="$PWD/third_party/mlir-aie"
+.venv/bin/python tools/compile/rwkv7_array.py --bf16
+.venv/bin/python tools/compile/rwkv7_array.py --bf16 --k 2048 --rows 8192
+.venv/bin/python tools/compile/rwkv7_ffn.py --bf16
+cmake --build --preset dev
+./build/host/rwkv-array-test build/kernels/rwkv7-full --bf16
+./build/host/bench_xdna_fp16 build/kernels/rwkv7-full bf16 2048 2048
+# 显式打开；仅 resident、C=2048、32 heads。
+RWKV_XDNA_BF16=1 ./build/host/rwkv-cli --model "$MODEL" \
+  --decode resident --prefill decode --prompt 'The capital of France is' \
+  --max-tokens 32 --top-k 1
+```
+
+`bench_xdna_fp16` 当前覆盖主投影形状，实际精度由 `fp32|bf16` 参数及输出字段说明。
+预热20次、计时30次，报告 min/median/max、主机 submit/wait、有效带宽、数值误差和
+guard 检查。其时间包含 DMA 和调度，不能视为纯设备 kernel cycles。
+`RWKV_XDNA_PROFILE=1` 另报告每类算子、每层、提交/等待、embedding/logits 传输时间。
+wait 包含设备计算、DMA 和调度/PDI 开销，尚未被设备 trace 分拆。
+
+首轮 2048×2048 GEMV 最小耗时 699→290 μs；两种 FFN 大形状约2586→952/962 μs。
+128步固定输入/greedy对照（首步不计时）为1.0175→0.8908秒/token，仍488 runs/token。
+这是精度切换实验，不能当成同精度FP32优化。详细条件见
+[实验记录](../reports/rwkv7-bf16-projections-2026-10-03.json)。
+
+数值验收区分三个问题：随机/边界单算子；实际设备输入上的独立CPU FP64点积；
+以及不同精度/独立轨迹的模型漂移。前两者已通过，580次真实输入主投影的最大误差
+为1.53e-5，沿用原单算子阈值。独立CPU BF16整图在第二层未通过旧FP32阈值；
+未放宽阈值，不能声称这条整图严格检查通过。128步FP32/BF16对照的末步state相对L2
+约0.0023。更多提示与数值契约仍需验证，因此该模式不作为默认路径。
+自然语言 planet 提示的128步 teacher-forced 对照为127/128次 argmax一致，末步
+state相对L2约0.00145；不能把它写成自由生成文本完全相同。
+
+```bash
+./build/host/rwkv-alignment-test "$MODEL" build/kernels/rwkv7-full --bf16-projections
+./build/host/rwkv-precision-benchmark "$MODEL" build/kernels/rwkv7-full 128 \
+  'Question: What is the largest planet in our solar system? Answer:'
+```
+
+`set_projection_trace` 会读回实际投影输入/输出，仅用于 oracle；其诊断传输和CPU
+点积不属于生产推理路径。性能测试必须关闭此 hook。
+
 ## Prefill：独立序列路径
 
 `Model::prefill` 按最多 16 token 的 chunk 分层执行：先准备一层的投影和门控序列，

@@ -2,6 +2,7 @@
 #include "rwkv/xdna/session.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 using namespace rwkv::xdna;
@@ -45,6 +46,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error("kernel root required");
     std::filesystem::path root(argv[1]);
     const bool array32 = argc == 3 && std::string(argv[2]) == "--array32";
+    const bool bf16 = argc == 3 && std::string(argv[2]) == "--bf16";
     for (int mode = 0; mode < 5; ++mode) {
       size_t k = mode == 0   ? 256
                  : mode == 2 ? 8192
@@ -55,9 +57,11 @@ int main(int argc, char **argv) {
                                          (mode == 3 ? "-8192" : "");
       if (array32 && mode < 4)
         name.replace(0, 5, "array32");
+      if (bf16)
+        name = "bf16-" + name;
       Session s(root / name / "design.xclbin",
                 root / name / "instructions.bin");
-      Guarded x(s, k), w(s, rows * k), y(s, rows), z(s, rows);
+      Guarded x(s, k), w(s, rows * k / (bf16 ? 2 : 1)), y(s, rows), z(s, rows);
       std::vector<float> weights(rows * k), input(k), expected(rows),
           active(rows);
       for (size_t r = 0; r < rows; ++r)
@@ -76,7 +80,21 @@ int main(int argc, char **argv) {
           }
           weights[pos] = (int(r % 17) - 8) * (int(c % 7) - 3) / 2048.f;
         }
-      w.upload(weights);
+      std::vector<float> stored = weights;
+      if (bf16) {
+        stored.resize(weights.size() / 2);
+        std::vector<uint16_t> bits(weights.size());
+        for (size_t i = 0; i < weights.size(); ++i) {
+          uint32_t u;
+          std::memcpy(&u, &weights[i], 4);
+          // These dyadic fixtures are exactly representable in BF16.
+          if (u & 0xffff)
+            throw std::runtime_error("inexact BF16 fixture");
+          bits[i] = u >> 16;
+        }
+        std::memcpy(stored.data(), bits.data(), bits.size() * 2);
+      }
+      w.upload(stored);
       std::vector<DeviceBuffer> args{x.data, w.data, y.data};
       if (mode == 4)
         args.push_back(z.data);
@@ -98,7 +116,7 @@ int main(int argc, char **argv) {
           check(z.read(), active);
         check(x.read(), input);
       }
-      check(w.read(), weights);
+      check(w.read(), stored);
       std::cout << name << " replay/numerical/guards passed" << std::endl;
     }
     {

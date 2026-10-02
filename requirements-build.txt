@@ -21,6 +21,7 @@ reuse
 torch==2.13.0+cpu
 pytest
 pytest-xdist
+PyYAML==6.0.3  # MLIR-AIE static compiler remarks
 
 cmake==4.1.0
 ninja==1.13.0

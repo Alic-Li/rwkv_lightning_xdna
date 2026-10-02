@@ -31,6 +31,12 @@ public:
   // state.
   using Trace = std::function<void(size_t, const Vector &, const Vector *)>;
   void set_trace(Trace trace);
+  // Diagnostic projection oracle hook. Reads device inputs and outputs;
+  // never enable it for performance measurements. Main (non-transposed)
+  // projections only; fused low-rank intermediates use set_trace instead.
+  using ProjectionTrace = std::function<void(size_t, const Vector &,
+                                             const Tensor &, const Vector &)>;
+  void set_projection_trace(ProjectionTrace trace);
   // Explicit device-owned request state. load once after prefill/reset, export
   // only for checkpoint/branch. No implicit pointer-identity state cache.
   void load_state(const State &);

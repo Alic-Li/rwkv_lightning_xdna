@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -46,6 +47,7 @@ struct DecodeGraph::Impl {
   Id embedding, logits;
   size_t replays = 0;
   DecodeGraph::Trace trace;
+  DecodeGraph::ProjectionTrace projection_trace;
   std::vector<size_t> node_run_ends;
   bool device_failed = false, resident_state_valid = false;
   std::vector<xdna::DeviceRun> shift_runs;
@@ -70,6 +72,9 @@ struct DecodeGraph::Impl {
     return b;
   }
   void prepare_resident(const std::filesystem::path &root) {
+    const bool bf16 = std::getenv("RWKV_XDNA_BF16") != nullptr;
+    if (bf16 && (weights.channels() != 2048 || weights.heads() != 32))
+      throw std::runtime_error("BF16 projection mode requires C=2048 and 32 heads");
     for (const auto &name : {"resident-ops", "resident-decode"}) {
       std::ifstream in(root / name / "config.json");
       nlohmann::json j;
@@ -131,6 +136,13 @@ struct DecodeGraph::Impl {
     };
     for (const auto &entry : optional_abis)
       check_optional(entry.first, entry.second);
+    if (bf16) {
+      if (!std::filesystem::exists(root / "bf16-fused-ffn-key/config.json"))
+        throw std::runtime_error("Missing BF16 fused FFN artifact");
+      check_optional("bf16-fused-ffn-key", {{"schema_version", 1},
+                                            {"dtype", "bfloat16"},
+                                            {"rows", 8192}, {"k", 2048}});
+    }
     for (int a = 0; a < 3; ++a)
       check_optional("fused-rank-" + std::to_string(a), {{"schema_version", 1},
                                                          {"dtype", "float32"},
@@ -444,7 +456,7 @@ struct DecodeGraph::Impl {
         }
         auto array32_name = array_name;
         array32_name.replace(0, 5, "array32");
-        const bool array32 =
+        const bool array32 = !bf16 &&
             array_rows == 8192 &&
             std::filesystem::exists(root / array32_name / "config.json");
         if (array32)
@@ -453,22 +465,25 @@ struct DecodeGraph::Impl {
             outputs >= 2048 &&
             std::filesystem::exists(root / array_name / "config.json");
         const size_t rows = array ? array_rows : 256;
+        if (bf16 && array)
+          array_name = "bf16-" + array_name;
         if (array) {
           std::ifstream config(root / array_name / "config.json");
           nlohmann::json j;
           config >> j;
           if (j.at("schema_version") != (array32 ? 2 : 1) ||
-              j.at("dtype") != "float32" || j.at("rows") != rows ||
+              j.at("dtype") != (bf16 ? "bfloat16" : "float32") || j.at("rows") != rows ||
               j.at("cores") != (array32 ? 32 : 8) || j.at("k") != k ||
               (array32 && j.at("layout") != "column_block_lane"))
             throw std::runtime_error("Incompatible array GEMV ABI");
         }
+        const std::string ffn_name = bf16 ? "bf16-fused-ffn-key" : "fused-ffn-key";
         const bool ffn =
             inputs == 2048 && outputs == 8192 && rows == 8192 &&
             is_op(1, Op::ReluSquared) &&
             nodes[node_index + 1].inputs[0] == node.output &&
-            std::filesystem::exists(root / "fused-ffn-key/config.json");
-        auto &gemv = session(root, ffn     ? "fused-ffn-key"
+            std::filesystem::exists(root / ffn_name / "config.json");
+        auto &gemv = session(root, ffn     ? ffn_name
                                    : array ? array_name
                                            : "gemv-" + std::to_string(k));
         for (size_t start = 0; start < outputs; start += rows) {
@@ -490,7 +505,21 @@ struct DecodeGraph::Impl {
               packed[pos] = w.data[node.transpose ? col * outputs + start + r
                                                   : (start + r) * inputs + col];
             }
-          auto weight = initialized(gemv, packed);
+          xdna::DeviceBuffer weight;
+          if (bf16 && array) {
+            std::vector<uint16_t> half(packed.size());
+            for (size_t i = 0; i < packed.size(); ++i) {
+              uint32_t bits;
+              std::memcpy(&bits, &packed[i], 4);
+              half[i] = static_cast<uint16_t>((bits + 0x7fff + ((bits >> 16) & 1)) >> 16);
+            }
+            weight = gemv.allocate(half.size() * 2);
+            weight.upload(half.data(), half.size() * 2);
+            resident_bytes += weight.size();
+            ++root_bos;
+          } else {
+            weight = initialized(gemv, packed);
+          }
           std::vector<xdna::DeviceBuffer> args{slice(a[0], 0, k), weight,
                                                slice(node.output, start, rows)};
           if (ffn)
@@ -809,7 +838,7 @@ struct DecodeGraph::Impl {
             ++layer.first;
             layer.second += ms;
           }
-          while (trace && node_index < nodes.size() &&
+          while ((trace || projection_trace) && node_index < nodes.size() &&
                  i + 1 == node_run_ends[node_index]) {
             const auto &node = nodes[node_index];
             auto &out = buffers[node.output].value;
@@ -820,7 +849,14 @@ struct DecodeGraph::Impl {
               device_buffers[node.inputs[0]].download(matrix->data(),
                                                       matrix->size() * 4);
             }
-            trace(node_index++, out, matrix);
+            if (projection_trace && node.kind == Kind::Linear && !node.transpose) {
+              Vector input(buffers[node.inputs[0]].size);
+              device_buffers[node.inputs[0]].download(input.data(), input.size() * 4);
+              projection_trace(node_index, input, *node.weight, out);
+            }
+            if (trace)
+              trace(node_index, out, matrix);
+            ++node_index;
           }
         } catch (const std::exception &e) {
           device_failed = true;
@@ -933,6 +969,9 @@ Vector DecodeGraph::replay_resident(int token) {
   return impl_->replay(token, unused, true);
 }
 void DecodeGraph::set_trace(Trace trace) { impl_->trace = std::move(trace); }
+void DecodeGraph::set_projection_trace(ProjectionTrace trace) {
+  impl_->projection_trace = std::move(trace);
+}
 GraphStats DecodeGraph::stats() const {
   return {impl_->nodes.size(),
           impl_->buffers.size(),
