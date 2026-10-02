@@ -434,6 +434,58 @@ struct DecodeGraph::Impl {
             break;
           ++count;
         }
+        if (bf16 && count == 1 && node_index + 5 < nodes.size() &&
+            std::filesystem::exists(root / "bf16-channel-mix/config.json")) {
+          const auto *n = &nodes[node_index];
+          if (n[2].kind != Kind::Linear || n[2].transpose ||
+              n[2].inputs[0] != n[1].output ||
+              n[2].weight->shape != std::vector<size_t>{8192, 2048} ||
+              n[3].kind != Kind::Element || n[3].op != Op::ReluSquared ||
+              n[3].inputs[0] != n[2].output || n[4].kind != Kind::Linear ||
+              n[4].transpose || n[4].inputs[0] != n[3].output ||
+              n[4].weight->shape != std::vector<size_t>{2048, 8192} ||
+              n[5].kind != Kind::Element || n[5].op != Op::Add ||
+              n[5].inputs[0] != a[0] || n[5].inputs[1] != n[4].output ||
+              !std::any_of(states.begin(), states.end(),
+                           [&](const StateBinding &s) { return s.old_ffn == old; }))
+            throw std::runtime_error("Unexpected ChannelMix topology");
+          check_optional("bf16-channel-mix", {{"schema_version", 1}, {"dtype", "bfloat16"},
+              {"channels", 2048}, {"hidden", 8192}, {"key_cores", 4},
+              {"value_cores", 4}, {"exact_fp32", false}});
+          auto &stage = session(root, "bf16-channel-mix");
+          Vector parameters(6144);
+          for (size_t j = 0; j < 3; ++j) {
+            const auto &value = read(j < 2 ? a[j + 1] : n[1].inputs[2]);
+            if (value.size() != 2048) throw std::runtime_error("Unexpected ChannelMix parameter shape");
+            std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
+          }
+          Vector packed(33554432);
+          size_t offset = 0;
+          for (const auto *weight : {n[2].weight, n[4].weight}) {
+            const size_t rows = weight->shape[0], k = weight->shape[1];
+            for (size_t r = 0; r < rows; ++r)
+              for (size_t c = 0; c < k; ++c) {
+                const size_t pos = ((r / 16) * (k / 256) + c / 256) * 4096 +
+                                   (r % 16) * 256 + c % 256;
+                packed[offset + pos] = weight->data[r * k + c];
+              }
+            offset += rows * k;
+          }
+          auto diagnostic = initialized(stage, Vector(22528, 0));
+          auto result = initialized(stage, Vector(4096, 0));
+          device_buffers[old] = diagnostic.slice(0, 2048 * 4);
+          device_buffers[n[0].output] = device_buffers[old];
+          device_buffers[n[1].output] = diagnostic.slice(4096 * 4, 2048 * 4);
+          device_buffers[n[2].output] = diagnostic.slice(6144 * 4, 8192 * 4);
+          device_buffers[n[3].output] = diagnostic.slice(14336 * 4, 8192 * 4);
+          device_buffers[n[4].output] = result.slice(0, 2048 * 4);
+          device_buffers[n[5].output] = result.slice(2048 * 4, 2048 * 4);
+          runs.push_back(stage.prepare({device_buffers[a[0]], initialized(stage, parameters),
+                                        initialized_bf16(stage, packed), diagnostic, result}));
+          for (size_t j = 0; j < 6; ++j) node_run_ends.push_back(runs.size());
+          node_index += 5;
+          continue;
+        }
         const auto name = "fused-norm-mix-" + std::to_string(count);
         if ((count == 1 || count == 6) && std::filesystem::exists(root / name / "config.json")) {
           check_optional(name, {{"schema_version", 1}, {"dtype", "float32"},

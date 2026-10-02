@@ -276,6 +276,12 @@ logits/state 最大误差0，平均约0.324→0.298秒/token。单核合并曾�
 
 同精度比较时可给 `rwkv-precision-benchmark` 设置
 `RWKV_XDNA_REFERENCE_BF16=1` 和 `RWKV_XDNA_REFERENCE_KERNEL_DIR=基线目录`。
+`--channel-mix`（需要 `--bf16 --native-fp32`）将 FFN 的 LayerNorm、shift/mix、
+key/ReLU²/value 和残差合为 11 核程序，170→146 runs/token。128 步同精度
+logits 和 1/8/32/128 步状态完全一致；该组串行 A/B 为 0.245→0.238 秒/token。
+见[ChannelMix 记录](../reports/rwkv7-channel-mix-2026-10-03.json)。
+另一项 attention 前段大融合仅改善约 0.3%，已回退，见[拒绝记录](../reports/rwkv7-attention-front-rejected-2026-10-03.json)。
+
 oracle的 `--bf16-all-projections` 使用BF16低秩参考；`--bf16-projections` 保留FP32低秩
 参考。这些均为CPU诊断计算，不参与生产推理。
 

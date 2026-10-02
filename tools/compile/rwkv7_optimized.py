@@ -48,16 +48,25 @@ p.add_argument(
     help="combine RKV and low-rank branches",
 )
 p.add_argument(
+    "--channel-mix", action="store_true", help="fuse complete native BF16 ChannelMix"
+)
+p.add_argument(
     "--native-fp32",
     action="store_true",
     help="experimental faster arithmetic; does not meet the legacy real-model pointwise tolerance",
 )
 a = p.parse_args()
 if (
-    a.bf16_rank or a.rkv or a.rank_batch or a.ffn_pipeline or a.full_head
+    a.bf16_rank
+    or a.rkv
+    or a.rank_batch
+    or a.ffn_pipeline
+    or a.full_head
+    or a.projection_residual
+    or a.channel_mix
 ) and not a.bf16:
     p.error(
-        "--bf16-rank, --rkv, --rank-batch, --ffn-pipeline, --full-head and --projection-residual require --bf16"
+        "--bf16-rank, --rkv, --rank-batch, --ffn-pipeline, --full-head, --projection-residual and --channel-mix require --bf16"
     )
 env = dict(
     os.environ,
@@ -67,6 +76,8 @@ env = dict(
 )
 if a.attention_projections and not (a.bf16 and a.recurrence_stage):
     p.error("--attention-projections requires --bf16 and --recurrence-stage")
+if a.channel_mix and not a.native_fp32:
+    p.error("--channel-mix requires --native-fp32")
 if a.norm_mix and not a.native_fp32:
     p.error("--norm-mix requires --native-fp32")
 commands = [] if a.skip_base else [("rwkv7_full.py", [])]
@@ -100,6 +111,8 @@ if a.recurrence_stage:
     commands.append(("rwkv7_recurrence_stage.py", []))
 if a.norm_mix:
     commands.append(("rwkv7_norm_mix.py", []))
+if a.channel_mix:
+    commands.append(("rwkv7_channel_mix.py", []))
 if a.ffn_pipeline:
     commands.append(("rwkv7_ffn_pipeline.py", []))
 if a.full_head:

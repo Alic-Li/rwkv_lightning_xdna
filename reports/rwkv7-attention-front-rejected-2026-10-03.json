@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-03",
+  "decision": "REJECTED: 0.32% measured latency improvement does not justify added topology, state aliasing and compile variants",
+  "baseline_commit": "6eef46e",
+  "attempt": "Native LayerNorm/mix plus RKV/low-rank in one 13-core program; 16 shim input streams; regrouped resident activation packets",
+  "builds": [
+    {
+      "arm": 0,
+      "bf16_projections": true,
+      "build_seconds": 3.966345231,
+      "kernels": "build/kernels/rwkv7-attention-projections",
+      "resident_bytes": 2917128192,
+      "runs": 170
+    },
+    {
+      "arm": 1,
+      "bf16_projections": true,
+      "build_seconds": 3.864699143,
+      "kernels": "build/kernels/rwkv7-attention-front",
+      "resident_bytes": 2917505024,
+      "runs": 146
+    }
+  ],
+  "summaries": [
+    {
+      "arm": 0,
+      "greedy_matches": 0,
+      "measured_tokens": 31,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 4.105284172990787,
+      "total_seconds": 7.551243395999999
+    },
+    {
+      "arm": 1,
+      "greedy_matches": 32,
+      "measured_tokens": 31,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 4.118602108962282,
+      "total_seconds": 7.526825651
+    }
+  ],
+  "max_logits_abs": 0,
+  "microbenchmark": [
+    "attention_front=3 oracle/replay/guards passed max_abs=1.66055e-06 min_us=1094.87 median_us=1126.57",
+    "attention_front=4 oracle/replay/guards passed max_abs=1.80025e-06 min_us=1216.15 median_us=1247.06"
+  ],
+  "correctness": "Unit CPU oracle, guards, shift replay, packet presimulation and 32 same-token logits/state exact passed",
+  "reason": "Meeting DMA capacity reduced first/second rank workers from 2/4 to 1/2. Larger packets and fewer rank workers cost enough to cancel almost all dispatch savings. This is an observed design tradeoff, not proof that all front-end fusion is impossible.",
+  "cleanup": "Compiler, device kernel, test and graph integration removed; detailed local experiment archived under ignored build/experiments/attention-front-rejected. Generic regroup probe retained because it passed and measures a reusable mechanism."
+}
