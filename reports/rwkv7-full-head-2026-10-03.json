@@ -1,0 +1,132 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "ea3e718",
+  "change": "Eight-core full 65536-row BF16 head, input vector held on each core across all output tiles",
+  "precision": "Same BF16 input rounding and FP32 reduction order",
+  "hardware_software_provenance": "Same XDNA2/XRT2.25/firmware1.0.0.63 as baseline report",
+  "builds": [
+    {
+      "arm": 0,
+      "bf16_projections": true,
+      "build_seconds": 3.656253333,
+      "kernels": "build/kernels/rwkv7-ffn-pipeline",
+      "resident_bytes": 2916710464,
+      "runs": 225
+    },
+    {
+      "arm": 1,
+      "bf16_projections": true,
+      "build_seconds": 3.513780518,
+      "kernels": "build/kernels/rwkv7-head-full",
+      "resident_bytes": 2916710464,
+      "runs": 218
+    }
+  ],
+  "summaries": [
+    {
+      "arm": 0,
+      "greedy_matches": 0,
+      "measured_tokens": 31,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 3.710404644842909,
+      "total_seconds": 8.354883892
+    },
+    {
+      "arm": 1,
+      "greedy_matches": 32,
+      "measured_tokens": 31,
+      "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+      "tokens_per_second": 3.713314828560727,
+      "total_seconds": 8.348336037000001
+    }
+  ],
+  "max_logits_abs": 0,
+  "state_checkpoints": [
+    {
+      "arm": 1,
+      "greedy": 59,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.271223066,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 1
+    },
+    {
+      "arm": 1,
+      "greedy": 22590,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.267510524,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 8
+    },
+    {
+      "arm": 1,
+      "greedy": 52095,
+      "greedy_matches": true,
+      "logits_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "seconds": 0.267238515,
+      "state_error": {
+        "cosine": 1.0,
+        "max_abs": 0.0,
+        "mean_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "step": 32
+    }
+  ],
+  "microbenchmark": {
+    "accumulator": "fp32",
+    "case": "bf16-array-gemv-2048-65536",
+    "cosine": 0.9999999999999731,
+    "effective_gflops": 40.56908551314248,
+    "effective_weight_GBps": 40.56908551314248,
+    "max_abs": 5.859765224158764e-07,
+    "max_relative": 0.0022465970662085373,
+    "max_us": 7415.888,
+    "mean_abs": 6.303296215559064e-08,
+    "mean_submit_us": 12.559733333333332,
+    "mean_wait_us": 6995.901866666667,
+    "median_us": 7024.9800000000005,
+    "min_us": 6616.749,
+    "precision": "bf16",
+    "repetitions": 30,
+    "status": "passed",
+    "timing_scope": "host wall-clock, prepared run; includes DMA and scheduling",
+    "warmup": 20
+  },
+  "validation": [
+    "Independent CPU oracle and buffer/input/weight guards using bench_xdna_fp16",
+    "Depth-two full 512-row-tile stripe presimulation",
+    "32 same-token full-model logits/state exact; small latency gain"
+  ],
+  "constraints": [
+    "Original repeated-input DMA for 512 repeats exceeds size-3 maximum 64; decomposing repeats introduces an unsupported zero stride in dimension 2. Resident input avoids both descriptor constraints.",
+    "Bandwidth is effective weight bytes / host wall time; not a hardware DRAM counter."
+  ]
+}

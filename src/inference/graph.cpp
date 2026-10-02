@@ -750,7 +750,12 @@ struct DecodeGraph::Impl {
         size_t k = ((inputs + 255) / 256) * 256;
         auto array_name = "array-gemv-" + std::to_string(k);
         size_t array_rows = 2048;
-        if (outputs >= 8192 && outputs % 8192 == 0 &&
+        const bool full_head = bf16 && k == 2048 && outputs == 65536 &&
+            std::filesystem::exists(root / "bf16-array-gemv-2048-65536/config.json");
+        if (full_head) {
+          array_name += "-65536";
+          array_rows = 65536;
+        } else if (outputs >= 8192 && outputs % 8192 == 0 &&
             std::filesystem::exists(root / (array_name + "-8192") /
                                     "config.json")) {
           array_name += "-8192";
@@ -765,7 +770,7 @@ struct DecodeGraph::Impl {
           array_name = array32_name;
         const bool array =
             outputs >= 2048 &&
-            std::filesystem::exists(root / array_name / "config.json");
+            (full_head || std::filesystem::exists(root / array_name / "config.json"));
         const size_t rows = array ? array_rows : 256;
         if (bf16 && array)
           array_name = "bf16-" + array_name;

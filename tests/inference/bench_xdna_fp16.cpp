@@ -19,10 +19,12 @@ int main(int argc, char **argv) {
       throw std::runtime_error("precision must be fp32 or bf16");
     const bool bf = precision == "bf16";
     const size_t k = std::stoul(argv[3]), rows = std::stoul(argv[4]);
-    if ((k != 256 && k != 2048 && k != 8192) || (rows != 2048 && rows != 8192))
+    if ((k != 256 && k != 2048 && k != 8192) ||
+        (rows != 2048 && rows != 8192 && rows != 65536))
       throw std::runtime_error("unsupported shape");
     const auto name = (bf ? "bf16-array-gemv-" : "array-gemv-") +
-                      std::to_string(k) + (rows == 8192 ? "-8192" : "");
+                      std::to_string(k) +
+                      (rows == 2048 ? "" : "-" + std::to_string(rows));
     const auto path = std::filesystem::path(argv[1]) / name;
     Session s(path / "design.xclbin", path / "instructions.bin");
     Guarded x(s, k * 4), w(s, rows * k * (bf ? 2 : 4)), y(s, rows * 4);

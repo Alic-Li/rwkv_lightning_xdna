@@ -35,13 +35,20 @@ p.add_argument(
     "--ffn-pipeline", action="store_true", help="fuse BF16 key/ReLU^2/value/residual"
 )
 p.add_argument(
+    "--full-head", action="store_true", help="single-run BF16 vocabulary projection"
+)
+p.add_argument(
     "--native-fp32",
     action="store_true",
     help="experimental faster arithmetic; does not meet the legacy real-model pointwise tolerance",
 )
 a = p.parse_args()
-if (a.bf16_rank or a.rkv or a.rank_batch or a.ffn_pipeline) and not a.bf16:
-    p.error("--bf16-rank, --rkv, --rank-batch and --ffn-pipeline require --bf16")
+if (
+    a.bf16_rank or a.rkv or a.rank_batch or a.ffn_pipeline or a.full_head
+) and not a.bf16:
+    p.error(
+        "--bf16-rank, --rkv, --rank-batch, --ffn-pipeline and --full-head require --bf16"
+    )
 env = dict(
     os.environ,
     MLIR_AIE_KERNEL_SOURCES=str(ROOT / "third_party/mlir-aie"),
@@ -83,6 +90,8 @@ if a.norm_mix:
     commands.append(("rwkv7_norm_mix.py", []))
 if a.ffn_pipeline:
     commands.append(("rwkv7_ffn_pipeline.py", []))
+if a.full_head:
+    commands.append(("rwkv7_head.py", []))
 for script, args in commands:
     subprocess.run(
         [sys.executable, str(ROOT / "tools/compile" / script), *args],
