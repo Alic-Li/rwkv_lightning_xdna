@@ -1,5 +1,5 @@
 {
-  "local_time": "2026-10-02T20:43:21.772709+08:00",
+  "local_time": "2026-10-02T21:14:43.174603+08:00",
   "kernel": "7.0.0-38-generic",
   "xrt_examine": "System Configuration\n  OS Name              : Linux\n  Release              : 7.0.0-38-generic\n  Machine              : x86_64\n  CPU Cores            : 16\n  Memory               : 31198 MB\n  Distribution         : Ubuntu 24.04.5 LTS\n  GLIBC                : 2.39\n  Model                : YILONG Series\n  BIOS Vendor          : American Megatrends International, LLC.\n  BIOS Version         : N.1.21MRO30\n  Processor            : AMD Ryzen AI 7 H 350 w/ Radeon 860M\n\nXRT\n  Version              : 2.25.00\n  virtio-pci Version   : 7.0.0-38-generic\n  amdxdna Version      : 7.0.0-38-generic\n  NPU Firmware Version : 1.0.0.63\n\nDevice(s) Present\n|BDF             |Name          |Architecture  |Topology  |\n|----------------|--------------|--------------|----------|\n|[0000:66:00.1]  |RyzenAI-npu6  |aie2p         |6x8       |\n\n\n",
   "driver_workaround": "amdxdna force_cmdlist=N; /etc/modprobe.d/rwkv-lightning-xdna.conf",

@@ -214,7 +214,7 @@ export PATH="$PWD/.venv/bin:$PATH"
 
 ```bash
 uv venv --allow-existing .venv --python /usr/bin/python3
-uv pip install --python .venv/bin/python --index-strategy unsafe-best-match -r requirements-build.lock
+uv pip sync --python .venv/bin/python --index-strategy unsafe-best-match requirements-build.lock
 export PATH="$PWD/.venv/bin:$PATH"
 cmake --preset dev
 cmake --build --preset dev
@@ -222,6 +222,7 @@ cmake --build --preset dev
 
 依赖管理依据：[uv 环境选择](https://docs.astral.sh/uv/pip/environments/)、
 [uv requirements 锁定流程](https://docs.astral.sh/uv/pip/compile/)。
+`uv pip sync` 同步精确依赖集合，并移除旧环境中不再需要的包（包括原来的 amd/IRON 包）。
 本项目 `.lock` 是固定版本的 requirements 文本，不是 `uv.lock` 项目模式文件。
 原始依赖范围位于 `requirements-build.txt`，实际复现使用 `requirements-build.lock`。
 

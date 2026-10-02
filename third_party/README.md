@@ -3,17 +3,15 @@
 | Directory | Source | Version | License |
 |---|---|---|---|
 | mlir-aie | Xilinx/mlir-aie wheel's aie_kernels and aie_runtime_lib | 1.4.4.dev53+gd53582d | Apache-2.0 WITH LLVM-exception |
-| iron | Local amd/IRON source checkout | 3fc9a6084f934108c5c4982eb6ea39a6fcc55b67 | Apache-2.0 |
 | kernel_tests | Xilinx/mlir-aie test/python/npu | d53582d | Apache-2.0 WITH LLVM-exception |
 | nlohmann | nlohmann/json single_include | v3.12.0 | MIT |
 
-The actual C++ kernels are distributed in the MLIR-AIE wheel, not in IRON's
-Python operator directories. Initial import used shell `cp -a` from:
+The C++ kernels are copied from the pinned MLIR-AIE wheel. No amd/IRON
+source snapshot or Python package is required. Initial import used shell `cp -a` from:
 
 ```text
 ../IRON/ironenv/lib/python3.12/site-packages/mlir_aie/include/aie_kernels
 ../IRON/ironenv/lib/python3.12/site-packages/mlir_aie/aie_runtime_lib
-../IRON/iron
 ```
 
 These are ordinary files copied into this Git repository, not symlinks or Git

@@ -20,7 +20,6 @@ src/runtime/             XRT 会话、设备缓冲区及同步调用
 apps/xdna_run.cpp        独立 C++ 测试执行器，无 Python 运行依赖
 kernels/rwkv/            后续 RWKV 专用 AIE C++ 内核
 third_party/mlir-aie/    复制的完整官方内核与 LUT/运行时辅助源码
-third_party/iron/        固定版本 IRON 设计与编译接口
 third_party/kernel_tests/ 同版本官方测试配置和级联设计
 third_party/nlohmann/    固定版本 JSON 单头文件及许可证
 third_party/SOURCES.json 来源版本与内核文件 SHA-256
@@ -49,7 +48,8 @@ export PATH="$PWD/.venv/bin:$PATH"
 
 Python 由 uv 管理；构建依赖固定在 `requirements-build.lock`。
 `requirements-build.txt` 保留直接依赖配置，升级时显式更新 lock。
-项目不依赖相邻的 `../IRON` 或它的虚拟环境。
+项目直接编译 `third_party/mlir-aie` 中的 C++ 内核，不依赖 amd/IRON 包。
+设计生成使用固定版本 MLIR-AIE 提供的 `aie.iron` API；它属于 MLIR-AIE 编译工具链。
 
 ## 构建与运行
 

@@ -114,10 +114,6 @@
       "aie_runtime_lib/AIE2P/aiesim/genwrapper_for_ps.cpp": "63414c16e877a9fefb9479c10197ea6c64fb1a25d891d6f4617836c13a2f2c2b"
     }
   },
-  "iron": {
-    "commit": "3fc9a6084f934108c5c4982eb6ea39a6fcc55b67",
-    "source": "https://github.com/amd/IRON"
-  },
   "nlohmann_json": {
     "version": "3.12.0",
     "source": "https://github.com/nlohmann/json",

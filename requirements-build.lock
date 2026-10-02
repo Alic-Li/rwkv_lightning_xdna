@@ -16,7 +16,6 @@ execnet==2.1.2
 filelock==4.0.9
 fsspec==2026.9.0
 iniconfig==2.3.0
--e ./third_party/iron
 jinja2==3.1.6
 license-expression==30.4.4
 llvm-aie==22.0.0.2026091701+773413fb

@@ -22,9 +22,6 @@ torch==2.13.0+cpu
 pytest
 pytest-xdist
 
-# Install the local python code as the package "iron"
--e ./third_party/iron
-
 cmake==4.1.0
 ninja==1.13.0
 clang-format==21.1.8
