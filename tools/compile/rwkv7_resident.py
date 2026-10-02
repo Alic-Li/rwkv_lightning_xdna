@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import aie.iron as iron
 from aie.iron import In, Out, InOut, ObjectFifo, Worker, Runtime, Program
-from rwkv7_full import ROOT, typ, external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
 
 
 def ops_design(source):
@@ -99,9 +99,7 @@ def recurrent(state: InOut, vectors: In, y: Out):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output", type=Path, default=ROOT / "build/kernels/rwkv7-full"
-    )
+    parser.add_argument("--output", type=Path, default=KERNEL_ROOT)
     args = parser.parse_args()
     for name, design in [
         ("resident-ops", ops),

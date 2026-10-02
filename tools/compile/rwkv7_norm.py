@@ -5,7 +5,7 @@ import json
 import os
 import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
-from rwkv7_full import ROOT, typ, external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
 
 os.environ["MLIR_AIE_KERNEL_SOURCES"] = str(ROOT / "third_party/mlir-aie")
 
@@ -38,7 +38,7 @@ def design(x: In, w: In, b: In, y: Out):
 
 
 if __name__ == "__main__":
-    p = ROOT / "build/kernels/rwkv7-full/upstream-norm"
+    p = KERNEL_ROOT / "upstream-norm"
     p.mkdir(parents=True, exist_ok=True)
     design.compile(p / "design.xclbin", p / "instructions.bin")
     (p / "config.json").write_text(

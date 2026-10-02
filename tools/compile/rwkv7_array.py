@@ -9,7 +9,7 @@ import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, typ, external as base_external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external as base_external
 
 
 def external(*args):
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     p.add_argument("--k", type=int, nargs="+", default=[256, 2048, 8192])
     p.add_argument("--rows", type=int, default=2048)
     p.add_argument("--bf16", action="store_true")
-    p.add_argument("--output", type=str, default=str(ROOT / "build/kernels/rwkv7-full"))
+    p.add_argument("--output", type=str, default=str(KERNEL_ROOT))
     args = p.parse_args()
     from pathlib import Path
 

@@ -2,38 +2,42 @@
 """Low-rank projection/activation/projection pipeline with on-chip broadcast."""
 
 import json
+import argparse
 import os
 import numpy as np
+from ml_dtypes import bfloat16
 import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, typ, external as base_external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external as base_external
 
 
 def external(*args):
     return base_external(*args, optimization="-O3")
 
 
-def rank(activation):
+def rank(activation, bf16=False):
+    wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]] if bf16 else typ(n)
+
     @iron.jit
     def design(x: In, w1: In, w2: In, raw: Out, activated: Out, y: Out):
         fn = external(
             "rwkv7_rank_tile64",
-            "rank_fp32.cc",
-            [typ(256), typ(4096), typ(64), np.int32],
+            "rank_bf16.cc" if bf16 else "rank_fp32.cc",
+            [typ(256), wt(4096), typ(64), np.int32],
         )
         zero = fn.object_file.bind("rwkv7_rank_zero64", [typ(64)])
         act = fn.object_file.bind("rwkv7_rank_activate64", [typ(64), typ(64), np.int32])
-        mul = fn.object_file.bind("rwkv7_gemv_tile", [typ(256), typ(4096), typ(16)])
+        mul = fn.object_file.bind("rwkv7_gemv_tile", [typ(256), wt(4096), typ(16)])
         init = fn.object_file.bind("rwkv7_zero", [typ(16)])
         xs = [ObjectFifo(typ(256), name=f"input{i}", depth=1) for i in range(4)]
-        ws1 = [ObjectFifo(typ(4096), name=f"weight1_{i}", depth=1) for i in range(4)]
+        ws1 = [ObjectFifo(wt(4096), name=f"weight1_{i}", depth=1) for i in range(4)]
         rawfifo = ObjectFifo(typ(256), name="raw", depth=1)
         active = ObjectFifo(typ(256), name="active", depth=1)
         raws = rawfifo.prod().join([0, 64, 128, 192], obj_types=[typ(64)] * 4)
         acts = active.prod().join([0, 64, 128, 192], obj_types=[typ(64)] * 4)
-        ws = [ObjectFifo(typ(4096), name=f"weight2_{i}", depth=1) for i in range(8)]
+        ws = [ObjectFifo(wt(4096), name=f"weight2_{i}", depth=1) for i in range(8)]
         ys = [ObjectFifo(typ(16), name=f"out{i}", depth=1) for i in range(8)]
 
         def first(x, w, h, activated, f, z, a):
@@ -114,8 +118,8 @@ def rank(activation):
                 seq,
                 [
                     typ(2048),
-                    typ(256 * 2048),
-                    typ(2048 * 256),
+                    wt(256 * 2048),
+                    wt(2048 * 256),
                     typ(256),
                     typ(256),
                     typ(2048),
@@ -134,15 +138,18 @@ def rank(activation):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bf16", action="store_true")
+    args = parser.parse_args()
     for a in [0, 1, 2]:
-        p = ROOT / f"build/kernels/rwkv7-full/fused-rank-{a}"
+        p = KERNEL_ROOT / (("bf16-" if args.bf16 else "") + f"fused-rank-{a}")
         p.mkdir(parents=True, exist_ok=True)
-        rank(a).compile(p / "design.xclbin", p / "instructions.bin")
+        rank(a, bf16=args.bf16).compile(p / "design.xclbin", p / "instructions.bin")
         (p / "config.json").write_text(
             json.dumps(
                 dict(
                     schema_version=1,
-                    dtype="float32",
+                    dtype="bfloat16" if args.bf16 else "float32",
                     exact_fp32=os.environ.get("RWKV_XDNA_EXACT", "1") == "1",
                     channels=2048,
                     rank=256,

@@ -7,7 +7,7 @@ import aie.iron as iron
 from aie.iron import In, InOut, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, typ, external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -122,7 +122,7 @@ if __name__ == "__main__":
             dict(schema_version=1, dtype="float32", count=2048, state_update=True),
         ),
     ]:
-        p = ROOT / "build/kernels/rwkv7-full" / name
+        p = KERNEL_ROOT / name
         p.mkdir(parents=True, exist_ok=True)
         program.compile(p / "design.xclbin", p / "instructions.bin")
         (p / "config.json").write_text(

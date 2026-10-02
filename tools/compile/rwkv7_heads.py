@@ -7,7 +7,7 @@ import aie.iron as iron
 from aie.iron import In, InOut, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, typ, external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -73,7 +73,7 @@ def design(state: InOut, vectors: In, y: Out):
 
 
 if __name__ == "__main__":
-    p = ROOT / "build/kernels/rwkv7-full/array-decode"
+    p = KERNEL_ROOT / "array-decode"
     p.mkdir(parents=True, exist_ok=True)
     design.compile(p / "design.xclbin", p / "instructions.bin")
     (p / "config.json").write_text(

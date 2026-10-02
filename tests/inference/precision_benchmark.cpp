@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
       return t == 1 || t == 8 || t == 32 || t == 128;
     };
     for (int arm = 0; arm < 2; ++arm) {
-      if (arm)
+      if (arm || std::getenv("RWKV_XDNA_REFERENCE_BF16"))
         setenv("RWKV_XDNA_BF16", "1", 1);
       else
         unsetenv("RWKV_XDNA_BF16");
@@ -81,6 +81,8 @@ int main(int argc, char **argv) {
                   {"build_seconds",
                    std::chrono::duration<double>(Clock::now() - begin).count()},
                   {"kernels", kernel_root},
+                  {"bf16_projections",
+                   std::getenv("RWKV_XDNA_BF16") != nullptr},
                   {"runs", stats.persistent_runs},
                   {"resident_bytes", stats.resident_bytes}})
                  .dump()
@@ -122,18 +124,17 @@ int main(int argc, char **argv) {
         }
         std::cout << row.dump() << std::endl;
       }
-      std::cout
-          << nlohmann::json(
-                 {{"arm", arm},
-                  {"measured_tokens", steps - 1},
-                  {"total_seconds", total},
-                  {"tokens_per_second", steps > 1 ? (steps - 1) / total : 0},
-                  {"greedy_matches", greedy_matches},
-                  {"scope", "FP32 reference versus BF16 main projections; FP32 "
-                            "low-rank, state and nonlinear arithmetic; drift "
-                            "measurement, not a tolerance pass"}})
-                 .dump()
-          << std::endl;
+      std::cout << nlohmann::json(
+                       {{"arm", arm},
+                        {"measured_tokens", steps - 1},
+                        {"total_seconds", total},
+                        {"tokens_per_second",
+                         steps > 1 ? (steps - 1) / total : 0},
+                        {"greedy_matches", greedy_matches},
+                        {"scope", "Identical-token cross-arm drift "
+                                  "measurement; not a tolerance pass"}})
+                       .dump()
+                << std::endl;
     }
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

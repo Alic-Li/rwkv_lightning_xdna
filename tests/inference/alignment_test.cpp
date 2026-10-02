@@ -14,6 +14,7 @@ using namespace rwkv::inference;
 // projections remain FP32. Double scalar dots do not mirror the AIE tree.
 class Bf16Reference : public RecurrentBackend {
   std::unique_ptr<RecurrentBackend> cpu = cpu_backend();
+  bool low_rank;
   static float rounded(float x) {
     uint32_t u;
     std::memcpy(&u, &x, 4);
@@ -23,17 +24,20 @@ class Bf16Reference : public RecurrentBackend {
   }
 
 public:
+  explicit Bf16Reference(bool low = false) : low_rank(low) {}
   Vector linear(const Vector &x, const Tensor &w, bool transposed) override {
-    if (transposed)
+    if (transposed && !low_rank)
       return cpu->linear(x, w, true);
-    Vector y(w.shape[0]), input(x);
+    Vector y(w.shape[transposed ? 1 : 0]), input(x);
     for (auto &f : input)
       f = rounded(f);
 #pragma omp parallel for
     for (size_t i = 0; i < y.size(); ++i) {
       double sum = 0;
       for (size_t j = 0; j < x.size(); ++j)
-        sum += double(input[j]) * rounded(w.data[i * x.size() + j]);
+        sum +=
+            double(input[j]) *
+            rounded(w.data[transposed ? j * y.size() + i : i * x.size() + j]);
       y[i] = float(sum);
     }
     return y;
@@ -55,20 +59,22 @@ int main(int argc, char **argv) {
     auto cpu = cpu_backend(), npu = full_npu_backend(argv[2]);
     if (argc == 4) {
       if (std::string(argv[3]) != "--bf16" &&
-          std::string(argv[3]) != "--bf16-projections")
+          std::string(argv[3]) != "--bf16-projections" &&
+          std::string(argv[3]) != "--bf16-all-projections")
         throw std::runtime_error("unknown option");
       setenv("RWKV_XDNA_BF16", "1", 1);
-      cpu = std::make_unique<Bf16Reference>();
+      cpu = std::make_unique<Bf16Reference>(std::string(argv[3]) ==
+                                            "--bf16-all-projections");
     }
     Model model(w, *cpu);
     DecodeGraph reference(w, *cpu), actual(w, *npu, argv[2]);
-    if (argc == 4 && std::string(argv[3]) == "--bf16-projections") {
+    if (argc == 4 && std::string(argv[3]) != "--bf16") {
       size_t checked = 0;
       double worst = 0;
       actual.set_projection_trace([&](size_t node, const Vector &input,
-                                      const Tensor &weight,
+                                      const Tensor &weight, bool transposed,
                                       const Vector &output) {
-        auto expected = cpu->linear(input, weight, false);
+        auto expected = cpu->linear(input, weight, transposed);
         for (size_t i = 0; i < output.size(); ++i) {
           double e = std::abs(double(output[i]) - expected[i]);
           worst = std::max(worst, e);

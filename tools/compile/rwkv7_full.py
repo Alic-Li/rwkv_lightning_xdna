@@ -15,6 +15,9 @@ from aie.utils import set_current_device
 from rwkv7 import design as decode
 
 ROOT = Path(__file__).resolve().parents[2]
+KERNEL_ROOT = Path(
+    os.environ.get("RWKV_XDNA_KERNEL_DIR", ROOT / "build/kernels/rwkv7-full")
+)
 set_current_device(NPU2())
 
 
@@ -147,7 +150,7 @@ def gemv(k):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--output", type=Path, default=ROOT / "build/kernels/rwkv7-full")
+    p.add_argument("--output", type=Path, default=KERNEL_ROOT)
     p.add_argument("--k", type=int, nargs="+", default=[256, 2048, 8192])
     args = p.parse_args()
     for name, design in [("ops", ops), ("prefill", prefill), ("decode", decode)] + [

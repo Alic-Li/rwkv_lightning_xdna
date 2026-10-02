@@ -59,14 +59,32 @@ struct DecodeGraph::Impl {
   xdna::Session &session(const std::filesystem::path &root,
                          const std::string &name) {
     auto &s = sessions[name];
-    if (!s)
-      s = std::make_unique<xdna::Session>(root / name / "design.xclbin",
-                                          root / name / "instructions.bin");
+    if (!s) {
+      try {
+        s = std::make_unique<xdna::Session>(root / name / "design.xclbin",
+                                           root / name / "instructions.bin");
+      } catch (const std::exception &e) {
+        throw std::runtime_error("Create resident session " + name + ": " + e.what());
+      }
+    }
     return *s;
   }
   xdna::DeviceBuffer initialized(xdna::Session &s, const Vector &v) {
     auto b = s.allocate(v.size() * sizeof(float));
     b.upload(v.data(), v.size() * sizeof(float));
+    resident_bytes += b.size();
+    ++root_bos;
+    return b;
+  }
+  xdna::DeviceBuffer initialized_bf16(xdna::Session &s, const Vector &v) {
+    std::vector<uint16_t> half(v.size());
+    for (size_t i = 0; i < v.size(); ++i) {
+      uint32_t bits;
+      std::memcpy(&bits, &v[i], 4);
+      half[i] = static_cast<uint16_t>((bits + 0x7fff + ((bits >> 16) & 1)) >> 16);
+    }
+    auto b = s.allocate(half.size() * 2);
+    b.upload(half.data(), half.size() * 2);
     resident_bytes += b.size();
     ++root_bos;
     return b;
@@ -204,6 +222,7 @@ struct DecodeGraph::Impl {
       }
     }
     std::map<size_t, std::vector<xdna::DeviceBuffer>> stage_args;
+    std::map<Id, xdna::DeviceBuffer> mixed_inputs;
     auto pack_vectors = [&](const std::vector<Id> &ids, size_t slots) {
       Vector value(slots * 2048, 0);
       for (size_t i = 0; i < ids.size(); ++i) {
@@ -294,6 +313,37 @@ struct DecodeGraph::Impl {
     for (size_t node_index = 0; node_index < nodes.size(); ++node_index) {
       const auto &node = nodes[node_index];
       const auto &a = node.inputs;
+      if (bf16 && node.kind == Kind::Linear && !node.transpose &&
+          mixed_inputs.count(a[0]) && node_index + 2 < nodes.size() &&
+          std::filesystem::exists(root / "bf16-rkv/config.json")) {
+        check_optional("bf16-rkv", {{"schema_version", 1}, {"dtype", "bfloat16"},
+                                     {"channels", 2048}, {"cores", 8},
+                                     {"layout", "worker_projection_row_tile_k_tile"},
+                                     {"input_slots", {0, 2, 3}}});
+        auto &rkv = session(root, "bf16-rkv");
+        Vector packed(3 * 2048 * 2048);
+        std::vector<xdna::DeviceBuffer> args{mixed_inputs.at(a[0])};
+        for (size_t projection = 0; projection < 3; ++projection) {
+          const auto &n = nodes[node_index + projection];
+          if (n.kind != Kind::Linear || n.transpose ||
+              n.weight->shape != std::vector<size_t>{2048, 2048})
+            throw std::runtime_error("Unexpected RKV topology");
+          for (size_t row = 0; row < 2048; ++row)
+            for (size_t col = 0; col < 2048; ++col) {
+              size_t pos = ((row / 256 * 3 + projection) * 16 + (row % 256) / 16) * 8 * 4096 +
+                           (col / 256) * 4096 + (row % 16) * 256 + col % 256;
+              packed[pos] = n.weight->data[row * 2048 + col];
+            }
+        }
+        args.push_back(initialized_bf16(rkv, packed));
+        for (size_t p = 0; p < 3; ++p)
+          args.push_back(device_buffers[nodes[node_index + p].output]);
+        runs.push_back(rkv.prepare(args));
+        for (size_t p = 0; p < 3; ++p)
+          node_run_ends.push_back(runs.size());
+        node_index += 2;
+        continue;
+      }
       if (node.kind == Kind::Linear && node.transpose &&
           buffers[a[0]].size == 2048 && buffers[node.output].size <= 256) {
         size_t last = node_index + 1;
@@ -305,7 +355,14 @@ struct DecodeGraph::Impl {
           activation = nodes[last].op == Op::Tanh ? 1 : 2;
           ++last;
         }
-        const auto name = "fused-rank-" + std::to_string(activation);
+        auto name = "fused-rank-" + std::to_string(activation);
+        const bool bf16_rank = bf16 && std::filesystem::exists(root / ("bf16-" + name) / "config.json");
+        if (bf16_rank) {
+          name = "bf16-" + name;
+          check_optional(name, {{"schema_version", 1}, {"dtype", "bfloat16"},
+                                {"channels", 2048}, {"rank", 256},
+                                {"activation", activation}, {"exact_fp32", exact_fp32}});
+        }
         if (last < nodes.size() && nodes[last].kind == Kind::Linear &&
             nodes[last].transpose &&
             nodes[last].inputs[0] == nodes[last - 1].output &&
@@ -322,7 +379,7 @@ struct DecodeGraph::Impl {
                     (row % 16) * 256 + col % 256;
                 v[pos] = w.data[col * out + row];
               }
-            return initialized(rank, v);
+            return bf16_rank ? initialized_bf16(rank, v) : initialized(rank, v);
           };
           const size_t hidden = buffers[node.output].size;
           auto w1 = pack(*node.weight, 2048, hidden, 2048, 256);
@@ -392,6 +449,7 @@ struct DecodeGraph::Impl {
             std::copy(v.begin(), v.end(), coeff.begin() + j * 2048);
           }
           auto mixed = initialized(mix, Vector(6 * 2048, 0));
+          mixed_inputs.emplace(nodes[node_index].output, mixed);
           for (size_t j = 0; j < 6; ++j)
             device_buffers[nodes[node_index + j].output] =
                 mixed.slice(j * 2048 * 4, 2048 * 4);
@@ -505,21 +563,8 @@ struct DecodeGraph::Impl {
               packed[pos] = w.data[node.transpose ? col * outputs + start + r
                                                   : (start + r) * inputs + col];
             }
-          xdna::DeviceBuffer weight;
-          if (bf16 && array) {
-            std::vector<uint16_t> half(packed.size());
-            for (size_t i = 0; i < packed.size(); ++i) {
-              uint32_t bits;
-              std::memcpy(&bits, &packed[i], 4);
-              half[i] = static_cast<uint16_t>((bits + 0x7fff + ((bits >> 16) & 1)) >> 16);
-            }
-            weight = gemv.allocate(half.size() * 2);
-            weight.upload(half.data(), half.size() * 2);
-            resident_bytes += weight.size();
-            ++root_bos;
-          } else {
-            weight = initialized(gemv, packed);
-          }
+          auto weight = bf16 && array ? initialized_bf16(gemv, packed)
+                                      : initialized(gemv, packed);
           std::vector<xdna::DeviceBuffer> args{slice(a[0], 0, k), weight,
                                                slice(node.output, start, rows)};
           if (ffn)
@@ -849,10 +894,10 @@ struct DecodeGraph::Impl {
               device_buffers[node.inputs[0]].download(matrix->data(),
                                                       matrix->size() * 4);
             }
-            if (projection_trace && node.kind == Kind::Linear && !node.transpose) {
+            if (projection_trace && node.kind == Kind::Linear) {
               Vector input(buffers[node.inputs[0]].size);
               device_buffers[node.inputs[0]].download(input.data(), input.size() * 4);
-              projection_trace(node_index, input, *node.weight, out);
+              projection_trace(node_index, input, *node.weight, node.transpose, out);
             }
             if (trace)
               trace(node_index, out, matrix);

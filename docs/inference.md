@@ -225,6 +225,29 @@ state相对L2约0.00145；不能把它写成自由生成文本完全相同。
 `set_projection_trace` 会读回实际投影输入/输出，仅用于 oracle；其诊断传输和CPU
 点积不属于生产推理路径。性能测试必须关闭此 hook。
 
+后续实验可在独立目录编译，避免覆盖严格基线：
+
+```bash
+.venv/bin/python tools/compile/rwkv7_optimized.py --native-fp32 --bf16 \
+  --bf16-rank --rkv --output build/kernels/rwkv7-bf16
+RWKV_XDNA_BF16=1 ./build/host/rwkv-cli --model "$MODEL" \
+  --kernel-dir build/kernels/rwkv7-bf16 --decode resident --prefill decode \
+  --prompt 'The capital of France is' --max-tokens 32 --top-k 1
+```
+
+`--native-fp32` 仍为显式数值契约切换。该路径复用向量WKV、官方FP32 LayerNorm和
+原生FP32辅助，BF16主投影下自然语言128步平均约0.419秒/token，末步state相对L2约
+0.00151；与严格FP32参考的126/128次argmax相同。没有改变旧FP32验收阈值。
+`--bf16-rank` 将低秩矩阵也改为BF16，并扩展实际输入oracle到1340次投影；
+`--rkv` 合并三路投影，runs从488到440。32步同精度对照logits/state最大误差0，
+平均约0.396→0.392秒/token（约0.9%，收益小，不能用run降幅代替延迟收益）。
+测量与未完成的长序列验收见[融合记录](../reports/rwkv7-bf16-fusion-2026-10-03.json)。
+
+同精度比较时可给 `rwkv-precision-benchmark` 设置
+`RWKV_XDNA_REFERENCE_BF16=1` 和 `RWKV_XDNA_REFERENCE_KERNEL_DIR=基线目录`。
+oracle的 `--bf16-all-projections` 使用BF16低秩参考；`--bf16-projections` 保留FP32低秩
+参考。这些均为CPU诊断计算，不参与生产推理。
+
 ## Prefill：独立序列路径
 
 `Model::prefill` 按最多 16 token 的 chunk 分层执行：先准备一层的投影和门控序列，

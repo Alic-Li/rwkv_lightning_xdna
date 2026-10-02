@@ -9,7 +9,7 @@ import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, typ, external as base_external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external as base_external
 
 
 def external(*args):
@@ -100,11 +100,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bf16", action="store_true")
     args = parser.parse_args()
-    path = (
-        ROOT
-        / "build/kernels/rwkv7-full"
-        / ("bf16-fused-ffn-key" if args.bf16 else "fused-ffn-key")
-    )
+    path = KERNEL_ROOT / ("bf16-fused-ffn-key" if args.bf16 else "fused-ffn-key")
     path.mkdir(parents=True, exist_ok=True)
     ffn(bf16=args.bf16).compile(path / "design.xclbin", path / "instructions.bin")
     (path / "config.json").write_text(

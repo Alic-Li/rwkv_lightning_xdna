@@ -7,7 +7,7 @@ import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, typ, external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
 
 
 def gemv(k, rows):
@@ -100,10 +100,8 @@ if __name__ == "__main__":
     p.add_argument("--rows", type=int, default=2048)
     a = p.parse_args()
     for k in a.k:
-        path = (
-            ROOT
-            / "build/kernels/rwkv7-full"
-            / (f"array32-gemv-{k}" + (f"-{a.rows}" if a.rows != 2048 else ""))
+        path = KERNEL_ROOT / (
+            f"array32-gemv-{k}" + (f"-{a.rows}" if a.rows != 2048 else "")
         )
         path.mkdir(parents=True, exist_ok=True)
         gemv(k, a.rows).compile(path / "design.xclbin", path / "instructions.bin")

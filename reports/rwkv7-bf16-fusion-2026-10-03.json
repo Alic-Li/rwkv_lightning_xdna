@@ -1,0 +1,171 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "003e1d0",
+  "precision": "BF16 matrix inputs/weights, FP32 accumulators/state/nonlinear tensors",
+  "native_stage": {
+    "summary": [
+      {
+        "arm": 0,
+        "greedy_matches": 0,
+        "measured_tokens": 127,
+        "scope": "FP32 reference versus BF16 main projections; FP32 low-rank, state and nonlinear arithmetic; drift measurement, not a tolerance pass",
+        "tokens_per_second": 0.9816471092966865,
+        "total_seconds": 129.374394115
+      },
+      {
+        "arm": 1,
+        "greedy_matches": 126,
+        "measured_tokens": 127,
+        "scope": "FP32 reference versus BF16 main projections; FP32 low-rank, state and nonlinear arithmetic; drift measurement, not a tolerance pass",
+        "tokens_per_second": 2.3844729377200027,
+        "total_seconds": 53.26124611899999
+      }
+    ],
+    "checkpoints": [
+      {
+        "arm": 1,
+        "greedy": 59,
+        "greedy_matches": true,
+        "logits_error": {
+          "cosine": 0.9999972180685565,
+          "max_abs": 0.17402076721191406,
+          "mean_abs": 0.0460835960075201,
+          "relative_l2": 0.004097111302835134
+        },
+        "seconds": 0.42757229,
+        "state_error": {
+          "cosine": 0.9999941771182947,
+          "max_abs": 0.6014175415039062,
+          "mean_abs": 0.0004178015538021158,
+          "relative_l2": 0.0034125848424029033
+        },
+        "step": 1
+      },
+      {
+        "arm": 1,
+        "greedy": 22590,
+        "greedy_matches": false,
+        "logits_error": {
+          "cosine": 0.9999998594196856,
+          "max_abs": 0.06680870056152344,
+          "mean_abs": 0.01836891012499109,
+          "relative_l2": 0.0009746339246167839
+        },
+        "seconds": 0.419533454,
+        "state_error": {
+          "cosine": 0.9999983327282461,
+          "max_abs": 0.225799560546875,
+          "mean_abs": 0.00037831515249641995,
+          "relative_l2": 0.001834101029858638
+        },
+        "step": 8
+      },
+      {
+        "arm": 1,
+        "greedy": 59,
+        "greedy_matches": true,
+        "logits_error": {
+          "cosine": 0.9999995314460561,
+          "max_abs": 0.12542724609375,
+          "mean_abs": 0.028581946045051154,
+          "relative_l2": 0.0013460285110635344
+        },
+        "seconds": 0.418801059,
+        "state_error": {
+          "cosine": 0.9999977259512225,
+          "max_abs": 0.2153778076171875,
+          "mean_abs": 0.0004449496760071148,
+          "relative_l2": 0.002132655122766492
+        },
+        "step": 32
+      },
+      {
+        "arm": 1,
+        "greedy": 4811,
+        "greedy_matches": true,
+        "logits_error": {
+          "cosine": 0.9999998867267347,
+          "max_abs": 0.07831954956054688,
+          "mean_abs": 0.0114471275901451,
+          "relative_l2": 0.0005297098222011547
+        },
+        "seconds": 0.418619822,
+        "state_error": {
+          "cosine": 0.999998861796457,
+          "max_abs": 0.19042205810546875,
+          "mean_abs": 0.00033533048337535244,
+          "relative_l2": 0.0015087862175709181
+        },
+        "step": 128
+      }
+    ]
+  },
+  "low_rank_stage": {
+    "summary": [
+      {
+        "arm": 0,
+        "greedy_matches": 0,
+        "measured_tokens": 7,
+        "scope": "FP32 reference versus BF16 main projections; FP32 low-rank, state and nonlinear arithmetic; drift measurement, not a tolerance pass",
+        "tokens_per_second": 0.9744820836647321,
+        "total_seconds": 7.183302922999999
+      },
+      {
+        "arm": 1,
+        "greedy_matches": 7,
+        "measured_tokens": 7,
+        "scope": "FP32 reference versus BF16 main projections; FP32 low-rank, state and nonlinear arithmetic; drift measurement, not a tolerance pass",
+        "tokens_per_second": 2.460588813131144,
+        "total_seconds": 2.8448475269999998
+      }
+    ],
+    "oracle": "1340 actual-input projections passed unchanged unit bound, max_abs 1.52588e-5"
+  },
+  "rkv_stage": {
+    "summary": [
+      {
+        "arm": 0,
+        "bf16_projections": true,
+        "build_seconds": 3.229873746,
+        "kernels": "build/kernels/rwkv7-native-rank",
+        "resident_bytes": 2912631872,
+        "runs": 488
+      },
+      {
+        "arm": 0,
+        "greedy_matches": 0,
+        "measured_tokens": 31,
+        "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+        "tokens_per_second": 2.525362700063205,
+        "total_seconds": 12.275464431000001
+      },
+      {
+        "arm": 1,
+        "bf16_projections": true,
+        "build_seconds": 3.400661095,
+        "kernels": "build/kernels/rwkv7-rkv",
+        "resident_bytes": 2912631872,
+        "runs": 440
+      },
+      {
+        "arm": 1,
+        "greedy_matches": 32,
+        "measured_tokens": 31,
+        "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+        "tokens_per_second": 2.547129723684692,
+        "total_seconds": 12.170561912
+      }
+    ],
+    "max_logits_error": 0.0,
+    "max_state_error": 0.0,
+    "oracle": "1340 real-input projections passed; randomized independent oracle/replay/guards passed, max_abs 3.57628e-7; bounded FIFO simulation passed"
+  },
+  "limitations": [
+    "Native FP32 mode does not satisfy the historical FP32 pointwise whole-model gate; remains explicit opt-in.",
+    "Long-text FP32 versus native/BF16-main path gave 126/128 teacher-forced greedy matches; not identical free-running generation.",
+    "One transient hw-context allocation -EINVAL occurred before the low-rank real-input test; next standalone GEMV and retry passed. No driver settings changed.",
+    "BF16 low-rank/RKV combination still needs 128-token end-to-end qualification."
+  ],
+  "hardware": "Ryzen AI 7 H 350, XDNA2 6x8, firmware 1.0.0.63, XRT 2.25.00",
+  "compiler": "MLIR-AIE 1.4.4.dev53+gd53582d; Peano 22.0.0.2026091701+773413fb"
+}

@@ -6,7 +6,7 @@ import os
 import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, typ, external
+from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -56,7 +56,7 @@ def design(aux: In, first: In, out: Out):
 
 
 if __name__ == "__main__":
-    p = ROOT / "build/kernels/rwkv7-full/fused-value"
+    p = KERNEL_ROOT / "fused-value"
     p.mkdir(parents=True, exist_ok=True)
     design.compile(p / "design.xclbin", p / "instructions.bin")
     (p / "config.json").write_text(
