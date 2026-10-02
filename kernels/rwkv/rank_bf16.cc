@@ -19,3 +19,10 @@ extern "C" void rwkv7_rank_activate64(const float *raw, float *out,
              : activation == 2 ? sigmoid(raw[i])
                                : raw[i];
 }
+extern "C" void rwkv7_rank_batch_activate64(const float *raw, float *out,
+                                            int projection) {
+  rwkv7_rank_activate64(raw, out,
+                        projection == 0   ? 1
+                        : projection == 2 ? 2
+                                          : 0);
+}

@@ -1,0 +1,146 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "4f89dd2",
+  "precision": "BF16 matrices and activation rounding, FP32 accumulator/state, native FP32 arithmetic unchanged",
+  "change": "Batch independent W/A/G/(V) low-rank branches; six-BO ABI writes W/A directly to existing prepare slots",
+  "hardware_software_provenance": "Same XDNA2/XRT2.25/firmware1.0.0.63 as rwkv7-fp16-baseline-2026-10-03.json",
+  "full_model": {
+    "builds": [
+      {
+        "arm": 0,
+        "bf16_projections": true,
+        "build_seconds": 3.739776279,
+        "kernels": "build/kernels/rwkv7-rkv",
+        "resident_bytes": 2912631872,
+        "runs": 440
+      },
+      {
+        "arm": 1,
+        "bf16_projections": true,
+        "build_seconds": 3.661308791,
+        "kernels": "build/kernels/rwkv7-batched-rank",
+        "resident_bytes": 2912778304,
+        "runs": 369
+      }
+    ],
+    "summaries": [
+      {
+        "arm": 0,
+        "greedy_matches": 0,
+        "measured_tokens": 127,
+        "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+        "tokens_per_second": 2.5414316406441815,
+        "total_seconds": 49.97183397299999
+      },
+      {
+        "arm": 1,
+        "greedy_matches": 128,
+        "measured_tokens": 127,
+        "scope": "Identical-token cross-arm drift measurement; not a tolerance pass",
+        "tokens_per_second": 3.0870854715746954,
+        "total_seconds": 41.13912658700001
+      }
+    ],
+    "max_logits_abs": 0,
+    "state_checkpoints": [
+      {
+        "arm": 1,
+        "greedy": 59,
+        "greedy_matches": true,
+        "logits_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "seconds": 0.326067785,
+        "state_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "step": 1
+      },
+      {
+        "arm": 1,
+        "greedy": 22590,
+        "greedy_matches": true,
+        "logits_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "seconds": 0.322186796,
+        "state_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "step": 8
+      },
+      {
+        "arm": 1,
+        "greedy": 52095,
+        "greedy_matches": true,
+        "logits_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "seconds": 0.322172138,
+        "state_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "step": 32
+      },
+      {
+        "arm": 1,
+        "greedy": 22590,
+        "greedy_matches": true,
+        "logits_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "seconds": 0.324974334,
+        "state_error": {
+          "cosine": 1.0,
+          "max_abs": 0.0,
+          "mean_abs": 0.0,
+          "relative_l2": 0.0
+        },
+        "step": 128
+      }
+    ]
+  },
+  "validation": {
+    "actual_input_oracle_projections": 1340,
+    "oracle_max_abs": 1.52588e-05,
+    "threshold": "unchanged 2e-5 + 2e-5*abs(reference)",
+    "standalone": "three changed-input passes, guards, immutable packed weights, untouched W/A arena slots, 20 warmups plus 30 samples",
+    "depth_one_join_broadcast_presimulation": "passed"
+  },
+  "standalone_us": {
+    "three_branches": {
+      "min": 309.116,
+      "median": 316.09
+    },
+    "four_branches": {
+      "min": 365.323,
+      "median": 371.544
+    }
+  },
+  "failed_experiment": "Nine-BO program failed before writing outputs. Six-BO version with same single-branch arithmetic passed, as did three/four branches. This is an observed ABI limitation, not a proven driver argument maximum. Final production ABI has six data BOs.",
+  "limits": [
+    "Fusion equivalence is checked against the same BF16/native arithmetic baseline; this does not establish legacy strict FP32 trajectory equivalence.",
+    "Timing includes dispatch, waits, DMA and device work; no isolated compute-cycle claim."
+  ]
+}

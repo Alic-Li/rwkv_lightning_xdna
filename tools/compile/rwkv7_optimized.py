@@ -21,13 +21,16 @@ p.add_argument(
     "--rkv", action="store_true", help="also compile the combined BF16 R/K/V program"
 )
 p.add_argument(
+    "--rank-batch", action="store_true", help="batch independent BF16 low-rank branches"
+)
+p.add_argument(
     "--native-fp32",
     action="store_true",
     help="experimental faster arithmetic; does not meet the legacy real-model pointwise tolerance",
 )
 a = p.parse_args()
-if (a.bf16_rank or a.rkv) and not a.bf16:
-    p.error("--bf16-rank and --rkv require --bf16")
+if (a.bf16_rank or a.rkv or a.rank_batch) and not a.bf16:
+    p.error("--bf16-rank, --rkv and --rank-batch require --bf16")
 env = dict(
     os.environ,
     MLIR_AIE_KERNEL_SOURCES=str(ROOT / "third_party/mlir-aie"),
@@ -59,6 +62,8 @@ if a.bf16_rank:
     commands.append(("rwkv7_rank.py", ["--bf16"]))
 if a.rkv:
     commands.append(("rwkv7_rkv.py", []))
+if a.rank_batch:
+    commands.append(("rwkv7_rank_batch.py", []))
 for script, args in commands:
     subprocess.run(
         [sys.executable, str(ROOT / "tools/compile" / script), *args],

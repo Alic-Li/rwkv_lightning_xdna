@@ -243,6 +243,12 @@ RWKV_XDNA_BF16=1 ./build/host/rwkv-cli --model "$MODEL" \
 平均约0.396→0.392秒/token（约0.9%，收益小，不能用run降幅代替延迟收益）。
 测量与未完成的长序列验收见[融合记录](../reports/rwkv7-bf16-fusion-2026-10-03.json)。
 
+`--rank-batch` 将 W/A/G/(V) 低秩支路合成一次运行，保持各支路原有数学顺序。
+六个数据 BO 接口直接写入后续 prepare 的 W/A 槽位，不增加 CPU 中间结果拷贝。
+runs/token 从440降至369，128步同精度对照 logits/state 最大误差为0，
+约0.394→0.324秒/token。独立随机输入、guard、未使用槽位及1340次实际输入
+投影 oracle 均通过；见[批量低秩记录](../reports/rwkv7-bf16-rank-batch-2026-10-03.json)。
+
 同精度比较时可给 `rwkv-precision-benchmark` 设置
 `RWKV_XDNA_REFERENCE_BF16=1` 和 `RWKV_XDNA_REFERENCE_KERNEL_DIR=基线目录`。
 oracle的 `--bf16-all-projections` 使用BF16低秩参考；`--bf16-projections` 保留FP32低秩
