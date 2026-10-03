@@ -12,11 +12,12 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/compile"))
-from kernel_case import case_id, selected
+from kernel_case import TEST_KERNEL_ROOT, case_id, selected
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runner", type=Path, default=ROOT / "build/test/xdna-run")
     parser.add_argument("--tier", choices=["smoke", "all"], default="smoke")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--case", action="append", help="Restrict to case IDs")
@@ -41,7 +42,7 @@ def main():
     def compile_one(case):
         identifier = case_id(case)
         if args.run_only:
-            return (ROOT / "build/kernels" / identifier / "manifest.json").is_file()
+            return (TEST_KERNEL_ROOT / identifier / "manifest.json").is_file()
         log = report_dir / f"{identifier}.compile.log"
         try:
             with log.open("w") as stream:
@@ -84,8 +85,8 @@ def main():
                 record["status"] = "compiled"
             else:
                 command = [
-                    str(ROOT / "build/host/xdna-run"),
-                    str(ROOT / "build/kernels" / identifier / "manifest.json"),
+                    str(args.runner.resolve()),
+                    str(TEST_KERNEL_ROOT / identifier / "manifest.json"),
                 ]
                 try:
                     run = subprocess.run(

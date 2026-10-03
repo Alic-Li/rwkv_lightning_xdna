@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+TEST_KERNEL_ROOT = Path(os.environ.get("RWKV_XDNA_TEST_KERNEL_DIR", ROOT / "build/kernels/test"))
 os.environ["MLIR_AIE_KERNEL_SOURCES"] = str(ROOT / "third_party/mlir-aie")
 sys.path.insert(0, str(ROOT / "third_party/kernel_tests"))
 
@@ -44,7 +45,7 @@ def find_case(identifier):
 
 
 def compile_case(case):
-    directory = ROOT / "build/kernels" / case_id(case)
+    directory = TEST_KERNEL_ROOT / case_id(case)
     directory.mkdir(parents=True, exist_ok=True)
     fn = case.fn()
     inputs = inputs_for(case, "random", np.random.default_rng(1000))

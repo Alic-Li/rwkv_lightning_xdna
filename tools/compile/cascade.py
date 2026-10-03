@@ -2,10 +2,10 @@
 """Compile the upstream two-core cascade matmul and export deterministic fixtures."""
 
 import json
-from kernel_case import ROOT, np, kernels
+from kernel_case import ROOT, TEST_KERNEL_ROOT, np, kernels
 from cascade_design import _cascade_design
 
-directory = ROOT / "build/kernels/cascade-mm"
+directory = TEST_KERNEL_ROOT / "cascade-mm"
 directory.mkdir(parents=True, exist_ok=True)
 _cascade_design.compile(directory / "design.xclbin", directory / "instructions.bin")
 fn = kernels.cascade_mm(dim_m=16, dim_k=16, dim_n=16)

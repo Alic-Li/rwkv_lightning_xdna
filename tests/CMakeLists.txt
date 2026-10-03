@@ -1,0 +1,50 @@
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+add_executable(xdna-run "${PROJECT_SOURCE_DIR}/apps/xdna_run.cpp")
+target_include_directories(xdna-run PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+target_link_libraries(xdna-run PRIVATE rwkv::xdna)
+target_compile_options(xdna-run PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(rwkv-recurrent-test inference/recurrent_test.cpp)
+target_link_libraries(rwkv-recurrent-test PRIVATE rwkv::inference)
+add_test(NAME rwkv.recurrent.cpu COMMAND rwkv-recurrent-test)
+add_executable(rwkv-text-test inference/text_test.cpp)
+target_link_libraries(rwkv-text-test PRIVATE rwkv_text)
+add_test(NAME rwkv.text COMMAND rwkv-text-test "${PROJECT_SOURCE_DIR}/assets/rwkv_vocab_v20230424.txt")
+add_executable(rwkv-graph-test inference/graph_test.cpp)
+target_link_libraries(rwkv-graph-test PRIVATE rwkv::inference)
+foreach(case channel_mix recurrence_stage projection_residual)
+    string(REPLACE "_" "-" suffix "${case}")
+    add_executable(rwkv-${suffix}-test inference/${case}_test.cpp)
+    target_link_libraries(rwkv-${suffix}-test PRIVATE rwkv::xdna)
+    if(RWKV_XDNA_HARDWARE_TESTS)
+        add_test(NAME rwkv.${case}.npu COMMAND rwkv-${suffix}-test
+            "${RWKV_XDNA_KERNEL_DIR}")
+        set_tests_properties(rwkv.${case}.npu PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+    endif()
+endforeach()
+add_executable(rwkv-alignment-test inference/alignment_test.cpp)
+target_link_libraries(rwkv-alignment-test PRIVATE rwkv::inference)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(rwkv-alignment-test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+add_executable(rwkv-cleanup-regression inference/cleanup_regression.cpp)
+target_link_libraries(rwkv-cleanup-regression PRIVATE rwkv::inference)
+target_include_directories(rwkv-cleanup-regression PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+
+if(RWKV_XDNA_HARDWARE_TESTS)
+    file(GLOB manifests "${RWKV_XDNA_TEST_KERNEL_DIR}/*/manifest.json")
+    foreach(manifest IN LISTS manifests)
+        get_filename_component(directory "${manifest}" DIRECTORY)
+        get_filename_component(case_id "${directory}" NAME)
+        add_test(NAME "dispatch.${case_id}" COMMAND xdna-run "${manifest}")
+        set_tests_properties("dispatch.${case_id}" PROPERTIES
+            RUN_SERIAL TRUE TIMEOUT 60 FIXTURES_SETUP "result.${case_id}")
+        add_test(NAME "check.${case_id}" COMMAND "${RWKV_XDNA_PYTHON}"
+            "${PROJECT_SOURCE_DIR}/tools/validation/check_case.py" "${case_id}")
+        set_tests_properties("check.${case_id}" PROPERTIES
+            ENVIRONMENT "RWKV_XDNA_TEST_KERNEL_DIR=${RWKV_XDNA_TEST_KERNEL_DIR}"
+            TIMEOUT 60 FIXTURES_REQUIRED "result.${case_id}")
+    endforeach()
+endif()
+

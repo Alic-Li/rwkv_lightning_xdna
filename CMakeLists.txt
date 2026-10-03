@@ -9,103 +9,11 @@ find_package(Threads REQUIRED)
 find_package(OpenMP QUIET)
 find_package(XRT REQUIRED)
 find_path(UUID_INCLUDE_DIR uuid/uuid.h HINTS "${CMAKE_CURRENT_SOURCE_DIR}/.cache/sdk/usr/include" REQUIRED)
-add_library(rwkv_xdna src/runtime/session.cpp)
-add_library(rwkv::xdna ALIAS rwkv_xdna)
-set_target_properties(rwkv_xdna PROPERTIES EXPORT_NAME xdna)
-target_compile_features(rwkv_xdna PUBLIC cxx_std_17)
-target_include_directories(rwkv_xdna PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE ${XRT_INCLUDE_DIR} ${UUID_INCLUDE_DIR})
-target_link_libraries(rwkv_xdna PRIVATE XRT::Coreutil Threads::Threads)
-target_compile_options(rwkv_xdna PRIVATE -Wall -Wextra -Wpedantic)
-add_executable(xdna-run apps/xdna_run.cpp)
-target_include_directories(xdna-run PRIVATE third_party/nlohmann/include)
-target_link_libraries(xdna-run PRIVATE rwkv::xdna)
-target_compile_options(xdna-run PRIVATE -Wall -Wextra -Wpedantic)
-install(TARGETS rwkv_xdna xdna-run EXPORT rwkvXdnaTargets)
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(EXPORT rwkvXdnaTargets NAMESPACE rwkv:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rwkvXdna)
-configure_package_config_file(cmake/rwkvXdnaConfig.cmake.in
-    "${CMAKE_CURRENT_BINARY_DIR}/rwkvXdnaConfig.cmake"
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rwkvXdna)
-write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/rwkvXdnaConfigVersion.cmake"
-    VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)
-install(FILES cmake/FindXRT.cmake
-    "${CMAKE_CURRENT_BINARY_DIR}/rwkvXdnaConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/rwkvXdnaConfigVersion.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rwkvXdna)
-option(RWKV_XDNA_HARDWARE_TESTS "Register compiled hardware fixtures with CTest" OFF)
-if(BUILD_TESTING AND RWKV_XDNA_HARDWARE_TESTS)
-    file(GLOB manifests "${CMAKE_CURRENT_SOURCE_DIR}/build/kernels/*/manifest.json")
-    foreach(manifest IN LISTS manifests)
-        get_filename_component(directory "${manifest}" DIRECTORY)
-        get_filename_component(case_id "${directory}" NAME)
-        add_test(NAME "dispatch.${case_id}" COMMAND xdna-run "${manifest}")
-        set_tests_properties("dispatch.${case_id}" PROPERTIES
-            RUN_SERIAL TRUE TIMEOUT 60 FIXTURES_SETUP "result.${case_id}")
-        add_test(NAME "check.${case_id}" COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/validation/check_case.py" "${case_id}")
-        set_tests_properties("check.${case_id}" PROPERTIES
-            TIMEOUT 60 FIXTURES_REQUIRED "result.${case_id}")
-    endforeach()
-endif()
-
-# Standalone model API; tokenization/sampling are private CLI concerns.
-add_library(rwkv_inference
-    src/inference/model.cpp src/inference/weights.cpp src/inference/backend.cpp
-    src/inference/ops.cpp src/inference/graph.cpp
-    src/inference/resident_plan.cpp src/inference/graph_execution.cpp
-    src/inference/artifacts.cpp src/inference/weight_layout.cpp
-    third_party/rwkv_cuda_io/src/pth_archive.cpp third_party/rwkv_cuda_io/src/pth_tensor.cpp)
-add_library(rwkv::inference ALIAS rwkv_inference)
-set_target_properties(rwkv_inference PROPERTIES EXPORT_NAME inference)
-target_compile_features(rwkv_inference PUBLIC cxx_std_17)
-target_include_directories(rwkv_inference PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE third_party/nlohmann/include third_party/rwkv_cuda_io/include)
-target_link_libraries(rwkv_inference PRIVATE rwkv::xdna)
-target_compile_options(rwkv_inference PRIVATE -Wall -Wextra -ffp-contract=off)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(rwkv_inference PRIVATE OpenMP::OpenMP_CXX)
-endif()
-add_library(rwkv_text STATIC src/utils/tokenizer.cpp src/utils/sampler.cpp)
-target_include_directories(rwkv_text PUBLIC src/utils)
-target_compile_features(rwkv_text PUBLIC cxx_std_17)
-target_link_libraries(rwkv_text PRIVATE Threads::Threads)
-add_executable(rwkv-cli apps/rwkv_cli.cpp)
-target_link_libraries(rwkv-cli PRIVATE rwkv::inference rwkv_text)
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(rwkv-cli PRIVATE OpenMP::OpenMP_CXX)
-endif()
-install(TARGETS rwkv_inference rwkv-cli EXPORT rwkvXdnaTargets)
-install(FILES assets/rwkv_vocab_v20230424.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/rwkv_lightning_xdna)
+include(cmake/Options.cmake)
+include(cmake/Runtime.cmake)
+include(cmake/Inference.cmake)
+include(cmake/Install.cmake)
+include(cmake/Kernels.cmake)
 if(BUILD_TESTING)
-    add_executable(rwkv-recurrent-test tests/inference/recurrent_test.cpp)
-    target_link_libraries(rwkv-recurrent-test PRIVATE rwkv::inference)
-    add_test(NAME rwkv.recurrent.cpu COMMAND rwkv-recurrent-test)
-    add_executable(rwkv-text-test tests/inference/text_test.cpp)
-    target_link_libraries(rwkv-text-test PRIVATE rwkv_text)
-    add_test(NAME rwkv.text COMMAND rwkv-text-test "${CMAKE_CURRENT_SOURCE_DIR}/assets/rwkv_vocab_v20230424.txt")
-    add_executable(rwkv-graph-test tests/inference/graph_test.cpp)
-    target_link_libraries(rwkv-graph-test PRIVATE rwkv::inference)
-    foreach(case channel_mix recurrence_stage projection_residual)
-        string(REPLACE "_" "-" suffix "${case}")
-        add_executable(rwkv-${suffix}-test tests/inference/${case}_test.cpp)
-        target_link_libraries(rwkv-${suffix}-test PRIVATE rwkv::xdna)
-        if(RWKV_XDNA_HARDWARE_TESTS)
-            add_test(NAME rwkv.${case}.npu COMMAND rwkv-${suffix}-test
-                "${CMAKE_CURRENT_SOURCE_DIR}/build/kernels/rwkv7-bf16")
-            set_tests_properties(rwkv.${case}.npu PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
-        endif()
-    endforeach()
-    add_executable(rwkv-alignment-test tests/inference/alignment_test.cpp)
-    target_link_libraries(rwkv-alignment-test PRIVATE rwkv::inference)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(rwkv-alignment-test PRIVATE OpenMP::OpenMP_CXX)
-    endif()
-    add_executable(rwkv-cleanup-regression tests/inference/cleanup_regression.cpp)
-    target_link_libraries(rwkv-cleanup-regression PRIVATE rwkv::inference)
-    target_include_directories(rwkv-cleanup-regression PRIVATE third_party/nlohmann/include)
+    add_subdirectory(tests)
 endif()

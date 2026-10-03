@@ -16,5 +16,6 @@ if [[ ! -f /usr/include/uuid/uuid.h ]]; then
     )
 fi
 export PATH="$project_root/.venv/bin:$PATH"
-cmake --preset dev
-cmake --build --preset dev
+build_preset=${1:-release}
+cmake --preset "$build_preset"
+cmake --build --preset "$build_preset"

@@ -6,12 +6,12 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "compile"))
-from kernel_case import ROOT, find_case, inputs_for, kd, np
+from kernel_case import ROOT, TEST_KERNEL_ROOT, find_case, inputs_for, kd, np
 
 
 def check(identifier):
     if identifier == "cascade-mm":
-        directory = ROOT / "build/kernels/cascade-mm"
+        directory = TEST_KERNEL_ROOT / "cascade-mm"
         expected = np.fromfile(directory / "expected.bin", dtype=np.int16)
         for repetition in range(3):
             got = np.fromfile(directory / f"output-4.bin.{repetition}", dtype=np.int16)
@@ -24,7 +24,7 @@ def check(identifier):
         )
     case = find_case(identifier)
     fn = case.fn()
-    directory = ROOT / "build/kernels" / identifier
+    directory = TEST_KERNEL_ROOT / identifier
     manifest = json.loads((directory / "manifest.json").read_text())
     # Regenerate typed logical inputs from the pinned case and seed.
     inputs = inputs_for(case, "random", np.random.default_rng(1000))

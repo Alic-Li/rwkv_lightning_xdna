@@ -1,0 +1,8 @@
+option(RWKV_XDNA_HARDWARE_TESTS "Register compiled hardware fixtures with CTest" OFF)
+set(RWKV_XDNA_PYTHON "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin/python" CACHE FILEPATH "Offline compiler and checker Python")
+set(RWKV_XDNA_KERNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/kernels/rwkv7-bf16" CACHE PATH "Production RWKV kernel artifacts")
+set(RWKV_XDNA_TEST_KERNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/kernels/test" CACHE PATH "Generic test kernel artifacts")
+set(RWKV_XDNA_COMPILE_JOBS 4 CACHE STRING "Parallel generic kernel compilation jobs")
+if(RWKV_XDNA_HARDWARE_TESTS AND NOT BUILD_TESTING)
+    message(FATAL_ERROR "RWKV_XDNA_HARDWARE_TESTS requires BUILD_TESTING=ON")
+endif()

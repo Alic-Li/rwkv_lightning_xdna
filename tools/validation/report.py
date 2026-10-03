@@ -63,7 +63,7 @@ summary = dict(
         "295 generic cases include output guard checks; cascade pair checks numerical output only.",
         "Source coverage is not every C++ symbol, datatype, shape or architecture branch.",
         "Four upstream NPU1-only cases are excluded on AIE2P.",
-        "RWKV model execution, tokenizer, weights and recurrent-state kernels are not implemented.",
+        "This generic kernel sweep does not validate RWKV model inference or its fused kernels.",
     ],
     sources=source_records,
     cases=[{k: r[k] for k in ("id", "case", "factory", "status")} for r in records],

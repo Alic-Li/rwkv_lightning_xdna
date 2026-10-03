@@ -150,6 +150,7 @@ def safetensors(path, weights):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cli", type=Path, default=ROOT / "build/test/rwkv-cli")
     args = parser.parse_args()
     torch.set_num_threads(2)
     out = ROOT / "build/tests/rwkv7"
@@ -177,7 +178,7 @@ def main():
         for backend in ["cpu"]:
             dump = out / (path.name + "." + backend + ".bin")
             cmd = [
-                str(ROOT / "build/host/rwkv-cli"),
+                str(args.cli.resolve()),
                 "--model",
                 str(path),
                 "--backend",
@@ -214,7 +215,7 @@ def main():
         path.write_bytes(content)
         result = subprocess.run(
             [
-                str(ROOT / "build/host/rwkv-cli"),
+                str(args.cli.resolve()),
                 "--model",
                 str(path),
                 "--backend",

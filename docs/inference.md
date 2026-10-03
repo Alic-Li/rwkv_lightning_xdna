@@ -21,14 +21,13 @@ NPU prefill 与 decode 复用同一个逐 token 状态转移。
 
 ```bash
 export PATH="$PWD/.venv/bin:$PATH"
-cmake --preset dev
-cmake --build --preset dev
-# 离线编译唯一生产配置，不调用 NPU。
-.venv/bin/python tools/compile/rwkv7_optimized.py
+cmake --preset release
+# 同时编译 C++ 主机程序和唯一生产 kernel 配置；编译不调用 NPU。
+cmake --build --preset release-full
 
-./build/host/rwkv-cli \
+./build/release/rwkv-cli \
   --model /home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth \
-  --prompt 'Question: What is the largest planet in our solar system? Answer:' \
+  --prompt 'User: 我是一个男孩子,我喜欢上了一个可爱的男孩子,我该怎么办? Assistant: <think></think' \
   --top-k 1 --max-tokens 32
 ```
 
@@ -42,6 +41,41 @@ cmake --build --preset dev
 `--tokens 1,2,7,9 --dump-logits FILE` 用于导出每个输入 token 后的 FP32 logits。
 CLI 单独报告建图、prefill、TTFT 和后续 decode 时间。生成32个 token 时，首 token 来自
 prefill，后续只有31次 decode forward。
+
+## 缺少生产 kernel
+
+若 CLI 报：
+
+```text
+rwkv-cli: Missing production artifact: upstream-norm
+```
+
+表示所选 kernel 目录中缺少 `upstream-norm/config.json`，可能尚未编译生产 kernel，
+或运行时指向了错误的产物目录。仅编译 `release`、执行 `bootstrap.sh`，以及编译
+`test-kernels-all`，都不会生成这套生产产物。
+
+从仓库根目录补齐生产 kernel：
+
+```bash
+export PATH="$PWD/.venv/bin:$PATH"
+cmake --preset release
+cmake --build --preset release-kernels
+ls build/kernels/rwkv7-bf16/upstream-norm/{config.json,design.xclbin,instructions.bin}
+```
+
+确认构建成功后重新运行上面的 CLI 命令。`upstream-norm` 是生产路径的 FP32
+LayerNorm，由 `rwkv7_norm.py` 生成，包含在 `release-kernels` 的编译清单中。
+不要只补这个目录；推理还需要其余生产阶段的完整产物。
+
+默认 kernel 路径相对于启动 CLI 时的工作目录。若从其他目录启动，或使用自定义
+产物目录，显式传入绝对路径：
+
+```bash
+./build/release/rwkv-cli \
+  --model /path/to/model.pth \
+  --kernel-dir "$PWD/build/kernels/rwkv7-bf16" \
+  --prompt 'Hello' --max-tokens 32
+```
 
 ## 模块边界
 
@@ -98,24 +132,8 @@ FP32 state 使用 `[head,key,value]` 固定布局。`HOST_ONLY` BO 是 NPU 可�
 
 ## 验证与数值边界
 
-```bash
-ctest --test-dir build/host -R '^rwkv\.' --output-on-failure
-# 生成小模型，检查 FP32/F16/BF16 checkpoint、非连续 stride、非法文件和 CPU oracle。
-.venv/bin/python tools/validation/rwkv7_reference.py
-./build/host/rwkv-graph-test build/tests/rwkv7/f32.pth
-# 以下硬件测试必须串行运行。
-./build/host/rwkv-channel-mix-test build/kernels/rwkv7-bf16
-./build/host/rwkv-recurrence-stage-test build/kernels/rwkv7-bf16
-./build/host/rwkv-projection-residual-test build/kernels/rwkv7-bf16
-./build/host/rwkv-alignment-test "$MODEL" build/kernels/rwkv7-bf16
-```
-
-`-DRWKV_XDNA_HARDWARE_TESTS=ON` 可将三个生产阶段的数值/guard测试注册到 CTest。
-硬件测试用独立 CPU FP64 点积/递推参考，保留原验收阈值。
-整模型回归工具 `rwkv-cleanup-regression MODEL KERNELS record|verify SNAPSHOT`
-记录首 token 全节点、128步 logits、第1/8/32/128步状态，并验证状态分支、reset、
-非法输入及主机状态接口。`verify` 必须使用整理前独立基线记录的快照；不能用候选版本
-自身记录的快照宣称通过回归。
+测试程序、阶段 oracle 和回归命令见 [验证说明](validation.md)，编译入口见
+[构建与测试](build.md)。
 
 BF16 整模型与旧纯 FP32 轨迹不是逐值等价；旧跨精度逐元素验收未通过的事实仍保留在
 [历史性能报告](../reports/rwkv7-optimization-summary-2026-10-03.json)。本次要求并检验的

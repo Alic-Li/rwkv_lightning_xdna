@@ -2,12 +2,102 @@
   "version": 6,
   "configurePresets": [
     {
-      "name": "dev",
+      "name": "base",
+      "hidden": true,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/host",
-      "cacheVariables": {"CMAKE_BUILD_TYPE": "RelWithDebInfo", "BUILD_TESTING": "ON"}
+      "cacheVariables": {
+        "RWKV_XDNA_HARDWARE_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
+      "name": "test",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build/test",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "test-hardware",
+      "inherits": "test",
+      "binaryDir": "${sourceDir}/build/test-hardware",
+      "cacheVariables": {
+        "RWKV_XDNA_HARDWARE_TESTS": "ON"
+      }
     }
   ],
-  "buildPresets": [{"name": "dev", "configurePreset": "dev"}],
-  "testPresets": [{"name": "dev", "configurePreset": "dev", "output": {"outputOnFailure": true}}]
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "test",
+      "configurePreset": "test"
+    },
+    {
+      "name": "test-hardware",
+      "configurePreset": "test-hardware"
+    },
+    {
+      "name": "release-kernels",
+      "configurePreset": "release",
+      "targets": [
+        "kernels-release"
+      ]
+    },
+    {
+      "name": "release-full",
+      "configurePreset": "release",
+      "targets": [
+        "rwkv-release"
+      ]
+    },
+    {
+      "name": "test-kernels-smoke",
+      "configurePreset": "test",
+      "targets": [
+        "kernels-test-smoke"
+      ]
+    },
+    {
+      "name": "test-kernels-all",
+      "configurePreset": "test",
+      "targets": [
+        "kernels-test-all"
+      ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test",
+      "configurePreset": "test",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1
+      }
+    },
+    {
+      "name": "test-hardware",
+      "configurePreset": "test-hardware",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 1
+      }
+    }
+  ]
 }

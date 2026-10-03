@@ -24,10 +24,10 @@
 - `reports/runs/all/*.compile.log`：每个配置的编译日志。
 - `reports/runs/all/*.run.log`：独立 C++ 程序的调用结果和时间。
 - `reports/runs/all/*.check.log`：离线参考比较结果。
-- `build/kernels/<case-id>/`：xclbin、指令流、manifest、输入和每次输出。
+- `build/kernels/<case-id>/`（历史输出路径）：xclbin、指令流、manifest、输入和每次输出。
 - `third_party/SOURCES.json`：复制来源、版本和源码 SHA-256。
 
-所有硬件提交都来自 `build/host/xdna-run`；Python 只进行离线设计编译、数据生成、
+历史硬件提交来自 `build/host/xdna-run`；Python 只进行离线设计编译、数据生成、
 启动 C++ 子进程和读取输出比较。`executed` 与 `passed` 分开记录。
 
 时间数据来自功能测试，含预热及很少的重复次数；不能直接作为稳定性能基准。
@@ -37,3 +37,32 @@
 （296 个提交 + 296 个检查）已注册，抽查 Add 和级联的 CTest 依赖路径通过。
 
 驱动排障及已经保存的兼容设置见 [环境说明](environment.md)。
+
+## 当前验证入口
+
+主机与 kernel 的编译、通用算子 sweep 和硬件 CTest 见 [构建与测试](build.md)。
+上述 2026-10-02 数据是历史实机证据，不代表每次构建都已重新验证。
+
+```bash
+cmake --preset test
+cmake --build --preset test
+ctest --preset test
+# 生成小模型，检查 checkpoint dtype、stride、非法文件和 CPU oracle。
+.venv/bin/python tools/validation/rwkv7_reference.py
+./build/test/rwkv-graph-test build/tests/rwkv7/f32.pth
+# 以下生产 kernel 测试串行运行。
+./build/test/rwkv-channel-mix-test build/kernels/rwkv7-bf16
+./build/test/rwkv-recurrence-stage-test build/kernels/rwkv7-bf16
+./build/test/rwkv-projection-residual-test build/kernels/rwkv7-bf16
+./build/test/rwkv-alignment-test "$MODEL" build/kernels/rwkv7-bf16
+```
+
+参考脚本可用 `--cli FILE` 指定 CLI。阶段测试使用独立 CPU FP64 点积/递推参考，
+保留原数值阈值和 guard 检查。
+
+整模型工具 `rwkv-cleanup-regression MODEL KERNELS record|verify SNAPSHOT`
+记录首 token 全节点、128 步 logits、第 1/8/32/128 步状态，并检查分支、reset、
+非法输入与主机状态接口。`verify` 必须使用改动前独立基线生成的快照。
+同 BF16 精度回归证据见 [清理摘要](../reports/rwkv7-cleanup-summary-2026-10-03.json)；
+旧跨精度逐元素验收未通过的事实见 [历史性能报告](../reports/rwkv7-optimization-summary-2026-10-03.json)。
+128 步回归不代表完整 25600 上下文已经验证。
