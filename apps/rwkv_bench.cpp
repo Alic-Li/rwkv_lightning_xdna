@@ -45,7 +45,6 @@ int main(int argc, char **argv) {
       else if (flag == "--int8-ffn") int8 = true;
       else throw std::invalid_argument("Unknown flag: " + flag);
     }
-    if (batch2 && int8) throw std::invalid_argument("Batched prefill requires BF16 weights");
     if (argc != 3 && argc != 6)
       throw std::invalid_argument("Usage: rwkv-bench MODEL KERNELS [PREFILL_TOKENS DECODE_TOKENS TRIALS] [--int8-ffn|--int8-ffn-output] [--prefill-batch2]");
     if (std::getenv("RWKV_XDNA_PROFILE"))

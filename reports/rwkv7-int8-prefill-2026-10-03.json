@@ -1,0 +1,341 @@
+{
+  "date": "2026-10-03",
+  "status": "opt_in_INT8_batched_prefill_verified; hardware_limit_objective_incomplete",
+  "baseline_commit": "765494567c8fbfcf8d3c3f2aa6993182e3b62c39",
+  "hardware_software": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano; power mode not reverified",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Two-token W8A16 FFN expands each streamed INT8 tile once to BF16 and reuses it for both tokens; each output row is scaled after its final K tile",
+    "Shared BF16/W8A16 offline dataflow and common exact activation/residual helpers; weight type and kernel stack are compile-time specializations",
+    "Batched2 enabled for Int8FFN and Int8FFNOutput; shares existing packed model weights, sessions and FP32 request state with decode",
+    "CLI, benchmark, model-state oracle and offline target expose INT8 batch2 explicitly; defaults unchanged"
+  ],
+  "reference_review": {
+    "FastFlowLM": "Inspected src/include/modules/dequant.hpp (generate_dequant_q80_packed_in_q4nx_seq), modules/gemm.hpp (M/K/N sequence interface), tensor_utils/q4_npu_eXpress.hpp. Public sequence/layout APIs; implementation hidden behind Impl/binary libraries in this checkout. No claim of porting unavailable device source.",
+    "rwkv_lightning_cuda": "quant/gemmv/rwkv_w8a16.cu converts tile codes to half, reuses weights across M rows and scales after FP32 reduction. Preserve this repo's existing BF16 activation / FP16-derived per-row scale / FP32 output contract; do not substitute CUDA IEEE FP16 arithmetic."
+  },
+  "validation": {
+    "host_builds": "release and test presets passed",
+    "host_tests": "3/3 CTest passed",
+    "stage_projection_input": {
+      "input_layout": "projection_residual_pairs",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 2.6806723326444626e-05,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete two-token FFN stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "timing_abba": [
+        {
+          "mean_us_per_two_tokens": 2354.0565466666676,
+          "p95_us_per_two_tokens": 2458.601,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 300
+        },
+        {
+          "mean_us_per_two_tokens": 1779.71758,
+          "p95_us_per_two_tokens": 1796.42,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 300
+        },
+        {
+          "mean_us_per_two_tokens": 1790.7060933333341,
+          "p95_us_per_two_tokens": 1812.27,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 300
+        },
+        {
+          "mean_us_per_two_tokens": 2335.2490866666667,
+          "p95_us_per_two_tokens": 2406.361,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 300
+        }
+      ],
+      "weights": "int8"
+    },
+    "stage_token_major": {
+      "input_layout": "token_major",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 2.6806723326444626e-05,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete two-token FFN stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "timing_abba": [
+        {
+          "mean_us_per_two_tokens": 2370.7328833333336,
+          "p95_us_per_two_tokens": 2466.426,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 300
+        },
+        {
+          "mean_us_per_two_tokens": 1815.1215266666666,
+          "p95_us_per_two_tokens": 1839.091,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 300
+        },
+        {
+          "mean_us_per_two_tokens": 1851.6349733333316,
+          "p95_us_per_two_tokens": 1953.259,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 300
+        },
+        {
+          "mean_us_per_two_tokens": 2456.987223333334,
+          "p95_us_per_two_tokens": 2537.422,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 300
+        }
+      ],
+      "weights": "int8"
+    },
+    "bf16_stage_regression": {
+      "input_layout": "projection_residual_pairs",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 3.5762786865234375e-07,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete two-token FFN stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "timing_abba": [
+        {
+          "mean_us_per_two_tokens": 3792.818320000001,
+          "p95_us_per_two_tokens": 4184.47,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 1902.6308900000013,
+          "p95_us_per_two_tokens": 2119.763,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 1930.0231299999994,
+          "p95_us_per_two_tokens": 2133.459,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 3779.7001299999993,
+          "p95_us_per_two_tokens": 4206.813,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 100
+        }
+      ],
+      "weights": "bf16"
+    },
+    "model": {
+      "bf16": {
+        "mode": "verify",
+        "prefill_pair_runs": 220,
+        "prefill_runs": 8455,
+        "resident_bytes": 2947313664,
+        "root_bos": 413,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "bf16"
+      },
+      "int8_ffn": {
+        "mode": "verify",
+        "prefill_pair_runs": 220,
+        "prefill_runs": 8455,
+        "resident_bytes": 2154590208,
+        "root_bos": 413,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "int8_ffn"
+      },
+      "int8_ffn_output": {
+        "mode": "verify",
+        "prefill_pair_runs": 220,
+        "prefill_runs": 8455,
+        "resident_bytes": 2055499776,
+        "root_bos": 413,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "int8_ffn_output"
+      }
+    },
+    "model_scope": "1533 memcmp vectors per precision: final logits and all per-layer attention/FFN shifts and recurrent matrices; prompt lengths 0,1,2,3,8,17,32, nonzero and zero initial state, odd tail, handoff to decode, reset/branch, repeated prefill, invalid token and trace rejection. INT8 references recorded with sequential resident decode in separate processes.",
+    "quality_scope": "Same-precision bitwise regression; not a new cross-precision or representative long-context language-quality certification.",
+    "cli": "INT8 FFN+output greedy 3-token generation for The capital of France is: decode and batch2 stdout identical, both exit 0."
+  },
+  "remaining_work": [
+    "Batch remaining attention matrices and increase useful sequence reuse within memory limits",
+    "Evaluate native INT8 arithmetic separately; current W8A16 uses BF16 MACs",
+    "Reduce program switching and submissions in decode",
+    "Measure full-array DMA/utilization and establish practical hardware limits; objective remains active"
+  ],
+  "raw_logs": "reports/runs/int8-prefill-2026-10-03",
+  "sha256": {
+    "kernels/rwkv/prefill_channel_int8.cc": "f9168bfa4ee9baaec86372b04b347fd1e3380e9c05d40acaac50a73850d7547c",
+    "kernels/rwkv/prefill_channel_common.hpp": "34f8509bee7cb9ddebd96e0dd3d608735f39124574e76a193e940437e6831f40",
+    "kernels/rwkv/prefill_channel_bf16.cc": "e0d8aac04ba0d6066d3b0078bf247d09c26e16611c268049fe244db02b545277",
+    "tools/compile/rwkv7_prefill_channel_mix.py": "834fb47ef273c7c5b5e5dc30690b61b2cbc9d9413c654dc39edb9346e33bf2a6",
+    "build/kernels/int8-prefill/int8-prefill-ffn-b2/config.json": "d4a65cfac7c9ef2da4b82321b48bc3b60f836bfcd0dfa8d331d93cf05d07f88d",
+    "build/kernels/int8-prefill/int8-prefill-ffn-b2/design.xclbin": "285b16e93fbb8762abab88046a1413ffeccd25892e88bb1654730619dedc0894",
+    "build/kernels/int8-prefill/int8-prefill-ffn-b2/instructions.bin": "9cd33e771bc2ce77a7430f02468cc11f0cd60e110f6eb0fee24b32175158c66b",
+    "build/kernels/int8-prefill/int8-prefill-ffn-b2-projection-input/config.json": "dcdd5c8d8436aae7df094940845cb7430e3593ec6e06fc863aaf984f0d78c7cb",
+    "build/kernels/int8-prefill/int8-prefill-ffn-b2-projection-input/design.xclbin": "49980ca2991cbb2d9c0494b1aeeac88723fc17abdd09dc0ca9befd7156dec0d4",
+    "build/kernels/int8-prefill/int8-prefill-ffn-b2-projection-input/instructions.bin": "7a13314de2b4bb8defbf17a19c355bbc1fdb3361bec1f1aef7785ac8a3c5afec",
+    "tests/inference/prefill_ffn_test.cpp": "d824aee8856530283564b6b8750f783fccf263e4d978120d26f0c460a7f56a5e",
+    "tests/inference/prefill_model_test.cpp": "3df50f220b3088c69d4f4d1b927f3f39b8bc12c768fb99e42cecf36d321b539b"
+  },
+  "benchmark": {
+    "int8-ffn": {
+      "blocks": [
+        {
+          "block": "a1",
+          "prefill_seconds": [
+            6.0855543,
+            6.011379726
+          ],
+          "decode_mean_ms": 188.7698153125,
+          "graph_build_seconds": 3.732178602,
+          "resident_bytes": 2124396544,
+          "root_bos": 291,
+          "prefill_runs": 3936
+        },
+        {
+          "block": "b1",
+          "prefill_seconds": [
+            3.960462539,
+            4.007566185
+          ],
+          "decode_mean_ms": 186.56571858333334,
+          "graph_build_seconds": 3.629400997,
+          "resident_bytes": 2154590208,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        },
+        {
+          "block": "b2",
+          "prefill_seconds": [
+            3.954027752,
+            3.942204829
+          ],
+          "decode_mean_ms": 187.53884952083334,
+          "graph_build_seconds": 3.591017753,
+          "resident_bytes": 2154590208,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        },
+        {
+          "block": "a2",
+          "prefill_seconds": [
+            6.08494264,
+            6.035614084
+          ],
+          "decode_mean_ms": 187.75048708333335,
+          "graph_build_seconds": 4.645238291,
+          "resident_bytes": 2124396544,
+          "root_bos": 291,
+          "prefill_runs": 3936
+        }
+      ],
+      "baseline_prefill_seconds": 6.0543726875,
+      "batch2_prefill_seconds": 3.96606532625,
+      "latency_reduction_percent": 34.492547271851436,
+      "throughput_ratio": 1.526543863871385,
+      "batch2_tokens_per_second": 8.068450055071757,
+      "baseline_decode_ms": 188.26015119791668,
+      "batch2_graph_decode_ms": 187.05228405208334,
+      "decode_change_percent": -0.6415946965662056
+    },
+    "int8-ffn-output": {
+      "blocks": [
+        {
+          "block": "a1",
+          "prefill_seconds": [
+            5.973787096,
+            5.934217759
+          ],
+          "decode_mean_ms": 186.0177205416667,
+          "graph_build_seconds": 3.715405395,
+          "resident_bytes": 2025306112,
+          "root_bos": 291,
+          "prefill_runs": 3936
+        },
+        {
+          "block": "b1",
+          "prefill_seconds": [
+            3.884303597,
+            3.88130103
+          ],
+          "decode_mean_ms": 187.60909706250004,
+          "graph_build_seconds": 3.634509185,
+          "resident_bytes": 2055499776,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        },
+        {
+          "block": "b2",
+          "prefill_seconds": [
+            3.889675971,
+            3.884142168
+          ],
+          "decode_mean_ms": 185.75405118750007,
+          "graph_build_seconds": 3.683983738,
+          "resident_bytes": 2055499776,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        },
+        {
+          "block": "a2",
+          "prefill_seconds": [
+            5.92679845,
+            5.930828882
+          ],
+          "decode_mean_ms": 185.6918166458333,
+          "graph_build_seconds": 3.710962473,
+          "resident_bytes": 2025306112,
+          "root_bos": 291,
+          "prefill_runs": 3936
+        }
+      ],
+      "baseline_prefill_seconds": 5.94140804675,
+      "batch2_prefill_seconds": 3.8848556915,
+      "latency_reduction_percent": 34.613888476738296,
+      "throughput_ratio": 1.529376769322398,
+      "batch2_tokens_per_second": 8.237114204786415,
+      "baseline_decode_ms": 185.85476859375,
+      "batch2_graph_decode_ms": 186.68157412500005,
+      "decode_change_percent": 0.4448664607886954
+    }
+  },
+  "benchmark_scope": "A/B/B/A per precision; serial NPU, 4 warmup decode tokens, 2 trials per process with 32 prefill / 24 decode tokens; setup and reset excluded. Combined effect of FFN batching, stage grouping and final-only logits. Small block-to-block drift; no confidence interval or saturation claim.",
+  "metrics": {
+    "graph_nodes_per_decode": 960,
+    "decode_runs": 123,
+    "prefill_runs_32_tokens": {
+      "sequential": 3936,
+      "batch2": 3490
+    },
+    "prefill_host_upload_bytes_32_tokens": 262144,
+    "prefill_host_download_bytes_32_tokens": {
+      "sequential": 8388608,
+      "batch2": 262144
+    },
+    "extra_resident_bytes": 30193664,
+    "extra_root_bos": 122,
+    "FFN_weight_payload_per_pair": {
+      "two_decode": 68157440,
+      "batch2": 34078720
+    },
+    "counter_limit": "Payload and host BO traffic are not measured device DMA bandwidth or hardware utilization."
+  },
+  "runtime_artifacts": "Added the two tested INT8 prefill artifact directories to build/kernels/rwkv7-bf16 with byte comparison. Existing decode and BF16 prefill artifacts unchanged; freshly rebuilt BF16 helper variant was separately validated in the candidate root."
+}

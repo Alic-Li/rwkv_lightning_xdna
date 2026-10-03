@@ -82,7 +82,8 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
   prefill_logits = remap(device_buffers[logits], true);
   prefill_body.push_back(bind(0, false));
   prefill_body.push_back(bind(0, true));
-  auto &ffn = session(root, "bf16-prefill-ffn-b2-projection-input");
+  auto &ffn = session(root, weight_mode == WeightMode::BFloat16
+      ? "bf16-prefill-ffn-b2-projection-input" : "int8-prefill-ffn-b2-projection-input");
   for (size_t l = 0; l < layers; ++l) {
     for (size_t stage = 0; stage < 4; ++stage) {
       prefill_body.push_back(bind(1 + l * 5 + stage, false));

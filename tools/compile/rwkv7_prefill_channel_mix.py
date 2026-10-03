@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Two-token BF16 ChannelMix: one submission, shared streamed weight tiles."""
+"""Two-token BF16/W8A16 ChannelMix: one submission, shared streamed weight tiles."""
+import argparse
 import json
 import numpy as np
 from ml_dtypes import bfloat16
@@ -15,7 +16,11 @@ def bt(n):
 
 @iron.jit
 def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
-           *, projection_input: CompileTime[bool] = False):
+           *, projection_input: CompileTime[bool] = False, quantized: CompileTime[bool] = False):
+    wt = (lambda n: np.ndarray[(n,), np.dtype[np.uint8]]) if quantized else bt
+    tile = 4160 if quantized else 4096
+    stripe, count = 1024 * tile, 8192 * tile
+    matrix_stack = 18432 if quantized else 12288
     packed = ObjectFifo(typ(6144), name="norm_input", depth=1)
     inputs = packed.prod().join([0, 2048, 4096], tile=Tile(0, 1), obj_types=[typ(2048)] * 3)
     normalized = ObjectFifo(typ(2048), name="normalized", depth=1)
@@ -28,16 +33,18 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
     mix = external("rwkv7_prefill_mix_tokens", "prefill_mix_bf16.cc",
                    [typ(2048), typ(4096), typ(2048), bt(4096), np.int32], optimization="-O3")
     init = mix.object_file.bind("rwkv7_prefill_shift_init", [typ(4096), typ(2048)])
-    key = external("rwkv7_prefill_key", "prefill_channel_bf16.cc",
-                   [bt(4096), bt(4096), typ(4096), np.int32, np.int32], optimization="-O3")
-    value = key.object_file.bind("rwkv7_prefill_value",
-                   [bt(16384), bt(4096), typ(1024), np.int32, np.int32])
+    key = external("rwkv7_prefill_key_int8" if quantized else "rwkv7_prefill_key",
+                   "prefill_channel_int8.cc" if quantized else "prefill_channel_bf16.cc",
+                   [bt(4096), wt(tile), typ(4096), np.int32, np.int32], optimization="-O3",
+                   stack_size=16384 if quantized else 8192)
+    value = key.object_file.bind("rwkv7_prefill_value_int8" if quantized else "rwkv7_prefill_value",
+                   [bt(16384), wt(tile), typ(1024), np.int32, np.int32])
     zero_key = key.object_file.bind("rwkv7_prefill_zero4096", [typ(4096)])
     zero_value = key.object_file.bind("rwkv7_prefill_zero1024", [typ(1024)])
     relu = key.object_file.bind("rwkv7_prefill_activate4096", [typ(4096), bt(4096)])
     add = key.object_file.bind("rwkv7_prefill_add4096", [typ(4096)] * 3)
-    wk = [ObjectFifo(bt(4096), name=f"kw{i}", depth=2) for i in range(4)]
-    wv = [ObjectFifo(bt(4096), name=f"vw{i}", depth=2) for i in range(4)]
+    wk = [ObjectFifo(wt(tile), name=f"kw{i}", depth=2) for i in range(4)]
+    wv = [ObjectFifo(wt(tile), name=f"vw{i}", depth=2) for i in range(4)]
     raw_out = ObjectFifo(typ(16384), name="raw", depth=1)
     act_out = ObjectFifo(bt(16384), name="activated", depth=1)
     # Contiguous core stripes: [core, token, channel]. Matrix/residual kernels
@@ -102,9 +109,9 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
                tile=Tile(1, 2), stack_size=12288),
     ]
     workers += [Worker(keys, [mx.cons(), wk[i].cons(), kr[i].prod(), ka[i].prod(), key, zero_key, relu],
-                       tile=Tile(i, 3), stack_size=12288) for i in range(4)]
+                       tile=Tile(i, 3), stack_size=matrix_stack) for i in range(4)]
     workers += [Worker(values, [act_out.cons(), wv[i].cons(), vp[i].prod(), value, zero_value],
-                       tile=Tile(i + 4, 3), stack_size=12288) for i in range(4)]
+                       tile=Tile(i + 4, 3), stack_size=matrix_stack) for i in range(4)]
     workers += [Worker(residual, [residual_x.cons(), proj.cons(), final.prod(), add],
                        tile=Tile(7, 2), stack_size=12288)]
     def seq(x, p, w, f, h, hx, hw, hb, hc, hs, hkw, hvw, hm, hr, ha, hv, hres, hy, ho):
@@ -116,8 +123,8 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
         hc.fill(p, tap=TAP((6144,), 4096, [1, 1, 1, 2048], [0, 0, 0, 1]))
         hs.fill(f, tap=TAP((26624,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]))
         for i in range(4):
-            hkw[i].fill(w, tap=TAP((33554432,), i * 4194304, [1, 1, 1, 4194304], [0, 0, 0, 1]))
-            hvw[i].fill(w, tap=TAP((33554432,), 16777216 + i * 4194304, [1, 1, 1, 4194304], [0, 0, 0, 1]))
+            hkw[i].fill(w, tap=TAP((count,), i * stripe, [1, 1, 1, stripe], [0, 0, 0, 1]))
+            hvw[i].fill(w, tap=TAP((count,), count // 2 + i * stripe, [1, 1, 1, stripe], [0, 0, 0, 1]))
         hm.drain(h, tap=TAP((20480,), 0, [1, 1, 1, 4096], [0, 0, 0, 1]), wait=True)
         hr.drain(f, tap=TAP((26624,), 2048, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True)
         ha.drain(h, tap=TAP((20480,), 4096, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True)
@@ -126,7 +133,7 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
         hy.drain(f, tap=TAP((26624,), 22528, [1, 1, 1, 4096], [0, 0, 0, 1]), wait=True)
         ho.drain(f, tap=TAP((26624,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]), wait=True)
     return Program(iron.get_current_device(), Runtime(seq, [
-        typ(8192 if projection_input else 4096), typ(6144), bt(33554432), typ(26624), bt(20480),
+        typ(8192 if projection_input else 4096), typ(6144), wt(count), typ(26624), bt(20480),
         *[f.prod() for f in inputs], *[f.prod() for f in joins],
         [f.prod() for f in wk], [f.prod() for f in wv],
         mix_out.cons(), raw_out.cons(), act_out.cons(), proj.cons(),
@@ -134,19 +141,23 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
     ]), workers=workers).resolve_program()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--int8", action="store_true", help="Compile W8A16 variants instead of BF16")
+    quantized = parser.parse_args().int8
     for projection_input in (False, True):
         suffix = "-projection-input" if projection_input else ""
-        path = KERNEL_ROOT / ("bf16-prefill-ffn-b2" + suffix)
+        path = KERNEL_ROOT / (("int8" if quantized else "bf16") + "-prefill-ffn-b2" + suffix)
         path.mkdir(parents=True, exist_ok=True)
-        design.specialize(projection_input=projection_input).compile(
+        design.specialize(projection_input=projection_input, quantized=quantized).compile(
             path / "design.xclbin", path / "instructions.bin")
         (path / "config.json").write_text(json.dumps(dict(
             schema_version=1, batch=2, channels=2048, hidden=8192,
-            weights="bfloat16", activation="bfloat16", state="float32",
+            weights="int8" if quantized else "bfloat16", activation="bfloat16", state="float32",
             layout="token_major", runs_per_batch=1,
             input_layout="projection_residual_pairs" if projection_input else "token_major",
             fp32_arena_floats=26624, bf16_arena_elements=20480,
             fp32_offsets=dict(shift=0, raw=2048, projected=18432, output=22528),
             bf16_offsets=dict(mixed=0, activated=4096),
+            **(dict(tile_bytes=4160, scale="fp16_expanded_fp32") if quantized else {}),
         )) + "\n")
         print(path, flush=True)

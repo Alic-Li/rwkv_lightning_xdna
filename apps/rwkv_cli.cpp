@@ -39,7 +39,7 @@ void usage() {
          "CPU; resident keeps "
          "intermediates in NPU BOs\n"
          "  --prefill sequence|decode|batch2  default decode; sequence available on "
-         "CPU; batch2 requires NPU BF16 and returns final prompt logits\n"
+         "CPU; batch2 requires NPU and returns final prompt logits\n"
          "  --threads N             CPU threads, default 8\n"
          "  --tokens 1,2,3 --dump-logits FILE  diagnostic: dump FP32 logits "
          "after every input token\n";
@@ -183,9 +183,9 @@ int main(int argc, char **argv) {
       throw std::runtime_error(
           "NPU inference requires --decode resident and --prefill decode or batch2");
     if (opts["--prefill"] == "batch2" &&
-        (opts["--backend"] != "npu" || opts["--weights"] != "bf16" ||
+        (opts["--backend"] != "npu" ||
          !opts["--dump-logits"].empty()))
-      throw std::runtime_error("batch2 requires NPU BF16 and cannot dump per-token logits");
+      throw std::runtime_error("batch2 requires NPU and cannot dump per-token logits");
     rwkv::inference::Model model(weights, *backend);
     auto state = model.initial_state();
     if (opts["--decode"] != "graph" && opts["--decode"] != "resident" &&

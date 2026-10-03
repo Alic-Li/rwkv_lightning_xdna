@@ -61,14 +61,18 @@ struct Snapshot {
 };
 int main(int argc, char **argv) {
   try {
+    const bool output_int8 = argc > 1 && std::string(argv[argc - 1]) == "--int8-ffn-output";
+    const bool int8 = output_int8 || (argc > 1 && std::string(argv[argc - 1]) == "--int8-ffn");
+    if (int8) --argc;
     if (argc != 5 || (std::string(argv[3]) != "record" && std::string(argv[3]) != "verify"))
-      throw std::runtime_error("Usage: rwkv-prefill-model-test MODEL KERNELS record|verify SNAPSHOT");
+      throw std::runtime_error("Usage: rwkv-prefill-model-test MODEL KERNELS record|verify SNAPSHOT [--int8-ffn|--int8-ffn-output]");
     const bool record = std::string(argv[3]) == "record";
     Snapshot snapshot(argv[4], record);
     Weights weights(argv[1]);
     auto backend = cpu_backend();
     Model model(weights, *backend);
-    DecodeGraph graph(weights, argv[2], WeightMode::BFloat16,
+    DecodeGraph graph(weights, argv[2], output_int8 ? WeightMode::Int8FFNOutput :
+                      int8 ? WeightMode::Int8FFN : WeightMode::BFloat16,
                       record ? PrefillMode::Sequential : PrefillMode::Batched2);
     auto rejected = [&](auto action) {
       bool failed = false;
@@ -118,7 +122,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error("Snapshot trailing data");
     auto stats = graph.stats();
     std::cout << Json({{"status", "passed"}, {"mode", record ? "record" : "verify"},
-        {"vectors", snapshot.vectors}, {"resident_bytes", stats.resident_bytes},
+        {"vectors", snapshot.vectors}, {"weights", output_int8 ? "int8_ffn_output" : int8 ? "int8_ffn" : "bf16"}, {"resident_bytes", stats.resident_bytes},
         {"root_bos", stats.root_bos}, {"prefill_pair_runs", stats.prefill_pair_runs},
         {"prefill_runs", stats.prefill_runs}}).dump() << '\n';
   } catch (const std::exception &e) {

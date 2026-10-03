@@ -76,8 +76,8 @@ DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
       capture_prefill(prefill == PrefillMode::Batched2) {
   if (prefill != PrefillMode::Sequential && prefill != PrefillMode::Batched2)
     throw std::invalid_argument("Invalid prefill mode");
-  if (capture_prefill && (resident.empty() || mode != WeightMode::BFloat16))
-    throw std::invalid_argument("Batched2 prefill currently requires BF16 NPU weights");
+  if (capture_prefill && resident.empty())
+    throw std::invalid_argument("Batched2 prefill requires NPU artifacts");
   if (mode != WeightMode::BFloat16 && mode != WeightMode::Int8FFN &&
       mode != WeightMode::Int8FFNOutput)
     throw std::invalid_argument("Invalid weight mode");

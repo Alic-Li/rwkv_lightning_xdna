@@ -53,7 +53,8 @@ public:
   void load_state(const State &);
   State export_state() const;
   Vector replay_resident(int token);
-  // Batched2 constructor required. Returns final-token logits; empty input is
+  // Batched2 constructor required; supports all NPU weight modes.
+  // Returns final-token logits; empty input is
   // a no-op. Odd tails use the resident decode transition. No trace hooks.
   Vector prefill_resident(const std::vector<int> &tokens);
   GraphStats stats() const;

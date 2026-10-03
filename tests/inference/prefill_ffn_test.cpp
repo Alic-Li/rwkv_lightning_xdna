@@ -23,10 +23,15 @@ static void same(const float *a, const float *b, size_t n, const char *name) {
 }
 int main(int argc, char **argv) {
   try {
-    const bool projection_input = argc > 1 && std::string(argv[argc - 1]) == "--projection-input";
-    if (projection_input) --argc;
+    bool projection_input = false, quantized = false;
+    while (argc > 1 && std::string(argv[argc - 1]).rfind("--", 0) == 0) {
+      const std::string flag(argv[--argc]);
+      if (flag == "--projection-input") projection_input = true;
+      else if (flag == "--int8") quantized = true;
+      else throw std::runtime_error("Unknown option: " + flag);
+    }
     if (argc < 3 || argc > 4)
-      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS] [--projection-input]");
+      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS] [--projection-input] [--int8]");
     size_t iterations = 100;
     if (argc == 4) {
       std::string count(argv[3]);
@@ -36,14 +41,16 @@ int main(int argc, char **argv) {
       if (!iterations || iterations > 1000000)
         throw std::runtime_error("Iterations outside [1, 1000000]");
     }
-    auto session = [](std::filesystem::path root, const char *name) {
+    auto session = [](std::filesystem::path root, const std::string &name) {
       return Session(root / name / "design.xclbin", root / name / "instructions.bin");
     };
-    auto fused = session(argv[1], projection_input ? "bf16-prefill-ffn-b2-projection-input" : "bf16-prefill-ffn-b2");
+    const std::string prefix = quantized ? "int8" : "bf16";
+    auto fused = session(argv[1], prefix + "-prefill-ffn-b2" +
+                         (projection_input ? "-projection-input" : ""));
     auto input_offset = [&](size_t t) { return projection_input ? t * 4096 + 2048 : t * 2048; };
-    auto decode = session(argv[2], "bf16-channel-mix");
+    auto decode = session(argv[2], prefix + "-channel-mix");
     Guarded x(fused, (projection_input ? 8192 : 4096) * 4), parameters(fused, 6144 * 4),
-        weights(fused, 33554432 * 2), fp32(fused, 26624 * 4), half(fused, 20480 * 2),
+        weights(fused, quantized ? 8192 * 4160 : 33554432 * 2), fp32(fused, 26624 * 4), half(fused, 20480 * 2),
         diag(decode, 22528 * 4), reference(decode, 4096 * 4);
     auto shift = fp32.data.slice(0, 2048 * 4);
     auto raw = fp32.data.slice(2048 * 4, 16384 * 4);
@@ -61,7 +68,39 @@ int main(int argc, char **argv) {
     std::uniform_real_distribution<float> random(-1, 1);
     std::vector<uint16_t> w(33554432);
     for (auto &v : w) v = bf16(random(rng) / 64);
-    weights.data.upload(w.data(), weights.bytes);
+    std::vector<uint8_t> weight_bytes(weights.bytes);
+    if (quantized) {
+      // Self-contained packed INT8 tiles with FP16-exact row scales. Include
+      // signed endpoints, zero rows and varying scales; oracle weights below
+      // use code*scale without BF16 weight rounding in the FP64 oracle.
+      for (size_t matrix = 0; matrix < 2; ++matrix) {
+        const size_t k = matrix ? 8192 : 2048;
+        const size_t rows = matrix ? 2048 : 8192;
+        for (size_t row = 0; row < rows; ++row) {
+          const float scale = std::ldexp(1.f + float(row % 8) / 16.f, -14 + int(row % 4));
+          for (size_t col = 0; col < k; ++col) {
+            const size_t index = matrix * 16777216 + packed(row, col, k);
+            const int8_t code = row == 0 ? 0 : int8_t(int((row * 31 + col * 17) % 255) - 127);
+            weight_bytes[(index / 4096) * 4160 + index % 4096] = uint8_t(code);
+            w[index] = bf16(float(code) * scale);
+            if (col % 256 == 0)
+              std::memcpy(weight_bytes.data() + (index / 4096) * 4160 + 4096 + (row % 16) * 4,
+                          &scale, 4);
+          }
+        }
+      }
+    } else std::memcpy(weight_bytes.data(), w.data(), weights.bytes);
+    weights.data.upload(weight_bytes.data(), weights.bytes);
+    auto oracle_weight = [&](size_t index) -> float {
+      if (!quantized) return expand(w[index]);
+      const size_t tile = (index / 4096) * 4160;
+      const int8_t code = static_cast<int8_t>(weight_bytes[tile + index % 4096]);
+      float scale;
+      std::memcpy(&scale, weight_bytes.data() + tile + 4096 + ((index % 4096) / 256) * 4, 4);
+      // Do not round dequantized weights to BF16: resident W8A16 applies the
+      // row scale after accumulating the integer-code dot product.
+      return float(code) * scale;
+    };
     V params(6144), initial(2048), input(4096), previous;
     for (auto &v : params) v = random(rng) / 8;
     for (size_t i = 0; i < 2048; ++i) params[i] += 1;
@@ -131,7 +170,7 @@ int main(int argc, char **argv) {
         for (size_t row = 0; row < 8192; ++row) {
           double dot = 0;
           for (size_t col = 0; col < 2048; ++col)
-            dot += double(expand(w[packed(row, col, 2048)])) *
+            dot += double(oracle_weight(packed(row, col, 2048))) *
                    expand(actual_mixed[t * 2048 + col]);
           check(actual_raw[t * 8192 + row], dot);
           float relu = std::max(actual_raw[t * 8192 + row], 0.f);
@@ -141,7 +180,7 @@ int main(int argc, char **argv) {
         for (size_t row = 0; row < 2048; ++row) {
           double dot = 0;
           for (size_t col = 0; col < 8192; ++col)
-            dot += double(expand(w[16777216 + packed(row, col, 8192)])) *
+            dot += double(oracle_weight(16777216 + packed(row, col, 8192))) *
                    expand(actual_active[t * 8192 + col]);
           check(actual_projected[t * 2048 + row], dot);
           check(actual[t * 2048 + row], actual_projected[t * 2048 + row] + input[t * 2048 + row]);
@@ -155,11 +194,11 @@ int main(int argc, char **argv) {
       for (auto *b : {&x, &parameters, &weights, &fp32, &half, &diag, &reference}) b->guard();
     }
     V unchanged_x(packed_input.size()), unchanged_parameters(6144);
-    std::vector<uint16_t> unchanged_w(w.size());
+    std::vector<uint8_t> unchanged_w(weight_bytes.size());
     x.data.download(unchanged_x.data(), x.bytes);
     parameters.data.download(unchanged_parameters.data(), parameters.bytes);
     weights.data.download(unchanged_w.data(), weights.bytes);
-    if (unchanged_x != packed_input || unchanged_parameters != params || unchanged_w != w)
+    if (unchanged_x != packed_input || unchanged_parameters != params || unchanged_w != weight_bytes)
       throw std::runtime_error("Immutable input changed");
     Json timings = Json::array();
     for (bool batched : {false, true, true, false}) {
@@ -180,11 +219,11 @@ int main(int argc, char **argv) {
           {"runs_per_two_tokens", batched ? 1 : 2}});
     }
     for (auto *b : {&x, &parameters, &weights, &fp32, &half, &diag, &reference}) b->guard();
-    std::cout << Json({{"status", "passed"}, {"input_passes", 4},
+    std::cout << Json({{"status", "passed"}, {"input_passes", 4}, {"weights", prefix},
         {"input_layout", projection_input ? "projection_residual_pairs" : "token_major"},
         {"oracle_max_abs", worst}, {"intermediates_output_shift_bitwise", "passed"},
         {"reset_branch_guards_immutable_inputs", "passed"}, {"timing_abba", timings},
-        {"scope", "Complete two-token BF16 FFN stage; model attention/WKV and prefill integration not included."}}).dump() << '\n';
+        {"scope", "Complete two-token FFN stage; model attention/WKV and prefill integration not included."}}).dump() << '\n';
   } catch (const std::exception &e) {
     std::cerr << "prefill FFN: " << e.what() << '\n';
     return 1;

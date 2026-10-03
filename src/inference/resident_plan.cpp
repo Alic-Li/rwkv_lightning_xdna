@@ -47,14 +47,20 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
 }
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
-  if (capture_prefill)
-    check_artifact(root, "bf16-prefill-ffn-b2-projection-input",
+  if (capture_prefill) {
+    const bool int8 = weight_mode != WeightMode::BFloat16;
+    const char *name = int8 ? "int8-prefill-ffn-b2-projection-input"
+                            : "bf16-prefill-ffn-b2-projection-input";
+    check_artifact(root, name,
         {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"hidden", 8192},
-         {"weights", "bfloat16"}, {"activation", "bfloat16"}, {"state", "float32"},
+         {"weights", int8 ? "int8" : "bfloat16"}, {"activation", "bfloat16"}, {"state", "float32"},
          {"layout", "token_major"}, {"input_layout", "projection_residual_pairs"},
          {"fp32_arena_floats", 26624}, {"bf16_arena_elements", 20480},
          {"fp32_offsets", {{"shift", 0}, {"raw", 2048}, {"projected", 18432}, {"output", 22528}}},
          {"bf16_offsets", {{"mixed", 0}, {"activated", 4096}}}});
+    if (int8) check_artifact(root, name,
+        {{"tile_bytes", 4160}, {"scale", "fp16_expanded_fp32"}});
+  }
   ResidentLayout layout;
   prepare_resident_arenas(root, layout);
   prepare_resident_runs(root, layout);
