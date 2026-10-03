@@ -214,6 +214,33 @@ PDI 计数，不能作为硬件利用率。正常计时继续使用拒绝 profil
 不能单独归因为 PDI。数值回归和未插桩性能检查见
 [prefill profile 证据](../reports/rwkv7-prefill-profile-2026-10-03.json)。
 
+## 实验性四-token chunked prefill
+
+`--prefill chunk4` 当前先开放 BF16，不改变默认的逐 token prefill。
+每层按阶段处理四个 token：attention/WKV 使用两次原有 batch2 kernel，
+WKV FP32 state 依次更新；FFN 一次权重流供四行复用。
+key 核将行结果流给独立的 activation 收集核，value 核分块读取设备已写入的
+activation，避免四行完整 activation 同时挤入每个 value tile。
+没有新增 CPU 模型算术或 host activation 往返。尾部1–3个 token 使用原 NPU decode。
+
+```bash
+cmake --build --preset release --target kernels-release-prefill-chunk4
+./build/release/rwkv-cli --model "$MODEL" --prefill chunk4 --prompt 'Hello world' --max-tokens 32
+./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 32 24 2 --prefill-chunk4
+```
+
+独立编译入口是 `rwkv7_optimized.py --prefill-chunk4 --output DIR`。
+它验证 output stride 变体的 PDI 逐字节相同后共享 xclbin/context，避免超过硬件
+context 上限；仅保留各自 DMA 指令。原有 batch2 仍可使用同一目录。
+新图额外占用60,977,152字节常驻 BO；每4个完整 token 的 body 为268次提交，
+末 chunk logits 另2次。更多提交不妨碍权重复用和连续执行同一程序带来的收益。
+
+本机首轮32-token A/B/B/A：prefill 3.437→2.590秒，9.31→12.35 tokens/s；
+decode 198.73→200.81 ms/token，后者有约1%退化，尚不据此替换默认路径。
+2,628个 logits/state 向量逐位验收通过，含0–64 token、各种尾部和状态分支。
+完整范围与限制见[BF16 chunk4 实测](../reports/rwkv7-chunk4-model-bf16-2026-10-03.json)。
+这不是已达硬件上限或长上下文质量验收的声明。
+
 ## 缺少生产 kernel
 
 若 CLI 报：

@@ -73,14 +73,17 @@ DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
                         const std::filesystem::path &resident, WeightMode mode,
                         PrefillMode prefill)
     : weights(w), backend(b), weight_mode(mode),
-      capture_prefill(prefill == PrefillMode::Batched2) {
-  if (prefill != PrefillMode::Sequential && prefill != PrefillMode::Batched2)
+      capture_prefill(prefill != PrefillMode::Sequential),
+      prefill_chunk_tokens(prefill == PrefillMode::Chunked4 ? 4 : 2) {
+  if (prefill != PrefillMode::Sequential && prefill != PrefillMode::Batched2 && prefill != PrefillMode::Chunked4)
     throw std::invalid_argument("Invalid prefill mode");
   if (capture_prefill && resident.empty())
     throw std::invalid_argument("Batched2 prefill requires NPU artifacts");
   if (mode != WeightMode::BFloat16 && mode != WeightMode::Int8FFN &&
       mode != WeightMode::Int8FFNOutput)
     throw std::invalid_argument("Invalid weight mode");
+  if (prefill == PrefillMode::Chunked4 && mode != WeightMode::BFloat16)
+    throw std::invalid_argument("Chunk4 currently requires BF16 weights");
   const size_t c = w.channels(), n = w.head_size();
   embedding = allocate(c);
   Id x = norm(embedding, w.at("blocks.0.ln0.weight"), w.at("blocks.0.ln0.bias"),
@@ -190,7 +193,9 @@ GraphStats DecodeGraph::stats() const {
           impl_->decode_run_count(),
           impl_->weights.channels() * 4,
           impl_->weights.vocabulary() * 4,
-          impl_->prefill_body.size() + impl_->prefill_head.size(),
-          impl_->prefill_run_count};
+          impl_->prefill_chunk_tokens == 2 ? impl_->prefill_body.size() + impl_->prefill_head.size() : 0,
+          impl_->prefill_run_count,
+          impl_->prefill_body.empty() ? 0 : impl_->prefill_chunk_tokens,
+          impl_->prefill_body.size() + impl_->prefill_head.size()};
 }
 } // namespace rwkv::inference

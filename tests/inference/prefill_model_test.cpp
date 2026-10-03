@@ -61,6 +61,8 @@ struct Snapshot {
 };
 int main(int argc, char **argv) {
   try {
+    const bool chunk4 = argc > 1 && std::string(argv[argc - 1]) == "--chunk4";
+    if (chunk4) --argc;
     const bool output_int8 = argc > 1 && std::string(argv[argc - 1]) == "--int8-ffn-output";
     const bool int8 = output_int8 || (argc > 1 && std::string(argv[argc - 1]) == "--int8-ffn");
     if (int8) --argc;
@@ -73,7 +75,7 @@ int main(int argc, char **argv) {
     Model model(weights, *backend);
     DecodeGraph graph(weights, argv[2], output_int8 ? WeightMode::Int8FFNOutput :
                       int8 ? WeightMode::Int8FFN : WeightMode::BFloat16,
-                      record ? PrefillMode::Sequential : PrefillMode::Batched2);
+                      record ? PrefillMode::Sequential : chunk4 ? PrefillMode::Chunked4 : PrefillMode::Batched2);
     auto rejected = [&](auto action) {
       bool failed = false;
       try { action(); } catch (const std::exception &) { failed = true; }
@@ -84,7 +86,9 @@ int main(int argc, char **argv) {
     graph.load_state(zero);
     for (int token : {1, 2, 7}) graph.replay_resident(token);
     const auto warm = graph.export_state();
-    for (size_t length : {size_t(0), size_t(1), size_t(2), size_t(3), size_t(8), size_t(17), size_t(32)}) {
+    std::vector<size_t> lengths{0,1,2,3,8,17,32};
+    if (chunk4) lengths.insert(lengths.end(), {4,5,7,9,64});
+    for (size_t length : lengths) {
       // Zero-state pair plus nonzero-state prompts exercise state sharing and
       // odd tails. All cases also verify the handoff to resident decode.
       graph.load_state(length == 2 ? zero : warm);
@@ -124,7 +128,8 @@ int main(int argc, char **argv) {
     std::cout << Json({{"status", "passed"}, {"mode", record ? "record" : "verify"},
         {"vectors", snapshot.vectors}, {"weights", output_int8 ? "int8_ffn_output" : int8 ? "int8_ffn" : "bf16"}, {"resident_bytes", stats.resident_bytes},
         {"root_bos", stats.root_bos}, {"prefill_pair_runs", stats.prefill_pair_runs},
-        {"prefill_runs", stats.prefill_runs}}).dump() << '\n';
+        {"prefill_runs", stats.prefill_runs}, {"prefill_chunk_tokens", stats.prefill_chunk_tokens},
+        {"prefill_chunk_runs", stats.prefill_chunk_runs}}).dump() << '\n';
   } catch (const std::exception &e) {
     std::cerr << "prefill model: " << e.what() << '\n'; return 1;
   }

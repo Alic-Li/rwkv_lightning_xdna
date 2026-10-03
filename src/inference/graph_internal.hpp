@@ -33,6 +33,7 @@ struct DecodeGraph::Impl {
   RecurrentBackend *backend;
   WeightMode weight_mode;
   bool capture_prefill = false;
+  size_t prefill_chunk_tokens = 2;
   std::vector<Buffer> buffers;
   std::vector<Node> nodes;
   int recording_layer = -1;
@@ -73,6 +74,7 @@ struct DecodeGraph::Impl {
   };
   std::vector<PrefillRun> prefill_body, prefill_head;
   xdna::DeviceBuffer prefill_embedding, prefill_logits;
+  std::vector<xdna::DeviceBuffer> chunk_embeddings;
   size_t prefill_run_count = 0;
   size_t resident_bytes = 0, upload_bytes = 0, download_bytes = 0, root_bos = 0;
   xdna::Session &session(const std::filesystem::path &root,
@@ -89,6 +91,7 @@ struct DecodeGraph::Impl {
   void prepare_resident_runs(const std::filesystem::path &, ResidentLayout &);
   void prepare_resident(const std::filesystem::path &root);
   void prepare_decode_fusion(const std::filesystem::path &root);
+  void prepare_chunk4(const std::filesystem::path &root);
   void prepare_prefill(const std::filesystem::path &root);
   Vector prefill(const std::vector<int> &tokens);
   Id allocate(size_t size);

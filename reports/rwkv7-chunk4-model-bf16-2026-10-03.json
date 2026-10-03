@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-03",
+  "status": "validated BF16 opt-in chunk4; default stays sequential/batch2",
+  "schedule": "Four token activation slots; per layer run four norm/mix, two paired attention, two time-ordered FP32 recurrence, two paired outputs, one four-token FFN. Only final prompt logits; tails use 1-3 resident NPU decodes.",
+  "context_limit": "Initial graph hit hardware-context limit. Output stride compiler --share-program asserts byte-identical PDI then shares xclbin/UUID, retaining distinct DMA instructions. No runtime changes.",
+  "validation": "2628 bitwise logits/state vectors; lengths 0,1,2,3,4,5,7,8,9,17,32,64; warm/zero states, reset/branch and decode handoff. Stage oracle/guards in rwkv7-chunk4-ffn-stage-2026-10-03.json.",
+  "blocks": {
+    "A1": {
+      "prefill_s": [
+        3.441062265,
+        3.432050996
+      ],
+      "decode_ms": 198.60606927083333,
+      "prefill_runs": [
+        1970,
+        1970
+      ]
+    },
+    "B1": {
+      "prefill_s": [
+        2.581380576,
+        2.642330755
+      ],
+      "decode_ms": 200.73073499999998,
+      "prefill_runs": [
+        2146,
+        2146
+      ]
+    },
+    "B2": {
+      "prefill_s": [
+        2.569175508,
+        2.567571056
+      ],
+      "decode_ms": 200.8905736458333,
+      "prefill_runs": [
+        2146,
+        2146
+      ]
+    },
+    "A2": {
+      "prefill_s": [
+        3.43950051,
+        3.435583233
+      ],
+      "decode_ms": 198.8582733541667,
+      "prefill_runs": [
+        1970,
+        1970
+      ]
+    }
+  },
+  "summary": {
+    "A": {
+      "prefill_s": 3.437049251,
+      "prefill_tokens_s": 9.310311742169446,
+      "decode_ms": 198.73217131250001
+    },
+    "B": {
+      "prefill_s": 2.59011447375,
+      "prefill_tokens_s": 12.354666299235031,
+      "decode_ms": 200.81065432291666
+    }
+  },
+  "limits": [
+    "Short 32-token A/B/B/A is not a hardware-limit estimate.",
+    "Decode mean regresses about 1%; longer follow-up required before considering default promotion.",
+    "BF16 only at this node; INT8 extension independently evaluated.",
+    "More total submissions than fused batch2; gain must be judged by model time, not submission count."
+  ],
+  "logs": "reports/runs/throughput-resume-2026-10-03",
+  "power_mode": "default, serial NPU",
+  "resident_bytes": {
+    "batch2": 2947313664,
+    "chunk4": 3008290816
+  }
+}

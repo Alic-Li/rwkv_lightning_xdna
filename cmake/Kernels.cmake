@@ -31,3 +31,9 @@ add_custom_target(kernels-release-int8-prefill
     COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
         --output "${RWKV_XDNA_KERNEL_DIR}" --int8-ffn-output --prefill-batch2
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+
+# Opt-in experiment; no change to kernels-release/default decode.
+add_custom_target(kernels-release-prefill-chunk4
+    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
+        --output "${RWKV_XDNA_KERNEL_DIR}" --prefill-chunk4
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)

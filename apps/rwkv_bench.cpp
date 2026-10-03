@@ -37,16 +37,17 @@ static Json distribution(std::vector<double> values) {
 }
 int main(int argc, char **argv) {
   try {
-    bool output_int8 = false, int8 = false, batch2 = false;
+    bool output_int8 = false, int8 = false, batch2 = false, chunk4 = false;
     while (argc > 1 && std::string(argv[argc - 1]).rfind("--", 0) == 0) {
       const std::string flag(argv[--argc]);
-      if (flag == "--prefill-batch2") batch2 = true;
+      if (flag == "--prefill-chunk4") chunk4 = batch2 = true;
+      else if (flag == "--prefill-batch2") batch2 = true;
       else if (flag == "--int8-ffn-output") output_int8 = int8 = true;
       else if (flag == "--int8-ffn") int8 = true;
       else throw std::invalid_argument("Unknown flag: " + flag);
     }
     if (argc != 3 && argc != 6)
-      throw std::invalid_argument("Usage: rwkv-bench MODEL KERNELS [PREFILL_TOKENS DECODE_TOKENS TRIALS] [--int8-ffn|--int8-ffn-output] [--prefill-batch2]");
+      throw std::invalid_argument("Usage: rwkv-bench MODEL KERNELS [PREFILL_TOKENS DECODE_TOKENS TRIALS] [--int8-ffn|--int8-ffn-output] [--prefill-batch2|--prefill-chunk4]");
     if (std::getenv("RWKV_XDNA_PROFILE"))
       throw std::invalid_argument("Unset RWKV_XDNA_PROFILE for uninstrumented benchmarks; use rwkv-cli for stage profiles");
     const size_t prefill = argc == 6 ? count(argv[3]) : 32;
@@ -61,7 +62,7 @@ int main(int argc, char **argv) {
     start = Clock::now();
     DecodeGraph graph(weights, argv[2], output_int8 ? WeightMode::Int8FFNOutput :
                      int8 ? WeightMode::Int8FFN : WeightMode::BFloat16,
-                     batch2 ? PrefillMode::Batched2 : PrefillMode::Sequential);
+                     chunk4 ? PrefillMode::Chunked4 : batch2 ? PrefillMode::Batched2 : PrefillMode::Sequential);
     double build_s = seconds(start);
     graph.load_state(initial);
     for (int i = 0; i < 4; ++i)
@@ -100,7 +101,7 @@ int main(int argc, char **argv) {
           {"prefill_runs", prefill_runs},
           {"prefill_runs_per_token", double(prefill_runs) / prefill},
           {"prefill_host_upload_bytes", prefill * graph.stats().persistent_upload_bytes},
-          {"prefill_host_download_bytes", (batch2 ? 1 : prefill) * graph.stats().persistent_download_bytes},
+          {"prefill_host_download_bytes", (batch2 ? (chunk4 ? std::max(size_t(1), prefill % 4) : size_t(1)) : prefill) * graph.stats().persistent_download_bytes},
           {"prefill_tokens_per_second", prefill / prefill_s},
           {"decode_samples_ms", sample},
           {"decode", distribution(sample)}});
@@ -110,7 +111,8 @@ int main(int argc, char **argv) {
       {"kernels", argv[2]}, {"precision", output_int8 ? "int8_ffn_output_bf16_others_fp32_state" :
         int8 ? "int8_ffn_bf16_others_fp32_state" : "bf16_weights_inputs_fp32_state"},
       {"workload", "fixed synthetic token IDs"},
-      {"prefill_mode", batch2 ? "batch2_ffn_final_logits" : "sequential_all_logits"},
+      {"prefill_mode", chunk4 ? "chunk4_ffn_final_logits" : batch2 ? "batch2_ffn_final_logits" : "sequential_all_logits"},
+      {"prefill_chunk_tokens", stats.prefill_chunk_tokens}, {"prefill_chunk_runs", stats.prefill_chunk_runs},
       {"prefill_tokens", prefill}, {"decode_tokens", decode},
       {"warmup_tokens", 4}, {"weight_load_seconds", load_s},
       {"graph_build_seconds", build_s}, {"trials", trial_results},

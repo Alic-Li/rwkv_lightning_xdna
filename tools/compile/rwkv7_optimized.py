@@ -14,7 +14,10 @@ def main():
     parser.add_argument("--int8-ffn", action="store_true", help="Also compile experimental W8A16 ChannelMix")
     parser.add_argument("--int8-ffn-output", action="store_true", help="Also compile W8A16 ChannelMix and attention output")
     parser.add_argument("--prefill-batch2", action="store_true", help="Also compile two-token ChannelMix prefill for the selected precisions")
+    parser.add_argument("--prefill-chunk4", action="store_true", help="Compile experimental four-token BF16 prefill")
     args = parser.parse_args()
+    if args.prefill_chunk4:
+        args.prefill_batch2 = True
     env = dict(os.environ, MLIR_AIE_KERNEL_SOURCES=str(ROOT / "third_party/mlir-aie"),
                RWKV_XDNA_KERNEL_DIR=str(args.output.resolve()))
     # Ordered only for reproducible build logs; each program has its own directory.
@@ -29,13 +32,17 @@ def main():
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_recurrence.py")],
                        cwd=ROOT, env=env, check=True)
-        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_output.py")],
+        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_output.py"),
+                        *(["--share-program"] if args.prefill_chunk4 else [])],
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_attention_projections.py"), "--batch", "2"],
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_channel_mix.py")],
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_channel_mix.py"), "--recurrence-input"],
+                       cwd=ROOT, env=env, check=True)
+    if args.prefill_chunk4:
+        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_chunk4_ffn_experiment.py"), "--projection-input"],
                        cwd=ROOT, env=env, check=True)
     if args.prefill_batch2 and (args.int8_ffn or args.int8_ffn_output):
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_channel_mix.py"), "--int8"],

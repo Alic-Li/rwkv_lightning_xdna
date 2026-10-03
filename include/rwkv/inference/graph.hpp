@@ -7,7 +7,7 @@ namespace rwkv::inference {
 // BF16; accumulation, recurrent state and nonlinear operations remain FP32.
 // Int8FFNOutput also quantizes attention output weights; both modes are W8A16.
 enum class WeightMode { BFloat16, Int8FFN, Int8FFNOutput };
-enum class PrefillMode { Sequential, Batched2 };
+enum class PrefillMode { Sequential, Batched2, Chunked4 };
 struct GraphStats {
   size_t nodes = 0, buffers = 0, replays = 0;
   size_t device_runs = 0, resident_bytes = 0;
@@ -15,6 +15,7 @@ struct GraphStats {
   size_t root_bos = 0, persistent_runs = 0;
   size_t persistent_upload_bytes = 0, persistent_download_bytes = 0;
   size_t prefill_pair_runs = 0, prefill_runs = 0;
+  size_t prefill_chunk_tokens = 0, prefill_chunk_runs = 0;
 };
 // In-process, fixed-shape decode graph. Capture records typed operations and
 // buffer dependencies without recording example tensor contents. Replay binds
@@ -53,7 +54,7 @@ public:
   void load_state(const State &);
   State export_state() const;
   Vector replay_resident(int token);
-  // Batched2 constructor required; supports all NPU weight modes.
+  // Batched2 or Chunked4 constructor required; Batched2 supports all NPU weight modes; Chunked4 is BF16 experimental.
   // Returns final-token logits; empty input is
   // a no-op. Odd tails use the resident decode transition. No trace hooks.
   Vector prefill_resident(const std::vector<int> &tokens);

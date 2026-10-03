@@ -2,6 +2,8 @@
 """Two-token BF16/W8A16 output projection with weight reuse and residual addition."""
 import argparse
 import json
+import shutil
+import hashlib
 import numpy as np
 from ml_dtypes import bfloat16
 import aie.iron as iron
@@ -94,16 +96,26 @@ def design(x: In, w: In, residual0: In, residual1: In, result: Out, *, stride: C
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--int8", action="store_true")
+    parser.add_argument("--share-program", action="store_true",
+                        help="Verify identical PDIs and reuse one xclbin across stride variants")
     args = parser.parse_args()
     prefix = "int8" if args.int8 else "bf16"
     for stride in (2048, 55296, 61440):
         path = KERNEL_ROOT / f"{prefix}-prefill-output-b2-s{stride}"
         path.mkdir(parents=True, exist_ok=True)
         design.specialize(stride=stride, quantized=args.int8).compile(path / "design.xclbin", path / "instructions.bin")
+        shared = KERNEL_ROOT / f"{prefix}-prefill-output-b2-s2048"
+        pdi = (path / "design.prj/main.pdi").read_bytes() if args.share_program else None
+        if args.share_program and stride != 2048:
+            if pdi != (shared / "design.prj/main.pdi").read_bytes():
+                raise RuntimeError("Output stride variants have different device programs")
+            shutil.copy2(shared / "design.xclbin", path / "design.xclbin")
         config = dict(
             schema_version=1, channels=2048, batch=2, cores=8 if args.int8 else 16, input_stride=stride,
             dtype="int8" if args.int8 else "bfloat16", residual_layout="separate_tokens",
             output_layout="token_projection_residual")
+        if args.share_program:
+            config.update(shared_program=shared.name, pdi_sha256=hashlib.sha256(pdi).hexdigest())
         if args.int8:
             config.update(tile_bytes=4160, scale="fp16_expanded_fp32",
                           activation_dtype="bfloat16", accumulator_dtype="float32")

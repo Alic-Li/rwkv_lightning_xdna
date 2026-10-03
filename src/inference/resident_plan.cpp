@@ -50,7 +50,8 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized(xdna::Session &s,
 xdna::DeviceBuffer DecodeGraph::Impl::initialized_pair(xdna::Session &s, const Vector &v) {
   if (!capture_prefill) return initialized(s, v);
   Vector pair = v;
-  pair.insert(pair.end(), v.begin(), v.end());
+  for (size_t t = 1; t < prefill_chunk_tokens; ++t)
+    pair.insert(pair.end(), v.begin(), v.end());
   auto root = initialized(s, pair);
   mutable_allocations.back().token_bytes = v.size() * sizeof(float);
   return root.slice(0, v.size() * sizeof(float));
@@ -130,6 +131,18 @@ void DecodeGraph::Impl::prepare_decode_fusion(const std::filesystem::path &root)
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
   if (capture_prefill) {
+    if (prefill_chunk_tokens == 4)
+      check_artifact(root, "bf16-chunk4-ffn-experiment-projection-input",
+          {{"schema_version", 1}, {"batch", 4}, {"channels", 2048}, {"hidden", 8192},
+           {"weights", "bfloat16"}, {"activation", "bfloat16"}, {"state", "float32"},
+           {"input_layout", "projection_residual_pairs"}, {"fp32_arena_floats", 51200},
+           {"bf16_arena_elements", 40960},
+           {"fp32_offsets", {{"shift", 0}, {"raw", 2048}, {"projected", 34816}, {"output", 43008}}},
+           {"bf16_offsets", {{"mixed", 0}, {"activated", 8192}}}});
+    if (prefill_chunk_tokens == 4)
+      for (int stride : {55296, 61440})
+        check_artifact(root, "bf16-prefill-output-b2-s" + std::to_string(stride),
+            {{"shared_program", "bf16-prefill-output-b2-s2048"}});
     for (bool value : {false, true})
       check_artifact(root, value ? "prefill-value-recurrence-b2" : "prefill-recurrence-b2",
           {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"head_size", 64},
@@ -184,7 +197,10 @@ void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   prepare_resident_arenas(root, layout);
   prepare_resident_runs(root, layout);
   prepare_decode_fusion(root);
-  if (capture_prefill) prepare_prefill(root);
+  if (capture_prefill) {
+    if (prefill_chunk_tokens == 4) prepare_chunk4(root);
+    else prepare_prefill(root);
+  }
   bindings.clear();
   bindings.shrink_to_fit();
   upload_bytes = weights.channels() * 4;
@@ -422,7 +438,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
           packed_weights = initialized_bf16(stage,
               weight_layout::channel_mix(*n[2].weight, *n[4].weight));
         }
-        auto diagnostic = initialized(stage, Vector(capture_prefill ? 26624 : 22528, 0));
+        auto diagnostic = initialized(stage, Vector(capture_prefill ? (prefill_chunk_tokens == 4 ? 51200 : 26624) : 22528, 0));
         auto result = initialized(stage, Vector(4096, 0));
         device_buffers[old] = diagnostic.slice(0, 2048 * 4);
         device_buffers[n[0].output] = device_buffers[old];
@@ -490,7 +506,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         packed_weights = initialized_bf16(stage,
             weight_layout::projection(*node.weight, false, 0, 2048, 2048));
       }
-      auto result_root = initialized(stage, Vector(capture_prefill ? 8192 : 4096, 0));
+      auto result_root = initialized(stage, Vector(capture_prefill ? prefill_chunk_tokens * 4096 : 4096, 0));
       auto result = capture_prefill ? result_root.slice(0, 4096 * 4) : result_root;
       device_buffers[node.output] = result.slice(0, 2048 * 4);
       device_buffers[nodes[node_index + 1].output] =

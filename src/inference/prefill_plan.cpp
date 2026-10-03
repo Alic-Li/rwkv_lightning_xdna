@@ -199,14 +199,17 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
     ++prefill_run_count;
   };
   try {
-    for (size_t t = 0; t + 1 < tokens.size(); t += 2) {
+    for (size_t t = 0; t + prefill_chunk_tokens <= tokens.size(); t += prefill_chunk_tokens) {
       resident_state_valid = false;
       const auto upload_start = profile ? Clock::now() : Clock::time_point{};
       device_buffers[embedding].upload(emb.data() + size_t(tokens[t]) * c, c * 4);
-      prefill_embedding.upload(emb.data() + size_t(tokens[t + 1]) * c, c * 4);
+      if (prefill_chunk_tokens == 2)
+        prefill_embedding.upload(emb.data() + size_t(tokens[t + 1]) * c, c * 4);
+      else for (size_t slot = 1; slot < prefill_chunk_tokens; ++slot)
+        chunk_embeddings[slot - 1].upload(emb.data() + size_t(tokens[t + slot]) * c, c * 4);
       if (profile) upload_us += elapsed_us(upload_start);
       for (auto &run : prefill_body) execute(run);
-      if (t + 2 == tokens.size()) {
+      if (t + prefill_chunk_tokens == tokens.size()) {
         for (auto &run : prefill_head) execute(run);
         result.resize(weights.vocabulary());
         const auto download_start = profile ? Clock::now() : Clock::time_point{};
@@ -215,12 +218,12 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
         for (float x : result)
           if (!std::isfinite(x)) throw std::runtime_error("Nonfinite prefill logits");
       }
-      replays += 2;
+      replays += prefill_chunk_tokens;
       resident_state_valid = true;
     }
-    if (tokens.size() % 2) {
+    for (size_t t = tokens.size() - tokens.size() % prefill_chunk_tokens; t < tokens.size(); ++t) {
       State unused;
-      result = replay(tokens.back(), unused, true);
+      result = replay(tokens[t], unused, true);
       prefill_run_count += decode_run_count();
     }
   } catch (...) {
@@ -248,8 +251,9 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
           {"runs", t.runs}, {"elapsed_us", t.elapsed},
           {"submit_us", t.submit}, {"wait_us", t.wait}});
     std::cerr << "prefill_profile " << nlohmann::json({
-        {"prompt_tokens", tokens.size()}, {"pairs", tokens.size() / 2},
-        {"odd_tail_runs", tokens.size() % 2 ? decode_run_count() : 0},
+        {"prompt_tokens", tokens.size()}, {"pairs", prefill_chunk_tokens == 2 ? tokens.size() / 2 : 0},
+        {"chunk_tokens", prefill_chunk_tokens}, {"chunks", tokens.size() / prefill_chunk_tokens},
+        {"odd_tail_runs", (tokens.size() % prefill_chunk_tokens) * decode_run_count()},
         {"pair_upload_us", upload_us}, {"final_pair_download_us", download_us},
         {"stages", rows},
         {"scope", "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output."}
