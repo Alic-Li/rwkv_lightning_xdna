@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """R/K/V and W/A/G/(V) in one 14-core BF16 program, 16 shim input streams."""
 
+import argparse
 import json
 import numpy as np
 from ml_dtypes import bfloat16
@@ -11,7 +12,11 @@ from aie.helpers.taplib import TensorAccessPattern as TAP
 from rwkv7_common import KERNEL_ROOT, typ, external
 
 
-def projections(count):
+def projections(count, batch=1):
+    arena_stride = 61440 if batch == 2 and count == 4 else 55296
+    value_stride = arena_stride if batch == 2 and count == 4 else 6144
+    value_size = (batch - 1) * value_stride + 6144
+    source = "prefill_attention_bf16.cc" if batch == 2 else "attention_projections_bf16.cc"
     wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]]
     n_rkv = 3 * 2048 * 2048
     n_rank = count * 256 * 2048
@@ -20,31 +25,31 @@ def projections(count):
     @iron.jit
     def design(mixed: In, weights: In, arena: Out, value_aux: Out, rank_aux: Out):
         fn = external(
-            "rwkv7_attention_rank_tile",
-            "attention_projections_bf16.cc",
-            [typ(2048), wt(4096), typ(128), np.int32, np.int32],
+            "rwkv7_prefill_attention_rank" if batch == 2 else "rwkv7_attention_rank_tile",
+            source,
+            [typ(2048 * batch), wt(4096), typ(128 * batch), np.int32, np.int32],
             optimization="-O3",
         )
-        z = fn.object_file.bind("rwkv7_attention_zero128", [typ(128)])
+        z = fn.object_file.bind("rwkv7_prefill_attention_zero256" if batch == 2 else "rwkv7_attention_zero128", [typ(128 * batch)])
         act = fn.object_file.bind(
-            "rwkv7_attention_activate128", [typ(128), typ(128), np.int32]
+            "rwkv7_prefill_attention_activate" if batch == 2 else "rwkv7_attention_activate128", [typ(128 * batch), typ(128 * batch), np.int32]
         )
-        mul = fn.object_file.bind("rwkv7_gemv_tile", [typ(256), wt(4096), typ(16)])
-        rz = fn.object_file.bind("rwkv7_zero", [typ(16)])
+        mul = fn.object_file.bind("rwkv7_prefill_attention_second" if batch == 2 else "rwkv7_gemv_tile", [typ(256 * batch), wt(4096), typ(16 * batch)])
+        rz = fn.object_file.bind("rwkv7_prefill_attention_zero32" if batch == 2 else "rwkv7_zero", [typ(16 * batch)])
         rkv = fn.object_file.bind(
-            "rwkv7_attention_rkv_tile", [typ(2048), wt(4096), typ(16), np.int32]
+            "rwkv7_prefill_attention_rkv" if batch == 2 else "rwkv7_attention_rkv_tile", [typ(2048 * batch), wt(4096), typ(16 * batch), np.int32]
         )
-        rx = ObjectFifo(typ(2048), name="rkv_x", depth=1)
-        kx = ObjectFifo(typ(2048), name="rank_x", depth=1)
+        rx = ObjectFifo(typ(2048 * batch), name="rkv_x", depth=1)
+        kx = ObjectFifo(typ(2048 * batch), name="rank_x", depth=1)
         rw = [ObjectFifo(wt(4096), name=f"rkv_w{i}", depth=2) for i in range(8)]
-        ry = [ObjectFifo(typ(16), name=f"rkv_y{i}", depth=2) for i in range(8)]
+        ry = [ObjectFifo(typ(16 * batch), name=f"rkv_y{i}", depth=2) for i in range(8)]
         w1 = [ObjectFifo(wt(4096), name=f"first_w{i}", depth=1) for i in range(2)]
         w2 = [ObjectFifo(wt(4096), name=f"second_w{i}", depth=1) for i in range(4)]
-        raw = ObjectFifo(typ(256), name="raw", depth=1)
-        activated = ObjectFifo(typ(256), name="active", depth=1)
-        hr = raw.prod().join([0, 128], obj_types=[typ(128)] * 2)
-        ha = activated.prod().join([0, 128], obj_types=[typ(128)] * 2)
-        ky = [ObjectFifo(typ(16), name=f"rank_y{i}", depth=1) for i in range(4)]
+        raw = ObjectFifo(typ(256 * batch), name="raw", depth=1)
+        activated = ObjectFifo(typ(256 * batch), name="active", depth=1)
+        hr = raw.prod().join([0, 128 * batch], obj_types=[typ(128 * batch)] * 2)
+        ha = activated.prod().join([0, 128 * batch], obj_types=[typ(128 * batch)] * 2)
+        ky = [ObjectFifo(typ(16 * batch), name=f"rank_y{i}", depth=1) for i in range(4)]
 
         def rkv_core(x, w, y, f, z):
             for _ in range_(3):
@@ -127,11 +132,11 @@ def projections(count):
         ):
             for slot in [0, 2, 3]:
                 hxr.fill(
-                    x, tap=TAP((12288,), slot * 2048, [1, 1, 1, 2048], [0, 0, 0, 1])
+                    x, tap=TAP((12288 * batch,), slot * 2048, [batch, 1, 1, 2048], [12288, 0, 0, 1])
                 )
             for slot in [1, 4, 5, 3][:count]:
                 hxk.fill(
-                    x, tap=TAP((12288,), slot * 2048, [1, 1, 1, 2048], [0, 0, 0, 1])
+                    x, tap=TAP((12288 * batch,), slot * 2048, [batch, 1, 1, 2048], [12288, 0, 0, 1])
                 )
             for i in range(8):
                 hwr[i].fill(
@@ -144,15 +149,16 @@ def projections(count):
                     ),
                 )
                 destinations = [
-                    (arena, 55296, 13 * 2048),
-                    (arena, 55296, 0),
-                    (arena, 55296, 16 * 2048) if count == 3 else (value_aux, 6144, 0),
+                    (arena, arena_stride, 13 * 2048),
+                    (arena, arena_stride, 0),
+                    (arena, arena_stride, 16 * 2048) if count == 3 else (value_aux, value_stride, 0),
                 ]
                 for target, size, offset in destinations:
                     hyr[i].drain(
                         target,
                         tap=TAP(
-                            (size,), offset + i * 256, [1, 1, 1, 256], [0, 0, 0, 1]
+                            ((arena_stride * batch) if target is arena else value_size,),
+                            offset + i * 256, [16, batch, 1, 16], [16, size, 0, 1]
                         ),
                         wait=True,
                     )
@@ -168,13 +174,13 @@ def projections(count):
                 )
             hraw.drain(
                 rank_aux,
-                tap=TAP((count * 512,), 0, [1, 1, 1, count * 256], [0, 0, 0, 1]),
+                tap=TAP((count * 512 * batch,), 0, [count, 2, batch, 128], [256, 128, count * 512, 1]),
                 wait=True,
             )
             hact.drain(
                 rank_aux,
                 tap=TAP(
-                    (count * 512,), count * 256, [1, 1, 1, count * 256], [0, 0, 0, 1]
+                    (count * 512 * batch,), count * 256, [count, 2, batch, 128], [256, 128, count * 512, 1]
                 ),
                 wait=True,
             )
@@ -189,16 +195,17 @@ def projections(count):
                     ),
                 )
                 destinations = [
-                    (arena, 55296, 4096),
-                    (arena, 55296, 2048),
-                    (arena, 55296, 12 * 2048),
-                    (value_aux, 6144, 2048),
+                    (arena, arena_stride, 4096),
+                    (arena, arena_stride, 2048),
+                    (arena, arena_stride, 12 * 2048),
+                    (value_aux, value_stride, 2048),
                 ]
                 for target, size, offset in destinations[:count]:
                     hyk[i].drain(
                         target,
                         tap=TAP(
-                            (size,), offset + i * 512, [1, 1, 1, 512], [0, 0, 0, 1]
+                            ((arena_stride * batch) if target is arena else value_size,),
+                            offset + i * 512, [32, batch, 1, 16], [16, size, 0, 1]
                         ),
                         wait=True,
                     )
@@ -208,11 +215,11 @@ def projections(count):
             Runtime(
                 seq,
                 [
-                    typ(12288),
+                    typ(12288 * batch),
                     wt(n_weights),
-                    typ(55296),
-                    typ(6144),
-                    typ(count * 512),
+                    typ(arena_stride * batch),
+                    typ(value_size),
+                    typ(count * 512 * batch),
                     rx.prod(),
                     kx.prod(),
                     [f.prod() for f in rw],
@@ -231,10 +238,13 @@ def projections(count):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--batch", type=int, choices=(1, 2), default=1)
+    batch = parser.parse_args().batch
     for count in [3, 4]:
-        path = KERNEL_ROOT / f"bf16-attention-projections-{count}"
+        path = KERNEL_ROOT / (f"bf16-attention-projections-{count}" + ("-b2" if batch == 2 else ""))
         path.mkdir(parents=True, exist_ok=True)
-        projections(count).compile(path / "design.xclbin", path / "instructions.bin")
+        projections(count, batch).compile(path / "design.xclbin", path / "instructions.bin")
         (path / "config.json").write_text(
             json.dumps(
                 dict(
@@ -245,6 +255,8 @@ if __name__ == "__main__":
                     rank=256,
                     cores=14,
                     exact_fp32=False,
+                    **(dict(batch=2, arena_stride=61440 if count == 4 else 55296,
+                            value_stride=61440 if count == 4 else 6144) if batch == 2 else {}),
                 )
             )
             + "\n"

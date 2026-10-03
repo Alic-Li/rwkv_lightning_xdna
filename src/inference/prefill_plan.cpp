@@ -33,6 +33,15 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
       if (view.offset_within(a.root)) return a.root;
     throw std::runtime_error("Missing mutable prefill allocation");
   };
+  auto paired_view = [&](const xdna::DeviceBuffer &view) -> xdna::DeviceBuffer {
+    for (const auto &a : mutable_allocations)
+      if (auto offset = view.offset_within(a.root)) {
+        if (!a.token_bytes || *offset + view.size() > a.token_bytes)
+          throw std::runtime_error("Invalid paired attention allocation");
+        return a.root.slice(*offset, a.token_bytes + view.size());
+      }
+    throw std::runtime_error("Missing paired attention allocation");
+  };
   std::vector<xdna::DeviceBuffer> paired_outputs, old_ffn_outputs, ffn_arenas;
   for (size_t l = 0; l < layers; ++l) {
     auto &projection = bindings[1 + l * 5 + 3].arguments;
@@ -65,6 +74,11 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
       }
     for (const auto &a : mutable_allocations)
       if (auto offset = view.offset_within(a.root)) {
+        if (a.token_bytes) {
+          if (*offset + view.size() > a.token_bytes)
+            throw std::runtime_error("Activation view spans both tokens");
+          return a.root.slice(*offset + a.token_bytes, view.size());
+        }
         for (const auto &clone : clones)
           if (same_region(clone.original, a.root))
             return clone.copy.slice(*offset, view.size());
@@ -89,8 +103,19 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
       ? "bf16-prefill-ffn-b2-projection-input" : "int8-prefill-ffn-b2-projection-input");
   for (size_t l = 0; l < layers; ++l) {
     for (size_t stage = 0; stage < 4; ++stage) {
-      prefill_body.push_back(bind(1 + l * 5 + stage, false));
-      prefill_body.push_back(bind(1 + l * 5 + stage, true));
+      const size_t index = 1 + l * 5 + stage;
+      if (stage == 1) {
+        const auto &args = bindings[index].arguments;
+        const size_t branches = args[4].size() / (512 * sizeof(float));
+        if (branches != 3 && branches != 4)
+          throw std::runtime_error("Unsupported paired attention branch count");
+        auto &attention = session(root, "bf16-attention-projections-" + std::to_string(branches) + "-b2");
+        prefill_body.push_back({attention.prepare({paired_view(args[0]), args[1],
+            paired_view(args[2]), paired_view(args[3]), paired_view(args[4])}), Stage::Attention, 2});
+      } else {
+        prefill_body.push_back(bind(index, false));
+        prefill_body.push_back(bind(index, true));
+      }
     }
     const auto &args = bindings[1 + l * 5 + 4].arguments;
     auto half = initialized(ffn, Vector(10240, 0));

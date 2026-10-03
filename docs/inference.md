@@ -17,7 +17,7 @@ embedding 查表、tokenizer、sampler、权重加载和调度在 CPU；模型�
 没有 CPU 算子回退。NPU 纯 FP32、hybrid、逐节点 NPU eager 和独立 sequence prefill
 已删除。CPU FP32 后端仅作为显式参考实现，继续支持 eager/graph 和分层 prefill。
 NPU 默认 prefill 与 decode 复用逐 token 状态转移；显式 `--prefill batch2` 使用
-分层两-token 调度，在 FFN 内共享矩阵权重流，attention/WKV 仍按 token 更新。
+分层两-token 调度，在 attention projections 和 FFN 内共享矩阵权重流；WKV 仍按 token 顺序更新。
 
 当前支持 C=2048、32×64 heads、FFN=8192、词表65536、低秩维度不超过256的模型。
 已验证 checkpoint 为 `rwkv7-g1k-1.5b-20260930-ctx25600.pth`，24层、123 runs/token。
@@ -91,20 +91,20 @@ cmake --build --preset release --target kernels-release-prefill-batch2
 ./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 32 24 2 --prefill-batch2
 ```
 
-`batch2` 每层先顺序完成两个 token 的 attention/WKV，再用一次 FFN 提交处理两行，
-共享已打包权重、session 和 FP32 recurrent state。仅增加 activation BO，奇数尾 token
+`batch2` 每层 attention projections 和 FFN 各用一次提交处理两行；norm/mix、WKV
+和 output projection 仍顺序执行两个 token。共享已打包权重、session 和 FP32 recurrent state。仅增加 activation BO，奇数尾 token
 使用原 resident decode。只计算并下载最后一个 prompt token 的 logits，因此不兼容
 逐 token `--dump-logits` 或 tensor trace。CPU 不支持此模式。
 C++ API 使用 `DecodeGraph(weights, root, WeightMode::BFloat16, PrefillMode::Batched2)`，
 先 `load_state`，再 `prefill_resident(tokens)`；空输入返回空向量且不改变状态。
 返回后可直接 `replay_resident`，也可 export/reset/branch。
 
-24层模型的 pair body 为218次提交，最后 logits 再加2次；32-token prompt 共3490次
-（109.0625/token），原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
+24层模型的 pair body 为194次提交，最后 logits 再加2次；32-token prompt 共3106次
+（97.0625/token），原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
 262144字节 logits。Benchmark JSON 分开报告 prefill 提交/host BO流量和 decode 指标；
 这些数值不包含设备内部 DMA，也不等于硬件带宽计数。
-2026-10-03 BF16 A/B/B/A 中，32-token prefill 平均6.532→4.009 s（1.63倍吞吐），
-decode 203.599→203.689 ms/token；额外常驻30,193,664字节、122个 root BO。
+2026-10-03 首版仅 FFN batching 的 BF16 A/B/B/A 中，32-token prefill 平均6.532→4.009 s（1.63倍吞吐），
+decode 203.599→203.689 ms/token；当时额外常驻30,193,664字节、122个 root BO（attention batching 后为49个）。
 加速同时包含 FFN batching 和跳过中间 logits head，不能归因于单一 kernel。
 完整 bitwise 回归、guard/oracle 和 A/B/B/A 性能见
 [整模型 prefill 验证](../reports/rwkv7-model-prefill-2026-10-03.json)。
@@ -131,6 +131,17 @@ logits/state 向量逐位回归通过；INT8 的语言质量限制仍沿用下�
 阶段及整模型逐位回归、A/B/B/A 实测和限制见
 [INT8 prefill 验证](../reports/rwkv7-int8-prefill-2026-10-03.json)。
 
+后续 attention batching 将 R/K/V 与全部低秩分支的权重流在两个 token 间复用，
+使用相邻的双份 activation arena，DMA 直接 scatter 到各 token 的 recurrence/value/rank
+视图。累计常驻 BO 字节不变，root BO 从413减至340；WKV 的 FP32 state 更新次序不变。
+现有 `--prefill-batch2` 编译入口会同时生成 `bf16-attention-projections-{3,4}-b2`；
+旧产物目录需要重新执行对应 prefill kernel target。
+该改动的32-token A/B/B/A：BF16 4.003→3.691 s，
+INT8 FFN+output 3.890→3.571 s；同精度的三种模式均通过1,533个向量的
+逐位 logits/state 回归。
+阶段 FP64/bitwise/guard 和整模型验收见
+[attention prefill 验证](../reports/rwkv7-prefill-attention-2026-10-03.json)。
+
 可用 `RWKV_XDNA_PROFILE=1` 诊断 batch2：
 
 ```bash
@@ -139,11 +150,11 @@ RWKV_XDNA_PROFILE=1 ./build/release/rwkv-cli --model "$MODEL" \
 ```
 
 stderr 的 `prefill_profile` JSON 按 stage 和 `token_slot` 汇总次数、elapsed/submit/wait
-微秒；slot 0/1 为成对调度的第一/第二次单-token调用，slot 2 为 fused FFN pair。
+微秒；slot 0/1 为成对调度的第一/第二次单-token调用，slot 2 为 fused attention/FFN pair。
 另报告 pair embedding 上传和末 pair logits 下载；奇数尾的原 decode 路径单独输出
 `decode_profile`。这些耗时包含调度、program switch、DMA 和算术，slot 差异不是独立
 PDI 计数，不能作为硬件利用率。正常计时继续使用拒绝 profile 环境变量的 `rwkv-bench`。
-2026-10-03 的32-token profile 中，recurrence 约37.7 ms/token，attention projections
+2026-10-03 attention batching 之前的32-token profile 中，recurrence 约37.7 ms/token，attention projections
 约33.1–33.3 ms/token，FFN 约31.7–32.2 ms/token。第一/第二 slot 的 recurrence
 约2.20/0.94 ms/run，提示继续测量 program switching 与 sequence reuse；该差值
 不能单独归因为 PDI。数值回归和未插桩性能检查见
@@ -291,7 +302,7 @@ cmake --build --preset test
 从920.91降至461.81 µs。三个输入 pass（含 zero token / zero weight row）通过
 FP64 oracle、batch=1/2 逐位比较、输入/权重不可变性和 BO guard 检查。
 上述约2倍是孤立阶段吞吐，不能直接作为整模型加速。后续 FFN 融合和整模型接入
-见下文及本文前面的 batch2 用法；attention projections 仍未 batch。详见
+见下文及本文前面的 batch2 用法；attention projections 的后续 batch 接入见本文前部。详见
 [batched projection 证据](../reports/rwkv7-prefill-projection-2026-10-03.json)。
 
 在此基础上，`rwkv7_prefill_channel_mix.py` 将两个 token 的 norm/mix、key、ReLU²、

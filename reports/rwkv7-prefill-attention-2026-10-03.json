@@ -1,0 +1,384 @@
+{
+  "date": "2026-10-03",
+  "status": "batched_attention_verified; hardware_limit_objective_incomplete",
+  "baseline_commit": "1ed6cf12389b64aab339a9814798f9f7199c9b73",
+  "hardware_software": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano; power mode not reverified",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Two-token R/K/V and W/A/G/(V) projection programs reuse each streamed BF16 tile for both tokens while preserving each token's accumulation and nonlinear order",
+    "Keep the 14-core topology and 16 shim input streams; use strided DMA to gather token inputs and scatter pair outputs directly into token-specific arenas",
+    "Explicit paired mutable allocations for mixed inputs, recurrence/value arenas and low-rank diagnostics; share existing packed weights and request state, avoiding host copies",
+    "Integrate paired attention into Batched2 for all three weight modes; normal decode and sequential default remain supported",
+    "Shared offline compiler supports batch=1/2; optional prefill compilation target includes the new programs"
+  ],
+  "validation": {
+    "builds": "release and test presets passed",
+    "host_tests": "3/3 CTest passed",
+    "stage": [
+      {
+        "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+        "branches": 3,
+        "oracle_max_abs": 1.9068829715251923e-07,
+        "passes": 3,
+        "status": "passed",
+        "timing_abba": [
+          {
+            "mean_us": 1726.0758650000012,
+            "p95_us": 1817.879,
+            "path": "two_decode",
+            "samples": 200
+          },
+          {
+            "mean_us": 930.8959349999996,
+            "p95_us": 966.574,
+            "path": "batched",
+            "samples": 200
+          },
+          {
+            "mean_us": 929.7178999999995,
+            "p95_us": 963.167,
+            "path": "batched",
+            "samples": 200
+          },
+          {
+            "mean_us": 1731.3896100000006,
+            "p95_us": 1841.293,
+            "path": "two_decode",
+            "samples": 200
+          }
+        ]
+      },
+      {
+        "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+        "branches": 4,
+        "oracle_max_abs": 2.0085644791834056e-07,
+        "passes": 3,
+        "status": "passed",
+        "timing_abba": [
+          {
+            "mean_us": 1823.8768049999996,
+            "p95_us": 1929.801,
+            "path": "two_decode",
+            "samples": 200
+          },
+          {
+            "mean_us": 1017.4752649999995,
+            "p95_us": 1056.033,
+            "path": "batched",
+            "samples": 200
+          },
+          {
+            "mean_us": 1016.5016800000001,
+            "p95_us": 1061.874,
+            "path": "batched",
+            "samples": 200
+          },
+          {
+            "mean_us": 1830.6288149999993,
+            "p95_us": 1918.769,
+            "path": "two_decode",
+            "samples": 200
+          }
+        ]
+      }
+    ],
+    "rebuilt_batch1_stage": [
+      {
+        "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+        "branches": 3,
+        "oracle_max_abs": 1.9068829715251923e-07,
+        "passes": 3,
+        "status": "passed",
+        "timing_abba": [
+          {
+            "mean_us": 1722.9207800000006,
+            "p95_us": 1817.216,
+            "path": "two_decode",
+            "samples": 100
+          },
+          {
+            "mean_us": 931.9459700000007,
+            "p95_us": 956.864,
+            "path": "batched",
+            "samples": 100
+          },
+          {
+            "mean_us": 932.4442399999997,
+            "p95_us": 963.969,
+            "path": "batched",
+            "samples": 100
+          },
+          {
+            "mean_us": 1751.7580699999996,
+            "p95_us": 1838.417,
+            "path": "two_decode",
+            "samples": 100
+          }
+        ]
+      },
+      {
+        "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+        "branches": 4,
+        "oracle_max_abs": 2.0085644791834056e-07,
+        "passes": 3,
+        "status": "passed",
+        "timing_abba": [
+          {
+            "mean_us": 1865.0415899999998,
+            "p95_us": 1937.415,
+            "path": "two_decode",
+            "samples": 100
+          },
+          {
+            "mean_us": 1019.0885600000001,
+            "p95_us": 1054.299,
+            "path": "batched",
+            "samples": 100
+          },
+          {
+            "mean_us": 1024.2620100000001,
+            "p95_us": 1058.217,
+            "path": "batched",
+            "samples": 100
+          },
+          {
+            "mean_us": 1841.1537699999994,
+            "p95_us": 1928.387,
+            "path": "two_decode",
+            "samples": 100
+          }
+        ]
+      }
+    ],
+    "stage_scope": "Three passes per branch count (3 and 4), including zero token and deterministic replay. Bitwise comparison against two resident calls for every output and untouched arena region, FP64 dot/nonlinear oracle, immutable input/weight and BO guards. Rebuilt batch1 compiler also passed against the validated batch2 program.",
+    "model": {
+      "bf16": {
+        "mode": "verify",
+        "prefill_pair_runs": 196,
+        "prefill_runs": 7567,
+        "resident_bytes": 2947313664,
+        "root_bos": 340,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "bf16"
+      },
+      "int8-ffn": {
+        "mode": "verify",
+        "prefill_pair_runs": 196,
+        "prefill_runs": 7567,
+        "resident_bytes": 2154590208,
+        "root_bos": 340,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "int8_ffn"
+      },
+      "int8-ffn-output": {
+        "mode": "verify",
+        "prefill_pair_runs": 196,
+        "prefill_runs": 7567,
+        "resident_bytes": 2055499776,
+        "root_bos": 340,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "int8_ffn_output"
+      }
+    },
+    "model_scope": "1533 memcmp vectors per mode against prior sequential snapshots: prompt lengths 0,1,2,3,8,17,32; all per-layer state and final logits, zero/nonzero initial state, odd tail, decode handoff, reset/branch and rejected-call state preservation. No claim of new long-context language-quality certification.",
+    "cli": "INT8 FFN+output greedy 3-token text output matches prior sequential CLI artifact for The capital of France is; exit 0."
+  },
+  "metrics": {
+    "pair_body_runs_before": 218,
+    "pair_body_runs_after": 194,
+    "final_head_runs": 2,
+    "runs_per_32_token_prompt_before": 3490,
+    "runs_per_32_token_prompt_after": 3106,
+    "root_bos_before": 413,
+    "root_bos_after": 340,
+    "resident_bytes_change": 0,
+    "decode_runs": 123,
+    "graph_nodes_per_decode": 960,
+    "host_upload_bytes_per_prompt_token": 8192,
+    "host_download_bytes_per_prompt": 262144,
+    "weight_payload_bytes_per_attention_pair": {
+      "three_branches": {
+        "two_decode": 62914560,
+        "batched": 31457280
+      },
+      "four_branches": {
+        "two_decode": 67108864,
+        "batched": 33554432
+      },
+      "scope": "Static streamed payload, not measured DMA bandwidth."
+    }
+  },
+  "remaining_work": [
+    "Profile remaining recurrence and projection-residual costs after attention batching",
+    "Further reduce program switches and expand sequence reuse within local-memory/DMA limits",
+    "Evaluate native INT8 arithmetic and retain quality gates",
+    "Establish device bandwidth/utilization and practical hardware limits; goal remains active"
+  ],
+  "raw_logs": "reports/runs/prefill-attention-2026-10-03",
+  "sha256": {
+    "kernels/rwkv/prefill_attention_bf16.cc": "9ce5c5dec0726c0cc8bdefdfa6f091870c6a15428fecea768a6ff5aa7d2070ae",
+    "tools/compile/rwkv7_attention_projections.py": "a936ee79779211996ce754978db7ae3af5c613c04d6ce6e6a5f5236d5aa22f78",
+    "src/inference/prefill_plan.cpp": "32dadff5a929095457f011d38fc0bc219bfef541cb6e606cce7c76e3af2b792f",
+    "src/inference/resident_plan.cpp": "13b5ece22ada5cb4df63f2468eb76b7c059d38a8300f32dc3ad94003d8d2cda9",
+    "tests/inference/prefill_attention_test.cpp": "514df17278a379c20a814a120f047b2d18bfca295831fbb455f6197c5c1b295f",
+    "build/kernels/prefill-attention/bf16-attention-projections-3-b2/config.json": "06e57a48095a22a196d465400f9126e038ee57458db30bf20b0bb2ed2f099566",
+    "build/kernels/prefill-attention/bf16-attention-projections-3-b2/design.xclbin": "7a00bde4ebdc279f4e93806a5343e1a645eb2862ea867269a91f2217e2f45d17",
+    "build/kernels/prefill-attention/bf16-attention-projections-3-b2/instructions.bin": "58376e3a9dd80f7229733003661ca3184374ba7ff34b9e2cfae598f00f8c87f7",
+    "build/kernels/prefill-attention/bf16-attention-projections-4-b2/config.json": "820e15fd9d1f1a33c6187ffc2521467f9ed5ddd2f73dc67fa1df85a55017881f",
+    "build/kernels/prefill-attention/bf16-attention-projections-4-b2/design.xclbin": "4f10ff3a9272169fd22b64910d44b1837c77dd163d70c1c1895de7c928dded51",
+    "build/kernels/prefill-attention/bf16-attention-projections-4-b2/instructions.bin": "87b4fde3b55cd5d1409963e7991888b8828c4c064707f0618dde7e4077b5b591"
+  },
+  "benchmark": {
+    "bf16": {
+      "blocks": [
+        {
+          "block": "a1",
+          "prefill_seconds": [
+            3.988962887,
+            4.042577547
+          ],
+          "decode_mean_ms": 203.19538547916662,
+          "setup_seconds": 3.829555572,
+          "resident_bytes": 2947313664,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        },
+        {
+          "block": "b1",
+          "prefill_seconds": [
+            3.681576794,
+            3.690967872
+          ],
+          "decode_mean_ms": 204.13802902083327,
+          "setup_seconds": 3.725970611,
+          "resident_bytes": 2947313664,
+          "root_bos": 340,
+          "prefill_runs": 3106
+        },
+        {
+          "block": "b2",
+          "prefill_seconds": [
+            3.711968429,
+            3.678005284
+          ],
+          "decode_mean_ms": 203.09978431249996,
+          "setup_seconds": 3.717687495,
+          "resident_bytes": 2947313664,
+          "root_bos": 340,
+          "prefill_runs": 3106
+        },
+        {
+          "block": "a2",
+          "prefill_seconds": [
+            3.989074557,
+            3.990514438
+          ],
+          "decode_mean_ms": 203.3048307916666,
+          "setup_seconds": 3.702546445,
+          "resident_bytes": 2947313664,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        }
+      ],
+      "baseline_prefill_seconds": 4.00278235725,
+      "candidate_prefill_seconds": 3.69062959475,
+      "latency_reduction_percent": 7.798394582573708,
+      "candidate_tokens_per_second": 8.670607325514512,
+      "baseline_decode_ms": 203.2501081354166,
+      "candidate_decode_ms": 203.61890666666662,
+      "decode_change_percent": 0.18145059534446784
+    },
+    "int8-ffn-output": {
+      "blocks": [
+        {
+          "block": "a1",
+          "prefill_seconds": [
+            3.887005464,
+            3.897099789
+          ],
+          "decode_mean_ms": 185.2836740625,
+          "setup_seconds": 3.678991223,
+          "resident_bytes": 2055499776,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        },
+        {
+          "block": "b1",
+          "prefill_seconds": [
+            3.56843108,
+            3.569117326
+          ],
+          "decode_mean_ms": 185.687369375,
+          "setup_seconds": 3.706765402,
+          "resident_bytes": 2055499776,
+          "root_bos": 340,
+          "prefill_runs": 3106
+        },
+        {
+          "block": "b2",
+          "prefill_seconds": [
+            3.578440877,
+            3.567061845
+          ],
+          "decode_mean_ms": 185.6909885,
+          "setup_seconds": 3.627745591,
+          "resident_bytes": 2055499776,
+          "root_bos": 340,
+          "prefill_runs": 3106
+        },
+        {
+          "block": "a2",
+          "prefill_seconds": [
+            3.882394315,
+            3.892485526
+          ],
+          "decode_mean_ms": 185.47015583333328,
+          "setup_seconds": 3.739414824,
+          "resident_bytes": 2055499776,
+          "root_bos": 413,
+          "prefill_runs": 3490
+        }
+      ],
+      "baseline_prefill_seconds": 3.8897462735,
+      "candidate_prefill_seconds": 3.570762782,
+      "latency_reduction_percent": 8.200624644161636,
+      "candidate_tokens_per_second": 8.961670643961584,
+      "baseline_decode_ms": 185.37691494791665,
+      "candidate_decode_ms": 185.6891789375,
+      "decode_change_percent": 0.16844815314307482
+    }
+  },
+  "benchmark_scope": "Serial A/B/B/A per precision, 2 trials/process, 32 prefill/24 decode tokens, 4 warmup decode tokens. A rebuilt from baseline commit with the same release preset and shared dependencies, B current source. Same artifact root and existing decode kernels; only B uses paired attention. Includes submit/wait and host transfer, excludes graph setup/reset. No confidence-interval or hardware-saturation claim.",
+  "post_change_profile": {
+    "bf16": {
+      "ms_per_token": {
+        "norm": 0.15888596875,
+        "norm_mix": 5.514219749999999,
+        "attention_projections": 23.754901218750003,
+        "recurrence": 37.69728553125002,
+        "projection_residual": 15.309856937499998,
+        "channel_mix": 32.47403674999999,
+        "head": 0.22442275
+      },
+      "runs": 3106,
+      "scope": "Diagnostic 32-token CLI prompt from zero state, including cold first pair; not directly comparable with prior warmed nonzero-state profile. Host timing includes scheduling, switching, DMA and compute."
+    },
+    "int8-ffn-output": {
+      "ms_per_token": {
+        "norm": 0.1596508125,
+        "norm_mix": 5.358900343749997,
+        "attention_projections": 23.462994374999997,
+        "recurrence": 37.76794818750002,
+        "projection_residual": 12.888824343749995,
+        "channel_mix": 31.636291218750003,
+        "head": 0.22240859375
+      },
+      "runs": 3106,
+      "scope": "Diagnostic 32-token CLI prompt from zero state, including cold first pair; not directly comparable with prior warmed nonzero-state profile. Host timing includes scheduling, switching, DMA and compute."
+    }
+  },
+  "runtime_artifacts": "Added the two validated batch2 attention directories to build/kernels/rwkv7-bf16 with byte comparison; existing decode and FFN artifacts unchanged."
+}

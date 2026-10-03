@@ -23,6 +23,8 @@ def main():
         subprocess.run([sys.executable, str(ROOT / "tools/compile" / f"rwkv7_{stage}.py")],
                        cwd=ROOT, env=env, check=True)
     if args.prefill_batch2:
+        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_attention_projections.py"), "--batch", "2"],
+                       cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_channel_mix.py")],
                        cwd=ROOT, env=env, check=True)
     if args.prefill_batch2 and (args.int8_ffn or args.int8_ffn_output):

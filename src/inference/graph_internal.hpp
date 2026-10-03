@@ -57,6 +57,7 @@ struct DecodeGraph::Impl {
   struct MutableAllocation {
     xdna::DeviceBuffer root;
     Vector initial;
+    size_t token_bytes = 0; // Nonzero for two adjacent activation copies.
   };
   std::vector<RunBinding> bindings;
   std::vector<MutableAllocation> mutable_allocations;
@@ -73,6 +74,7 @@ struct DecodeGraph::Impl {
   xdna::Session &session(const std::filesystem::path &root,
                          const std::string &name);
   xdna::DeviceBuffer initialized(xdna::Session &s, const Vector &v, bool shared = false);
+  xdna::DeviceBuffer initialized_pair(xdna::Session &, const Vector &);
   void append_run(xdna::Session &, std::vector<xdna::DeviceBuffer>, Stage);
   xdna::DeviceBuffer initialized_bf16(xdna::Session &s, const Vector &v);
   struct ResidentLayout {

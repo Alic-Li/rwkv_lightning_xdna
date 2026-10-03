@@ -82,3 +82,7 @@ target_compile_options(rwkv-prefill-ffn-test PRIVATE -Wall -Wextra -ffp-contract
 add_executable(rwkv-prefill-model-test inference/prefill_model_test.cpp)
 target_link_libraries(rwkv-prefill-model-test PRIVATE rwkv::inference)
 target_include_directories(rwkv-prefill-model-test PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+add_executable(rwkv-prefill-attention-test inference/prefill_attention_test.cpp)
+target_link_libraries(rwkv-prefill-attention-test PRIVATE rwkv::xdna)
+target_include_directories(rwkv-prefill-attention-test PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+target_compile_options(rwkv-prefill-attention-test PRIVATE -Wall -Wextra -ffp-contract=off)

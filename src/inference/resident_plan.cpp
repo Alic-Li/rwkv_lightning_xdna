@@ -31,6 +31,14 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized(xdna::Session &s,
     mutable_allocations.push_back({b, v});
   return b;
 }
+xdna::DeviceBuffer DecodeGraph::Impl::initialized_pair(xdna::Session &s, const Vector &v) {
+  if (!capture_prefill) return initialized(s, v);
+  Vector pair = v;
+  pair.insert(pair.end(), v.begin(), v.end());
+  auto root = initialized(s, pair);
+  mutable_allocations.back().token_bytes = v.size() * sizeof(float);
+  return root.slice(0, v.size() * sizeof(float));
+}
 void DecodeGraph::Impl::append_run(xdna::Session &s,
     std::vector<xdna::DeviceBuffer> arguments, Stage stage) {
   runs.push_back(s.prepare(arguments));
@@ -48,6 +56,12 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
   if (capture_prefill) {
+    for (int count : {3, 4})
+      check_artifact(root, "bf16-attention-projections-" + std::to_string(count) + "-b2",
+          {{"schema_version", 1}, {"dtype", "bfloat16"}, {"channels", 2048},
+           {"branches", count}, {"rank", 256}, {"cores", 14}, {"exact_fp32", false},
+           {"batch", 2}, {"arena_stride", count == 4 ? 61440 : 55296},
+           {"value_stride", count == 4 ? 61440 : 6144}});
     const bool int8 = weight_mode != WeightMode::BFloat16;
     const char *name = int8 ? "int8-prefill-ffn-b2-projection-input"
                             : "bf16-prefill-ffn-b2-projection-input";
@@ -144,7 +158,7 @@ void DecodeGraph::Impl::prepare_resident_arenas(
         if (ids[j] != none && buffers[ids[j]].constant)
           std::copy(read(ids[j]).begin(), read(ids[j]).end(),
                     values.begin() + j * 2048);
-      auto arena = initialized(allocator, values);
+      auto arena = initialized_pair(allocator, values);
       for (size_t j = 0; j < ids.size(); ++j) {
         if (ids[j] == none)
           continue;
@@ -332,7 +346,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
           std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
         }
         auto pair = initialized(stage, Vector(4096, 0));
-        auto mixed = initialized(stage, Vector(count * 2048, 0));
+        auto mixed = initialized_pair(stage, Vector(count * 2048, 0));
         device_buffers[node.output] = pair.slice(0, 2048 * 4);
         for (size_t j = 0; j < count; ++j)
           device_buffers[nodes[node_index + 1 + j].output] =
@@ -403,7 +417,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
           throw std::runtime_error(
               "Unexpected attention projection arena layout");
         auto &stage = session(root, name);
-        auto auxiliary = initialized(stage, Vector(count * 512, 0));
+        auto auxiliary = initialized_pair(stage, Vector(count * 512, 0));
         auto ranks = pack_rank(branches, 2, 4, auxiliary);
         std::array<const Tensor *, 3> projections;
         for (size_t p = 0; p < 3; ++p) {
@@ -415,7 +429,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         auto packed = weight_layout::rkv(projections);
         packed.insert(packed.end(), ranks.begin(), ranks.end());
         auto value_aux = count == 4 ? value_args.at(cursor)[0]
-                                    : initialized(stage, Vector(6144, 0));
+                                    : initialized_pair(stage, Vector(6144, 0));
         append_run(stage,
             {mixed_inputs.at(a[0]), initialized_bf16(stage, packed),
              recurrence_stages.at(prepare_index), value_aux, auxiliary}, Stage::Attention);
