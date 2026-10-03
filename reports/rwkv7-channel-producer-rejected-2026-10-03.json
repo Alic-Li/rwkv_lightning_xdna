@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-03",
+  "status": "rejected_no_reliable_speedup",
+  "baseline_commit": "739da8d",
+  "hardware_software": "Ryzen AI 7 H 350 / AIE2P / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / locked project compiler",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "experiment": "Convert ReLU outputs to BF16 on the existing four key workers; multicast BF16 to value workers. Combine raw and FP32 activated diagnostics into one FIFO per core and scatter back into the original host ABI. Explicit placement and memory-tile input fanout. No extra converter core or submission.",
+  "compile_constraints": [
+    "Automatic placement rejected compute-peer DMA budget",
+    "Three producer streams require three output DMA channels; hardware supports two, so combined FP32 diagnostic streams",
+    "Diagnostic scatter innermost extent 2048 and 1024 rejected by DMA lowering; [4,2,4,512] sizes / [2048,8192,512,1] strides compiled and passed oracle/guards"
+  ],
+  "validation": {
+    "channel_mix": "Independent FP64 oracle, replay, immutable input and guards passed; max_abs=2.42144e-7",
+    "whole_model": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 203.2455508897638,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.920156901945566,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "reference": "128-token pre-change snapshot from preceding cache experiment; SHA-256 verified before use"
+  },
+  "stage": {
+    "order": [
+      "A1",
+      "B1",
+      "B2",
+      "A2"
+    ],
+    "samples_per_process": 300,
+    "means_us": [
+      1908.29,
+      1900.36,
+      1886.45,
+      1889.53
+    ]
+  },
+  "whole_model": {
+    "order": [
+      "A1",
+      "B1",
+      "B2",
+      "A2"
+    ],
+    "prefill_tokens": 8,
+    "decode_tokens": 24,
+    "trials_per_process": 2,
+    "means_ms": [
+      203.17422027083322,
+      203.0118232708334,
+      203.39057462499997,
+      203.7346076875
+    ],
+    "baseline_mean_ms": 203.4544139791666,
+    "candidate_mean_ms": 203.20119894791668,
+    "latency_reduction_percent": 0.12445787058512625
+  },
+  "decision": "Reverted: stage means unchanged and whole-model difference below process variation. Production artifacts were never replaced. Avoid retaining extra layout complexity without demonstrated improvement.",
+  "limitations": [
+    "No hardware saturation claim; host waits contain DMA and program-switching costs",
+    "INT8 path not changed or promoted",
+    "Numerical regression covers 128 tokens, not full-context language quality"
+  ],
+  "next_work": "Implement batched BF16 projection with weight-tile reuse across tokens as a building block for real NPU prefill. Sequential full-model prefill remains a major unfinished requirement.",
+  "source_sha256": {
+    "kernels/rwkv/channel_mix_bf16.cc": "676d35361e82f2634d747148086793d85236f14b06e86279ba8565dd1d691bc1",
+    "tools/compile/rwkv7_channel_mix.py": "01f1c67585b8b5498c5eb6d2b8af508ff0d2c3b49328d7b68f3c3889248ced45"
+  },
+  "candidate_artifact_root": "build/kernels/channel-producer",
+  "raw_logs": "reports/runs/channel-producer-2026-10-03"
+}
