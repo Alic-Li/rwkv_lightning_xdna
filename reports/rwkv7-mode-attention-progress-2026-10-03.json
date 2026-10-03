@@ -1,0 +1,192 @@
+{
+  "date": "2026-10-03",
+  "status": "Validated opt-in candidate; default production promotion deferred because gains are small relative to observed drift",
+  "reference_evidence": [
+    "rwkv7-hrx-alternation-control-2026-10-03.json",
+    "rwkv7-mode-worker-control-2026-10-03.json"
+  ],
+  "design": {
+    "cores": 14,
+    "reuse": "Original RKV workers accept FP32 opcode through existing weight FIFO; lane 0 executes norm/mix, other lanes consume broadcast inputs; rank workers unchanged",
+    "shared_pdi_sha256": "4ac90fcbec1801d64e1f2155074730cdbb0a9c3bc585607e2975d424f85eda32",
+    "scope": "Fast decode layers 1-23; tracing and batch2 prefill retain original norm program",
+    "host_transfer_change_per_token": 0,
+    "resident_bytes_added": 385024,
+    "runs_per_token": {
+      "bf16": 100,
+      "int8_ffn": 100,
+      "int8_ffn_output": 123
+    }
+  },
+  "validation": {
+    "stage": "Three fixtures, unequal opcode repetitions, bitwise outputs/state, immutable buffers and guards passed; FP64 norm max abs 4.096161551780941e-6",
+    "decode": "All three modes: 128 steps and 1116 checked vectors exact against saved baselines; BF16 repeated after compiler integration and metadata validation",
+    "prefill": "All three modes: 1533 vectors exact; prompt lengths 0,1,2,3,8,17,32, zero/nonzero state, odd tails, state restore and decode handoff",
+    "compiler": "Refactored four-branch attention and norm PDI/instructions byte-identical to original experiment; three-branch PDI identical but instruction bytes differ; three/four-branch prefill-stage bitwise and FP64 checks passed",
+    "release_and_test_build": "passed",
+    "ctest": "3/3 passed",
+    "prefill_stage": "Both 3-branch and 4-branch refactored artifacts pass bitwise comparison, FP64 oracle, replay, guard and immutable-input checks against batch2 kernels."
+  },
+  "benchmarks": {
+    "bf16": {
+      "trials": {
+        "A1": {
+          "decode_ms": 203.9295566041667,
+          "prefill_seconds": 3.4649453704999997,
+          "decode_samples": 48
+        },
+        "B1": {
+          "decode_ms": 195.72905325000002,
+          "prefill_seconds": 3.4555688284999997,
+          "decode_samples": 48
+        },
+        "B2": {
+          "decode_ms": 194.41716964583335,
+          "prefill_seconds": 3.485690282,
+          "decode_samples": 48
+        },
+        "A2": {
+          "decode_ms": 198.64071399999997,
+          "prefill_seconds": 3.4278221374999998,
+          "decode_samples": 48
+        }
+      },
+      "baseline_decode_ms": 201.28513530208335,
+      "candidate_decode_ms": 195.0731114479167,
+      "gain_percent": 3.086181125518195
+    },
+    "bf16-repeat": {
+      "trials": {
+        "A1": {
+          "decode_ms": 201.68749314583337,
+          "prefill_seconds": 3.4430291425,
+          "decode_samples": 48
+        },
+        "B1": {
+          "decode_ms": 205.89890695833336,
+          "prefill_seconds": 3.5367150335,
+          "decode_samples": 48
+        },
+        "B2": {
+          "decode_ms": 195.70193945833338,
+          "prefill_seconds": 3.451721874,
+          "decode_samples": 48
+        },
+        "A2": {
+          "decode_ms": 202.19822964583338,
+          "prefill_seconds": 3.4529523930000003,
+          "decode_samples": 48
+        }
+      },
+      "baseline_decode_ms": 201.94286139583338,
+      "candidate_decode_ms": 200.80042320833337,
+      "gain_percent": 0.5657234821787926
+    },
+    "int8-ffn": {
+      "trials": {
+        "A1": {
+          "decode_ms": 194.54806241666668,
+          "prefill_seconds": 3.5167703035,
+          "decode_samples": 48
+        },
+        "B1": {
+          "decode_ms": 183.99043260416673,
+          "prefill_seconds": 3.4789719515,
+          "decode_samples": 48
+        },
+        "B2": {
+          "decode_ms": 181.98764733333334,
+          "prefill_seconds": 3.4438634290000003,
+          "decode_samples": 48
+        },
+        "A2": {
+          "decode_ms": 184.9085748958333,
+          "prefill_seconds": 3.421965244,
+          "decode_samples": 48
+        }
+      },
+      "baseline_decode_ms": 189.72831865625,
+      "candidate_decode_ms": 182.98903996875003,
+      "gain_percent": 3.5520678911987846
+    },
+    "int8-output": {
+      "trials": {
+        "A1": {
+          "decode_ms": 186.70256283333333,
+          "prefill_seconds": 3.421170548,
+          "decode_samples": 48
+        },
+        "B1": {
+          "decode_ms": 183.57884041666668,
+          "prefill_seconds": 3.429936678,
+          "decode_samples": 48
+        },
+        "B2": {
+          "decode_ms": 189.8295480416667,
+          "prefill_seconds": 3.5297198410000004,
+          "decode_samples": 48
+        },
+        "A2": {
+          "decode_ms": 191.51483143749996,
+          "prefill_seconds": 3.477900324,
+          "decode_samples": 48
+        }
+      },
+      "baseline_decode_ms": 189.10869713541666,
+      "candidate_decode_ms": 186.7041942291667,
+      "gain_percent": 1.271492502816074
+    },
+    "bf16-long": {
+      "order": [
+        "B1",
+        "A1",
+        "A2",
+        "B2"
+      ],
+      "trials": {
+        "B1": {
+          "decode_ms": 201.4935349635417,
+          "prefill_seconds": 3.5566727125,
+          "decode_samples": 192
+        },
+        "A1": {
+          "decode_ms": 201.7196336354166,
+          "prefill_seconds": 3.4686094835,
+          "decode_samples": 192
+        },
+        "A2": {
+          "decode_ms": 200.4636971458333,
+          "prefill_seconds": 3.4576375329999998,
+          "decode_samples": 192
+        },
+        "B2": {
+          "decode_ms": 196.2678814062501,
+          "prefill_seconds": 3.4534858805,
+          "decode_samples": 192
+        }
+      },
+      "baseline_decode_ms": 201.09166539062494,
+      "candidate_decode_ms": 198.8807081848959,
+      "gain_percent": 1.0994772963037636,
+      "baseline_prefill_seconds": 3.46312350825,
+      "candidate_prefill_seconds": 3.5050792965,
+      "prefill_change_percent": 1.211501355641853
+    }
+  },
+  "limitations": [
+    "No samples removed. BF16 decode gains range from 0.566% to 3.086% across short blocks; longer B/A/A/B gives approximately 1.10%.",
+    "Longer BF16 control has approximately 1.2% slower mean prefill despite unchanged batch2 compute path; environmental drift versus artifact effect remains unresolved.",
+    "Candidate has not replaced production artifacts or default kernel compiler settings.",
+    "Hardware-limit objective is not complete; next work should seek larger measured savings or resolve observed drift before default promotion."
+  ],
+  "logs": "reports/runs/mode-attention-2026-10-03",
+  "provenance": {
+    "hardware": "Ryzen AI 7 H 350 / RyzenAI-npu6, XDNA2/AIE2P, 8 columns",
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "kernel": "7.0.0-38-generic",
+    "power_mode": "performance, rechecked using xrt-smi platform report",
+    "checkpoint": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "benchmark": "rwkv-bench, prompt32 batch2, decode24 (short) or96 (long), two trials per process; C++ dispatch serial"
+  }
+}

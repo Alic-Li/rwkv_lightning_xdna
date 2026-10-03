@@ -362,6 +362,36 @@ cmake --build --preset test --target rwkv-mode-worker-test
 因此这是程序进入与切换的对照，不代表整层或整模型加速。
 详见[核心复用对照记录](../reports/rwkv7-mode-worker-control-2026-10-03.json)。
 
+### norm/mix 与 attention 复用核心的整模型候选
+
+`--mode-reuse` 为四分支、单 token attention 增加 norm/mix 操作模式；14个计算核心的
+布局保持一致，原有权重 FIFO 传递操作码。两个指令产物共享经过字节核对的 PDI 和
+xclbin，普通 decode 的第1–23层可复用同一硬件 context。trace 和 batch2 prefill
+继续使用原 norm/mix 程序。FP32 算术顺序不变，runs/token 仍为100/100/123，
+常驻数据增加385,024字节，不增加每 token 主机传输。
+
+这是显式实验路径，默认编译和生产产物尚未启用。独立生成后补齐已有 kernel：
+
+```bash
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/norm-attention-optin" \
+  .venv/bin/python tools/compile/rwkv7_attention_projections.py --mode-reuse
+for artifact in "$PWD"/build/kernels/rwkv7-bf16/*; do
+  target="build/kernels/norm-attention-optin/$(basename "$artifact")"
+  if [ ! -e "$target" ]; then ln -s "$artifact" "$target"; fi
+done
+cmake --build --preset test
+./build/test/rwkv-mode-attention-test build/kernels/norm-attention-optin \
+  build/kernels/rwkv7-bf16
+./build/release/rwkv-bench "$MODEL" build/kernels/norm-attention-optin \
+  32 96 2 --prefill-batch2
+```
+
+三种权重模式的128步 decode 和各1,533个 prefill 回归向量均逐位一致。BF16 长测
+B/A/A/B（每组192个 decode 样本）从201.092降至198.881 ms/token，约改善1.10%；
+同批 prefill 从3.463升至3.505秒。短测收益存在明显波动，尚不足以提升为默认路径。
+全部样本保留，未剔除慢轮次，见
+[整模型候选验证](../reports/rwkv7-mode-attention-progress-2026-10-03.json)。
+
 ## C++ 接口和状态
 
 ```cpp

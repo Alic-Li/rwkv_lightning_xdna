@@ -121,3 +121,8 @@ add_executable(rwkv-mode-worker-test inference/mode_worker_test.cpp)
 target_link_libraries(rwkv-mode-worker-test PRIVATE rwkv::xdna)
 target_include_directories(rwkv-mode-worker-test PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 target_compile_options(rwkv-mode-worker-test PRIVATE -Wall -Wextra -ffp-contract=off)
+
+add_executable(rwkv-mode-attention-test inference/mode_attention_test.cpp)
+target_link_libraries(rwkv-mode-attention-test PRIVATE rwkv::xdna)
+target_include_directories(rwkv-mode-attention-test PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+target_compile_options(rwkv-mode-attention-test PRIVATE -Wall -Wextra -ffp-contract=off)

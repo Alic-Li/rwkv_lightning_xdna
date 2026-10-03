@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -36,10 +37,15 @@ int main(int argc, char **argv) {
         return Session(p / "design.xclbin", p / "instructions.bin");
       };
       auto batch = session(argv[1], "-b2"), decode = session(argv[2], "");
+      std::ifstream metadata(std::filesystem::path(argv[2]) / name / "config.json");
+      Json config;
+      metadata >> config;
+      const bool mode_reuse = config.value("mode_attention", false);
       const size_t nrkv = 3 * 2048 * 2048, nrank = branches * 256 * 2048;
+      const size_t weight_elements = nrkv + 2 * nrank + (mode_reuse ? 4096 : 0);
       const size_t stride = branches == 4 ? 61440 : 55296;
       const size_t vstride = branches == 4 ? stride : 6144;
-      Guarded x(batch, 24576 * 4), w(batch, (nrkv + 2 * nrank) * 2),
+      Guarded x(batch, 24576 * 4), w(batch, weight_elements * 2),
           arena(batch, stride * 2 * 4), value(batch, (vstride + 6144) * 4),
           rank(batch, branches * 1024 * 4), ra(decode, 55296 * 4),
           rv(decode, 6144 * 4), rr(decode, branches * 512 * 4);
@@ -52,6 +58,10 @@ int main(int argc, char **argv) {
       std::uniform_real_distribution<float> random(-1, 1);
       std::vector<uint16_t> weights(nrkv + 2 * nrank);
       for (auto &v : weights) v = bf16(random(rng) / 64);
+      if (mode_reuse) {
+        weights.resize(weight_elements, 0);
+        weights[nrkv + 2 * nrank + 1] = 0x3f80;
+      }
       w.data.upload(weights.data(), w.bytes);
       V input(24576), first, first_a, first_v, first_r;
       V actual_a(stride * 2), actual_v(vstride + 6144), actual_r(branches * 1024);

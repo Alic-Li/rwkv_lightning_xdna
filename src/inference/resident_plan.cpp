@@ -4,9 +4,25 @@
 #include "weight_layout.hpp"
 #include "quantization.hpp"
 #include <algorithm>
+#include <fstream>
 #include <stdexcept>
 
 namespace rwkv::inference {
+namespace {
+bool mode_attention(const std::filesystem::path &root) {
+  std::ifstream input(root / "bf16-attention-projections-4/config.json");
+  if (!input) throw std::runtime_error("Missing attention artifact metadata");
+  nlohmann::json config;
+  input >> config;
+  if (!config.value("mode_attention", false)) return false;
+  check_artifact(root, "bf16-attention-projections-4", {{"mode_header_bytes", 8192}});
+  check_artifact(root, "mode-norm-mix-6",
+      {{"schema_version", 1}, {"channels", 2048}, {"mixes", 6},
+       {"dtype", "float32"}, {"mode_attention", true}, {"mode_header_bytes", 8192}});
+  return true;
+}
+}
+
 xdna::Session &DecodeGraph::Impl::session(const std::filesystem::path &root,
                                           const std::string &name) {
   auto &s = sessions[name];
@@ -54,15 +70,27 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
   return b;
 }
 // Keep the original plan for node/projection tracing. Normal execution reuses
-// its runs and BOs, replacing only value-recurrence/output and the following
-// FFN input binding. No additional resident data allocation or transfer.
+// its runs and BOs, replacing value-recurrence/output and the following FFN
+// input binding, plus norm/mix when attention provides shared mode workers.
+// Opcode headers are uploaded during preparation; replay adds no host transfer.
 void DecodeGraph::Impl::prepare_decode_fusion(const std::filesystem::path &root) {
-  if (weight_mode == WeightMode::Int8FFNOutput || states.size() < 2) return;
+  if (states.size() < 2) return;
+  const bool reuse_attention = mode_attention(root);
+  const bool fuse_recurrence = weight_mode != WeightMode::Int8FFNOutput;
+  if (!reuse_attention && !fuse_recurrence) return;
+  xdna::Session *fused = nullptr;
+  if (fuse_recurrence) {
   check_artifact(root, "bf16-decode-recurrence-projection",
       {{"schema_version", 1}, {"batch", 1}, {"channels", 2048}, {"head_size", 64},
        {"arena_vectors", 30}, {"lanes", 7}, {"cores", 31}, {"output_vectors", {25, 26}},
        {"dtype", "bfloat16"}, {"state_dtype", "float32"}});
-  auto &fused = session(root, "bf16-decode-recurrence-projection");
+  fused = &session(root, "bf16-decode-recurrence-projection");
+  }
+  xdna::Session *mode_norm = nullptr;
+  if (reuse_attention) {
+    check_artifact(root, "mode-norm-mix-6", {{"mode_attention", true}});
+    mode_norm = &session(root, "mode-norm-mix-6");
+  }
   decode_runs.reserve(runs.size());
   decode_run_ends.reserve(node_run_ends.size());
   std::vector<size_t> ends(runs.size() + 1);
@@ -70,7 +98,7 @@ void DecodeGraph::Impl::prepare_decode_fusion(const std::filesystem::path &root)
   for (size_t i = 0; i < bindings.size(); ++i) {
     const auto &binding = bindings[i];
     const auto &args = binding.arguments;
-    if (binding.stage == Stage::Recurrence && args.size() == 3) {
+    if (fused && binding.stage == Stage::Recurrence && args.size() == 3) {
       if (i + 2 >= bindings.size() || bindings[i + 1].stage != Stage::Output ||
           bindings[i + 2].stage != Stage::FFN)
         throw std::runtime_error("Unsupported decode fusion schedule");
@@ -78,7 +106,7 @@ void DecodeGraph::Impl::prepare_decode_fusion(const std::filesystem::path &root)
       const auto offset = projection[0].offset_within(args[1]);
       if (!offset || *offset != 24 * 2048 * 4 || args[1].size() != 30 * 2048 * 4)
         throw std::runtime_error("Unsupported decode fusion arena");
-      decode_runs.push_back(fused.prepare({args[0], args[1], args[2], projection[1], projection[2]}));
+      decode_runs.push_back(fused->prepare({args[0], args[1], args[2], projection[1], projection[2]}));
       ffn_input = args[1].slice(26 * 2048 * 4, 2048 * 4);
       ends[i + 1] = ends[i + 2] = decode_runs.size();
       ++i;
@@ -89,6 +117,10 @@ void DecodeGraph::Impl::prepare_decode_fusion(const std::filesystem::path &root)
         remapped[0] = ffn_input;
         decode_runs.push_back(binding.session->prepare(remapped));
         ffn_input = {};
+      } else if (mode_norm && binding.stage == Stage::Mix && i + 1 < bindings.size() &&
+                 bindings[i + 1].stage == Stage::Attention &&
+                 bindings[i + 1].arguments[4].size() == 2048 * sizeof(float)) {
+        decode_runs.push_back(mode_norm->prepare(args));
       } else decode_runs.push_back(runs[i]);
       ends[i + 1] = decode_runs.size();
     }
@@ -287,6 +319,7 @@ void DecodeGraph::Impl::prepare_resident_arenas(
 // runs.
 void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
                                               ResidentLayout &layout) {
+  const bool use_mode_attention = mode_attention(root);
   auto &value_args = layout.value_args;
   auto &recurrence_stages = layout.recurrence_stages;
   std::map<Id, xdna::DeviceBuffer> mixed_inputs;
@@ -421,6 +454,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
             throw std::runtime_error("Unexpected norm/mix parameter shape");
           std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
         }
+        if (use_mode_attention) parameters.resize(18432, 0.f);
         auto pair = initialized(stage, Vector(4096, 0));
         auto mixed = initialized_pair(stage, Vector(count * 2048, 0));
         device_buffers[node.output] = pair.slice(0, 2048 * 4);
@@ -504,6 +538,11 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         }
         auto packed = weight_layout::rkv(projections);
         packed.insert(packed.end(), ranks.begin(), ranks.end());
+        if (use_mode_attention && count == 4) {
+          const size_t header = packed.size();
+          packed.resize(header + 4096, 0);
+          packed[header + 1] = 0x3f80; // FP32 opcode 1 in the BF16 byte container.
+        }
         auto value_aux = count == 4 ? value_args.at(cursor)[0]
                                     : initialized_pair(stage, Vector(6144, 0));
         append_run(stage,
