@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-03",
+  "reference_root": "/home/alic-li/work_space/FastFlowLM",
+  "reference_commit": "b0d41a03411470373f849b25e3ce9356d716a483",
+  "method": "Read-only ELF symbol inspection and x86-64 objdump disassembly; no library execution or modification.",
+  "sha256": {
+    "src/lib/xrt/libgemm.so": "4edc9b8ad41059ced21d0b21ce08214fdc784fe4057aa667c10995d1177dad67",
+    "src/lib/xrt/libdequant.so": "c89ae39e7fe76e7ef8c3e0cdb5141311b6b43dd3b624ec8bb195a6a91e6d6f58",
+    "src/lib/xrt/libllama_npu.so": "4354b5c7c064853d7c9748a7669e6703516319d06800afc1a66b9b9c176a8c6f"
+  },
+  "verified_findings": [
+    {
+      "binary": "libgemm.so",
+      "addresses": [
+        "0x41b0",
+        "0x41c0",
+        "0x41d0"
+      ],
+      "finding": "get_m/get_k/get_n return immediate constants 64/512/128."
+    },
+    {
+      "binary": "libgemm.so",
+      "addresses": [
+        "0x5a50",
+        "0x5a58",
+        "0x5a68"
+      ],
+      "finding": "generate_seq checks M low 8 bits, K low 9 bits, N low 7 bits for zero. These host sequence constraints differ from get_m=64 and should not be conflated with a single hardware instruction shape."
+    },
+    {
+      "binary": "libdequant.so",
+      "addresses": [
+        "0x71d0",
+        "0x86a0"
+      ],
+      "finding": "Symbols expose implementation and wrapper for generate_dequant_q80_packed_in_q4nx_seq. This proves a Q8 dequantization sequence builder exists, not the device MAC precision."
+    },
+    {
+      "binary": "libllama_npu.so",
+      "addresses": [
+        "0x3d2f5",
+        "0x3d309",
+        "0x3d318",
+        "0x3d33d"
+      ],
+      "finding": "One forward branch executes and waits on xrt::runlist, then starts a separate xrt::run and waits. Other branches issue individual runs."
+    }
+  ],
+  "interpretation": [
+    "Investigate larger sequence GEMM tiles and resident multi-operation overlays; tiny-token GEMV timings cannot predict those gains.",
+    "Revisit runlist only with explicit context/ABI compatibility evidence: this repository documents a prior XRT 2.25 ERT_CMD_STATE_ABORT probe.",
+    "Host ELF disassembly does not establish native INT8 MAC usage; inspect the separate AIE programs in src/xclbins before drawing precision or device throughput conclusions."
+  ],
+  "next_evidence": [
+    "Trace Q8 sequence DMA arguments and device dequant-to-GEMM route.",
+    "Inspect xclbin metadata and embedded device code for the selected model/precision path.",
+    "Test candidate techniques in this project with numerical checks and whole-model A/B timing."
+  ],
+  "logs": "reports/runs/fastflow-binary-2026-10-03"
+}
