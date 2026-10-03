@@ -1,0 +1,112 @@
+{
+  "date": "2026-10-03",
+  "status": "BF16 prefill benefit repeated on longer workload; no material decode effect established",
+  "order": [
+    "B1",
+    "A1",
+    "A2",
+    "B2"
+  ],
+  "workload": {
+    "prefill_tokens": 128,
+    "decode_tokens": 96,
+    "trials_per_process": 2,
+    "warmup_decode_tokens": 4,
+    "tokens": "fixed synthetic; all samples retained"
+  },
+  "blocks": {
+    "B1": {
+      "prefill_s": [
+        10.277773862,
+        10.270324182
+      ],
+      "decode": {
+        "max_ms": 208.54535900000002,
+        "mean_ms": 198.73289407812504,
+        "min_ms": 196.764557,
+        "p50_ms": 198.130124,
+        "p95_ms": 200.593031,
+        "samples": 192,
+        "tokens_per_second": 5.031879622338133
+      },
+      "kernel_root": "build/kernels/chunk4-model",
+      "resident_bytes": 3008290816
+    },
+    "A1": {
+      "prefill_s": [
+        13.713826286,
+        13.702286936
+      ],
+      "decode": {
+        "max_ms": 202.087013,
+        "mean_ms": 198.76498092187487,
+        "min_ms": 197.01368,
+        "p50_ms": 198.443484,
+        "p95_ms": 200.67016600000002,
+        "samples": 192,
+        "tokens_per_second": 5.0310673206214975
+      },
+      "kernel_root": "build/kernels/rwkv7-bf16",
+      "resident_bytes": 2947313664
+    },
+    "A2": {
+      "prefill_s": [
+        13.696328562,
+        13.693694069
+      ],
+      "decode": {
+        "max_ms": 213.604371,
+        "mean_ms": 198.9090121718751,
+        "min_ms": 196.400304,
+        "p50_ms": 198.157506,
+        "p95_ms": 203.793641,
+        "samples": 192,
+        "tokens_per_second": 5.027424293555442
+      },
+      "kernel_root": "build/kernels/rwkv7-bf16",
+      "resident_bytes": 2947313664
+    },
+    "B2": {
+      "prefill_s": [
+        10.242419333,
+        10.2386386
+      ],
+      "decode": {
+        "max_ms": 206.693017,
+        "mean_ms": 198.72726135937503,
+        "min_ms": 197.09454100000002,
+        "p50_ms": 198.441413,
+        "p95_ms": 200.847215,
+        "samples": 192,
+        "tokens_per_second": 5.032022245763337
+      },
+      "kernel_root": "build/kernels/chunk4-model",
+      "resident_bytes": 3008290816
+    }
+  },
+  "summary": {
+    "A": {
+      "prefill_s": 13.70153396325,
+      "prefill_tokens_s": 9.342019685045427,
+      "decode_ms": 198.83699654687499,
+      "decode_samples": 384
+    },
+    "B": {
+      "prefill_s": 10.25728899425,
+      "prefill_tokens_s": 12.478930843398665,
+      "decode_ms": 198.73007771875004,
+      "decode_samples": 384
+    },
+    "prefill_throughput_gain_percent": 33.57851154365217,
+    "decode_latency_change_percent": -0.05377209975093722
+  },
+  "power_mode": "default",
+  "dispatch": "serial NPU; no compilation during these timed blocks",
+  "validation_reference": "rwkv7-chunk4-model-bf16-2026-10-03.json",
+  "logs": "reports/runs/throughput-resume-2026-10-03",
+  "limits": [
+    "Same model/device/precision only. No device roofline or full-array utilization established.",
+    "No statistical confidence interval; block means/distributions and raw per-token samples retained.",
+    "Tails use 1-3 sequential NPU decodes and short irregular prompts may behave differently."
+  ]
+}

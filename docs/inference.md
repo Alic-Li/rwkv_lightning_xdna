@@ -239,6 +239,9 @@ context 上限；仅保留各自 DMA 指令。原有 batch2 仍可使用同一�
 decode 198.73→200.81 ms/token，后者有约1%退化，尚不据此替换默认路径。
 2,628个 logits/state 向量逐位验收通过，含0–64 token、各种尾部和状态分支。
 完整范围与限制见[BF16 chunk4 实测](../reports/rwkv7-chunk4-model-bf16-2026-10-03.json)。
+随后128-token、每侧384个 decode 样本的 B/A/A/B 复测中，prefill 为9.34→12.48 tokens/s，
+decode 为198.837→198.730 ms/token。长测未复现短测约1%的 decode 退化，
+也不足以确立 decode 加速；详见[长负载复测](../reports/rwkv7-chunk4-long-confirmation-2026-10-03.json)。
 这不是已达硬件上限或长上下文质量验收的声明。
 
 W8A16 chunk4 使用同样的数据流；每个 INT8 weight tile 在核内展开一次，供四个
