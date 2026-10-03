@@ -78,12 +78,10 @@ DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
   if (prefill != PrefillMode::Sequential && prefill != PrefillMode::Batched2 && prefill != PrefillMode::Chunked4)
     throw std::invalid_argument("Invalid prefill mode");
   if (capture_prefill && resident.empty())
-    throw std::invalid_argument("Batched2 prefill requires NPU artifacts");
+    throw std::invalid_argument("Batched prefill requires NPU artifacts");
   if (mode != WeightMode::BFloat16 && mode != WeightMode::Int8FFN &&
       mode != WeightMode::Int8FFNOutput)
     throw std::invalid_argument("Invalid weight mode");
-  if (prefill == PrefillMode::Chunked4 && mode != WeightMode::BFloat16)
-    throw std::invalid_argument("Chunk4 currently requires BF16 weights");
   const size_t c = w.channels(), n = w.head_size();
   embedding = allocate(c);
   Id x = norm(embedding, w.at("blocks.0.ln0.weight"), w.at("blocks.0.ln0.bias"),

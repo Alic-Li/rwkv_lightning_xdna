@@ -216,7 +216,7 @@ PDI 计数，不能作为硬件利用率。正常计时继续使用拒绝 profil
 
 ## 实验性四-token chunked prefill
 
-`--prefill chunk4` 当前先开放 BF16，不改变默认的逐 token prefill。
+`--prefill chunk4` 支持 BF16、INT8 FFN-only 和 INT8 FFN+output，不改变默认的逐 token prefill。
 每层按阶段处理四个 token：attention/WKV 使用两次原有 batch2 kernel，
 WKV FP32 state 依次更新；FFN 一次权重流供四行复用。
 key 核将行结果流给独立的 activation 收集核，value 核分块读取设备已写入的
@@ -240,6 +240,21 @@ decode 198.73→200.81 ms/token，后者有约1%退化，尚不据此替换默�
 2,628个 logits/state 向量逐位验收通过，含0–64 token、各种尾部和状态分支。
 完整范围与限制见[BF16 chunk4 实测](../reports/rwkv7-chunk4-model-bf16-2026-10-03.json)。
 这不是已达硬件上限或长上下文质量验收的声明。
+
+W8A16 chunk4 使用同样的数据流；每个 INT8 weight tile 在核内展开一次，供四个
+BF16 token 复用，最后一个 K tile 后才乘 FP16-derived FP32 scale。
+不量化 activation，FP32 累加与 WKV state 不变。构建和运行：
+
+```bash
+cmake --build --preset release --target kernels-release-int8-prefill-chunk4
+./build/release/rwkv-cli --model "$MODEL" --weights int8-ffn-output --prefill chunk4 --prompt 'Hello' --max-tokens 32
+./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 32 24 2 --int8-ffn-output --prefill-chunk4
+```
+
+32-token A/B/B/A：FFN-only prefill 9.38→12.09 tokens/s，FFN+output 9.45→12.51；
+decode 分别183.82→184.11、184.20→184.31 ms/token，没有确立 decode 收益。
+两种模式各2,628个 logits/state 向量逐位通过；既有 INT8 语料质量限制不变。
+见[INT8 chunk4 整模型验证](../reports/rwkv7-chunk4-model-int8-2026-10-03.json)。
 
 ## 缺少生产 kernel
 

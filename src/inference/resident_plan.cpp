@@ -131,18 +131,23 @@ void DecodeGraph::Impl::prepare_decode_fusion(const std::filesystem::path &root)
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
   if (capture_prefill) {
+    const std::string chunk_weights = weight_mode == WeightMode::BFloat16 ? "bf16" : "int8";
+    const std::string chunk_output = weight_mode == WeightMode::Int8FFNOutput ? "int8" : "bf16";
     if (prefill_chunk_tokens == 4)
-      check_artifact(root, "bf16-chunk4-ffn-experiment-projection-input",
+      check_artifact(root, chunk_weights + "-chunk4-ffn-experiment-projection-input",
           {{"schema_version", 1}, {"batch", 4}, {"channels", 2048}, {"hidden", 8192},
-           {"weights", "bfloat16"}, {"activation", "bfloat16"}, {"state", "float32"},
+           {"weights", weight_mode == WeightMode::BFloat16 ? "bfloat16" : "int8"}, {"activation", "bfloat16"}, {"state", "float32"},
            {"input_layout", "projection_residual_pairs"}, {"fp32_arena_floats", 51200},
            {"bf16_arena_elements", 40960},
            {"fp32_offsets", {{"shift", 0}, {"raw", 2048}, {"projected", 34816}, {"output", 43008}}},
            {"bf16_offsets", {{"mixed", 0}, {"activated", 8192}}}});
     if (prefill_chunk_tokens == 4)
       for (int stride : {55296, 61440})
-        check_artifact(root, "bf16-prefill-output-b2-s" + std::to_string(stride),
-            {{"shared_program", "bf16-prefill-output-b2-s2048"}});
+        check_artifact(root, chunk_output + "-prefill-output-b2-s" + std::to_string(stride),
+            {{"shared_program", chunk_output + "-prefill-output-b2-s2048"}});
+    if (prefill_chunk_tokens == 4 && weight_mode != WeightMode::BFloat16)
+      check_artifact(root, chunk_weights + "-chunk4-ffn-experiment-projection-input",
+          {{"tile_bytes", 4160}, {"scale", "fp16_expanded_fp32"}});
     for (bool value : {false, true})
       check_artifact(root, value ? "prefill-value-recurrence-b2" : "prefill-recurrence-b2",
           {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"head_size", 64},

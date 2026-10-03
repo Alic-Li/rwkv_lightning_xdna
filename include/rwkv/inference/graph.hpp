@@ -54,9 +54,9 @@ public:
   void load_state(const State &);
   State export_state() const;
   Vector replay_resident(int token);
-  // Batched2 or Chunked4 constructor required; Batched2 supports all NPU weight modes; Chunked4 is BF16 experimental.
-  // Returns final-token logits; empty input is
-  // a no-op. Odd tails use the resident decode transition. No trace hooks.
+  // Batched2 or experimental Chunked4 constructor required; all NPU weight modes.
+  // Returns final-token logits; empty input is a no-op. Incomplete chunks use
+  // resident decode transitions. No trace hooks.
   Vector prefill_resident(const std::vector<int> &tokens);
   GraphStats stats() const;
 

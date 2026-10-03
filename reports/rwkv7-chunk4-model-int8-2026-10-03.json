@@ -1,0 +1,125 @@
+{
+  "date": "2026-10-03",
+  "status": "validated opt-in W8A16 chunk4 for both weight modes; defaults unchanged",
+  "precision": "INT8 weights with FP16-derived FP32 scales, BF16 activations/MAC inputs, FP32 accumulation/shift/WKV state. Unchanged quantization and no CPU/GPU model fallback.",
+  "validation": "Each mode: 2628 bitwise logits/state snapshot vectors for 0,1,2,3,4,5,7,8,9,17,32,64 tokens, state reset/branch and decode handoff. FP64/guards/replay/immutable stage checks in separate stage report.",
+  "modes": {
+    "int8-ffn": {
+      "blocks": {
+        "A1": {
+          "prefill_seconds": [
+            3.41258262,
+            3.409572429
+          ],
+          "decode_ms": 183.72374091666669,
+          "resident_bytes": 2154590208,
+          "prefill_runs": 1970
+        },
+        "B1": {
+          "prefill_seconds": [
+            2.644871773,
+            2.645098389
+          ],
+          "decode_ms": 184.01887745833332,
+          "resident_bytes": 2215567360,
+          "prefill_runs": 2146
+        },
+        "B2": {
+          "prefill_seconds": [
+            2.649070599,
+            2.648859827
+          ],
+          "decode_ms": 184.1992447708333,
+          "resident_bytes": 2215567360,
+          "prefill_runs": 2146
+        },
+        "A2": {
+          "prefill_seconds": [
+            3.41147885,
+            3.413094125
+          ],
+          "decode_ms": 183.92136083333335,
+          "resident_bytes": 2154590208,
+          "prefill_runs": 1970
+        }
+      },
+      "summary": {
+        "A": {
+          "prefill_s": 3.411682006,
+          "prefill_tokens_s": 9.37953770126371,
+          "decode_ms": 183.82255087500002
+        },
+        "B": {
+          "prefill_s": 2.646975147,
+          "prefill_tokens_s": 12.089271044447777,
+          "decode_ms": 184.1090611145833
+        },
+        "prefill_throughput_gain_percent": 28.889839024997844,
+        "decode_latency_change_percent": 0.15586240002627427
+      }
+    },
+    "int8-ffn-output": {
+      "blocks": {
+        "A1": {
+          "prefill_seconds": [
+            3.388631859,
+            3.388486529
+          ],
+          "decode_ms": 184.02952077083333,
+          "resident_bytes": 2055499776,
+          "prefill_runs": 2338
+        },
+        "B1": {
+          "prefill_seconds": [
+            2.556573959,
+            2.557374821
+          ],
+          "decode_ms": 184.49948858333332,
+          "resident_bytes": 2116476928,
+          "prefill_runs": 2146
+        },
+        "B2": {
+          "prefill_seconds": [
+            2.560410604,
+            2.560233068
+          ],
+          "decode_ms": 184.11066847916666,
+          "resident_bytes": 2116476928,
+          "prefill_runs": 2146
+        },
+        "A2": {
+          "prefill_seconds": [
+            3.379089742,
+            3.390214529
+          ],
+          "decode_ms": 184.36802749999995,
+          "resident_bytes": 2055499776,
+          "prefill_runs": 2338
+        }
+      },
+      "summary": {
+        "A": {
+          "prefill_s": 3.3866056647500002,
+          "prefill_tokens_s": 9.44898909639137,
+          "decode_ms": 184.19877413541664
+        },
+        "B": {
+          "prefill_s": 2.558648113,
+          "prefill_tokens_s": 12.506604498451406,
+          "decode_ms": 184.30507853125
+        },
+        "prefill_throughput_gain_percent": 32.35918012888553,
+        "decode_latency_change_percent": 0.05771178246560815
+      }
+    }
+  },
+  "build": "Complete rwkv7_optimized.py --prefill-chunk4 --int8-ffn-output --output build/kernels/chunk4-repro succeeded. Fresh-directory dispatch audited separately in final handoff.",
+  "logs": "reports/runs/throughput-resume-2026-10-03",
+  "measurement": "Serial NPU, default power mode, 32-token prompts, 24 decode tokens, two trials/process, A/B/B/A, all samples retained. A=batch2 production artifacts; B=chunk4 candidate.",
+  "limits": [
+    "No native INT8 MAC claim or changed activation quantization.",
+    "Existing INT8 corpus/long-context quality limitations still apply.",
+    "No material decode gain established; prefill is the demonstrated benefit.",
+    "Weight reuse and stage-contiguous scheduling effects are combined; no attribution to one component."
+  ]
+}

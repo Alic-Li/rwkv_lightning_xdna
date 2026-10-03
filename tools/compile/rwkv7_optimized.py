@@ -14,7 +14,7 @@ def main():
     parser.add_argument("--int8-ffn", action="store_true", help="Also compile experimental W8A16 ChannelMix")
     parser.add_argument("--int8-ffn-output", action="store_true", help="Also compile W8A16 ChannelMix and attention output")
     parser.add_argument("--prefill-batch2", action="store_true", help="Also compile two-token ChannelMix prefill for the selected precisions")
-    parser.add_argument("--prefill-chunk4", action="store_true", help="Compile experimental four-token BF16 prefill")
+    parser.add_argument("--prefill-chunk4", action="store_true", help="Compile experimental four-token prefill")
     args = parser.parse_args()
     if args.prefill_chunk4:
         args.prefill_batch2 = True
@@ -49,11 +49,15 @@ def main():
                        cwd=ROOT, env=env, check=True)
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_channel_mix.py"), "--int8", "--recurrence-input"],
                        cwd=ROOT, env=env, check=True)
+    if args.prefill_chunk4 and (args.int8_ffn or args.int8_ffn_output):
+        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_chunk4_ffn_experiment.py"), "--projection-input", "--int8"],
+                       cwd=ROOT, env=env, check=True)
     if args.int8_ffn or args.int8_ffn_output:
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_channel_mix_int8.py")],
                        cwd=ROOT, env=env, check=True)
     if args.prefill_batch2 and args.int8_ffn_output:
-        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_output.py"), "--int8"],
+        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_output.py"), "--int8",
+                        *(["--share-program"] if args.prefill_chunk4 else [])],
                        cwd=ROOT, env=env, check=True)
     if args.int8_ffn_output:
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_projection_residual_int8.py")],

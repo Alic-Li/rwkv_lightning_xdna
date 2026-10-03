@@ -1,7 +1,9 @@
 # RWKV Lightning XDNA
 
 面向 Ryzen AI NPU 的 C++17 RWKV-7 推理项目。生产路径使用 BF16 权重/乘法输入，
-FP32 累加、归一化、残差和 WKV 状态；状态跨 token 常驻设备，prefill 复用 decode。
+FP32 累加、归一化、残差和 WKV 状态；状态跨 token 常驻设备，默认 prefill 复用 decode。
+可显式选择 `--prefill batch2` 或实验性 `--prefill chunk4`；chunk4 在 FFN 中复用四个
+token 的权重流，并按层连续执行同一阶段。构建、实测范围与精度边界见[推理说明](docs/inference.md#实验性四-token-chunked-prefill)。
 支持 PTH 和 safetensors，CPU FP32 后端用于显式参考。
 
 运行路径：`C++ → XRT → amdxdna → NPU`。Python 仅用于离线编译、测试数据和数值检查。

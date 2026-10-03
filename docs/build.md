@@ -36,6 +36,23 @@ ctest --preset test
 清单，不编译通用测试配置。生产 kernel 由 `rwkv7_optimized.py` 顺序编译八个阶段，
 产物保留在 `build/kernels/rwkv7-bf16/`。
 
+可选 prefill 目标（默认构建不启用这些调度）：
+
+```bash
+cmake --build --preset release --target kernels-release-prefill-batch2
+cmake --build --preset release --target kernels-release-prefill-chunk4
+cmake --build --preset release --target kernels-release-int8-prefill-chunk4
+```
+
+最后一个目标包含 BF16 和两种 W8A16 模式。为保留生产目录，可离线输出到独立目录：
+
+```bash
+.venv/bin/python tools/compile/rwkv7_optimized.py --output build/kernels/chunk4 \
+  --prefill-chunk4 --int8-ffn-output
+```
+
+完整编译只证明产物生成；NPU 数值、状态与性能验收见[推理说明](inference.md)。
+
 ## 测试 kernel
 
 ```bash

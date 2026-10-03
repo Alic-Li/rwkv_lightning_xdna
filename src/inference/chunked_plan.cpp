@@ -82,7 +82,8 @@ void DecodeGraph::Impl::prepare_chunk4(const std::filesystem::path &root) {
   for (size_t slot = 1; slot < 4; ++slot) chunk_embeddings.push_back(remap(device_buffers[embedding], slot));
   prefill_logits = remap(device_buffers[logits], 3);
   for (size_t slot = 0; slot < 4; ++slot) prefill_body.push_back(bind(0, slot));
-  auto &ffn = session(root, "bf16-chunk4-ffn-experiment-projection-input");
+  auto &ffn = session(root, std::string(weight_mode == WeightMode::BFloat16 ? "bf16" : "int8") +
+                      "-chunk4-ffn-experiment-projection-input");
   for (size_t l = 0; l < layers; ++l) {
     std::array<std::vector<PrefillRun>, 4> stages;
     for (size_t pair = 0; pair < 2; ++pair) {
@@ -104,7 +105,8 @@ void DecodeGraph::Impl::prepare_chunk4(const std::filesystem::path &root) {
       const auto &o = bindings[base+3].arguments;
       auto input = pair_view(o[0],pair);
       const auto stride = input.size()/4-2048;
-      auto &out = session(root, "bf16-prefill-output-b2-s"+std::to_string(stride));
+      auto &out = session(root, std::string(weight_mode == WeightMode::Int8FFNOutput ? "int8" : "bf16") +
+                          "-prefill-output-b2-s"+std::to_string(stride));
       stages[3].push_back({out.prepare({input,o[1],remap(o[2],pair*2),remap(o[2],pair*2+1),
           projections[l].slice(pair*8192*4,8192*4)}),Stage::Output,int(pair*2)});
     }
