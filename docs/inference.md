@@ -203,6 +203,30 @@ host BO 传输字节。`graph_nodes` / `graph_buffers` 为逻辑图节点与缓�
 `host_*_bytes_per_token` 不含共享 DDR 到 AIE 的内部 DMA。未测得的设备带宽和
 全阵列计算利用率在 JSON 中为 `null`，不能用 host wait 时间冒充利用率。
 
+### 实验性 batched projection
+
+`rwkv7_prefill_projection.py` 为 FFN key（2048→8192）和 value（8192→2048）
+编译 batch=1/2 的独立 BF16 projection。每个16×256权重 tile 在释放前用于两个
+token，保持每个 token 原有 MAC reduction 和 K tile 累加顺序，输出为 token-major
+FP32。batch=2 每 token 的权重 DMA payload 和提交次数均减半；这里的 payload
+是静态数据量，不是设备带宽计数器。
+
+```bash
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/prefill-projection" \
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
+  .venv/bin/python tools/compile/rwkv7_prefill_projection.py
+cmake --build --preset test
+./build/test/rwkv-prefill-projection-test build/kernels/prefill-projection 300
+```
+
+2026-10-03 的孤立阶段 A/B/B/A 中，key 每 token 从932.75降至469.96 µs，value
+从920.91降至461.81 µs。三个输入 pass（含 zero token / zero weight row）通过
+FP64 oracle、batch=1/2 逐位比较、输入/权重不可变性和 BO guard 检查。
+该 primitive 尚未接入整模型：NPU prefill 仍使用逐 token resident replay，不能将
+上述约2倍阶段吞吐作为整模型加速。接入还需要 batched norm/mix、attention projections、
+顺序 WKV state 更新和 prefill→decode 状态交接。详见
+[batched projection 证据](../reports/rwkv7-prefill-projection-2026-10-03.json)。
+
 2026-10-03 首轮调优将 ChannelMix value 权重 FIFO 改为双缓冲，A/B/B/A 整模型
 对比为240.53→233.68 ms/token（约2.85%），128步 logits/state 逐位回归通过。
 这不是整体优化任务完成或已达到硬件上限的声明；实验范围、未采用方案及待完成的

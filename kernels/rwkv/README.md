@@ -12,12 +12,15 @@ recurrence, normalization outputs and residuals. Compile offline with
 | `projection_residual_int8.cc` | Experimental W8A16 attention output; streamed tile conversion, FP32 accumulation, row-scale epilogue and residual |
 | `ffn_common.hpp` | FFN helpers, including exact FP32 ReLU-square via vector integer significands; scalar handling preserves underflow/overflow |
 | `head_bf16.cc` | Full vocabulary projection |
+| `prefill_projection_bf16.cc` | Experimental batch-one/two BF16 FFN projections; reuse each streamed weight tile across tokens, token-major FP32 output |
 | `norm_fp32.cc`, `norm_mix_fp32.cc`, `mix_fp32.cc`, `mix_pair_fp32.cc` | Upstream LayerNorm and shift/mix |
 | `recurrence_{prepare,update,finish}_fp32.cc`, `stages_fp32.cc`, `wkv7_vector_fp32.cc` | Prepare/WKV/finish with FP32 persistent state |
 | `vector_exp_fp32.hpp` | 32-lane FP32 range reduction and exponential polynomial; scalar handling preserves small normal/subnormal results |
 | `value_fp32.cc` | First-value residual |
 | `math_fp32.hpp` | Shared native exp/tanh/sigmoid and preserved double square-root helper |
 
-No standalone FP32 GEMV, FP32 rank, scalar WKV experiment, or sequence-prefill
-program remains. FP32 names on the retained recurrence and arithmetic helpers
+No standalone FP32 GEMV, FP32 rank, or scalar WKV experiment remains.
+The experimental prefill projection has a separate compiler and guarded C++
+test; it is not yet connected to the model's prefill path.
+FP32 names on the retained recurrence and arithmetic helpers
 are intentional. Upstream files and numerical tolerances remain unchanged.

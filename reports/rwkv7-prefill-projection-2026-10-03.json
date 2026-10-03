@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-03",
+  "status": "isolated_prefill_projection_verified; whole-model integration incomplete",
+  "baseline_commit": "278a61f3b1ae92247e628d83d5b51b958786eb00",
+  "hardware_software": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P 6x8 topology / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / locked project MLIR-AIE and Peano; power mode not reverified",
+  "design": [
+    "Eight matrix workers; hold BF16 inputs locally; stream 16x256 BF16 weight tiles",
+    "Each streamed tile is reused for both tokens before releasing the FIFO; same per-token MAC/reduction and K accumulation order as the single-token helper",
+    "Token-major FP32 output via DMA scatter, without host transposition",
+    "Batch one and two for 2048x8192 and 8192x2048 FFN shapes; 12 KiB worker stacks, 8 KiB rejected by measured stack requirement of 8320 bytes"
+  ],
+  "validation": {
+    "offline_artifacts": "All four compiled and dispatched successfully by C++",
+    "host_builds": "release and test presets passed",
+    "host_tests": "3/3 CTest passed",
+    "device_checks": "3 input passes per shape; random signed BF16, one all-zero token and zero weight row; all outputs poisoned before dispatch; input/weight immutability and BO guards",
+    "bitwise_outputs_compared": 61440,
+    "oracle": "Independent CPU FP64 dots; unchanged 2e-5 + 2e-5*abs(reference) threshold",
+    "command": "./build/test/rwkv-prefill-projection-test build/kernels/prefill-projection 300"
+  },
+  "results": [
+    {
+      "k": 2048,
+      "rows": 8192,
+      "status": "passed",
+      "oracle_max_abs": 4.748580977320671e-07,
+      "batch1_batch2_bitwise": "passed",
+      "immutable_inputs_guards": "passed",
+      "input_passes": 3,
+      "order": "A/B/B/A; 8 warmup samples before each block; 300 measured samples of two tokens",
+      "process_block_mean_us_per_two_tokens": [
+        1871.5004333333325,
+        943.0730866666662,
+        936.7790766666665,
+        1859.5045499999987
+      ],
+      "batch1_us_per_token": 932.7512458333329,
+      "batch2_us_per_token": 469.96304083333314,
+      "throughput_ratio": 1.9847331913151913,
+      "latency_reduction_percent": 49.61539392922904
+    },
+    {
+      "k": 8192,
+      "rows": 2048,
+      "status": "passed",
+      "oracle_max_abs": 1.2463133316487074e-06,
+      "batch1_batch2_bitwise": "passed",
+      "immutable_inputs_guards": "passed",
+      "input_passes": 3,
+      "order": "A/B/B/A; 8 warmup samples before each block; 300 measured samples of two tokens",
+      "process_block_mean_us_per_two_tokens": [
+        1827.6931033333337,
+        912.7261233333331,
+        934.52897,
+        1855.9495099999988
+      ],
+      "batch1_us_per_token": 920.9106533333331,
+      "batch2_us_per_token": 461.8137733333333,
+      "throughput_ratio": 1.9941169070949896,
+      "latency_reduction_percent": 49.85248876622833
+    }
+  ],
+  "static_traffic": {
+    "weight_bytes_per_batch_each_shape": 33554432,
+    "single_token_weight_bytes_per_token": 33554432,
+    "two_token_weight_bytes_per_token": 16777216,
+    "batch1_submissions_per_token": 1,
+    "batch2_submissions_per_token": 0.5,
+    "note": "Static DMA payload from schedule, not measured device bandwidth. Timing excludes host transfer and setup."
+  },
+  "limits": [
+    "Standalone primitive not connected to DecodeGraph or CLI prefill. Production behavior and kernels are unchanged.",
+    "Synthetic device tests are not full-model BF16 accuracy or prefill/decode state-handoff validation.",
+    "Approximately 2x stage throughput does not imply 2x model prefill throughput or hardware saturation.",
+    "No native INT8 or quantized batched path is implemented here."
+  ],
+  "next_work": [
+    "Build batched norm/mix and FFN data flow around the verified projections",
+    "Add batched attention projections with sequential FP32 WKV state and device-resident activations",
+    "Integrate chunked prefill with resident decode and test final logits, per-layer states, reset/branch and odd-length/tail cases",
+    "Benchmark full-model BF16/INT8 prefill against the current sequential baseline before promoting"
+  ],
+  "sha256": {
+    "kernels/rwkv/prefill_projection_bf16.cc": "0fe0a8552276d3da49e715aae1fca81a232d50f6c9889b1ca4d7406409855164",
+    "tools/compile/rwkv7_prefill_projection.py": "978346b6d29fd12b95af27901d223aaaaaed0c10b7207cab9a82a4104fe81f68",
+    "tests/inference/prefill_projection_test.cpp": "a63e6ecb6c298d3464f111d1b652e615197a5001ce200012462dd804cbf507d3",
+    "build/test/rwkv-prefill-projection-test": "0cb40955c4957d182d18ffc737bd89a40a45ffbb54cba85bd413603f55531a72",
+    "build/kernels/prefill-projection/bf16-prefill-projection-2048-8192-b1/config.json": "444dd0023a9a3d8b173b38b06c3fcab298d0a5981193b72707a3734505548064",
+    "build/kernels/prefill-projection/bf16-prefill-projection-2048-8192-b1/design.xclbin": "fe18ed0bdf4690416cbd84775c47abf8675eb6ae2c44b3a1995a3d682570e798",
+    "build/kernels/prefill-projection/bf16-prefill-projection-2048-8192-b1/instructions.bin": "a277d1accf6c8023c70f400492ab1caed8d0d9eb4321e3ac738bcdfd1c9af304",
+    "build/kernels/prefill-projection/bf16-prefill-projection-2048-8192-b2/config.json": "86f292bdb5fe144c1b0c7b17b7e3ceaa7da71a89f610cc004f9961ce32f063fc",
+    "build/kernels/prefill-projection/bf16-prefill-projection-2048-8192-b2/design.xclbin": "d1a8354088a7b0f09ca95c1c74d4c021f60d3b6ae7b853076723057745b41594",
+    "build/kernels/prefill-projection/bf16-prefill-projection-2048-8192-b2/instructions.bin": "dbf281e74e807ccbef1fc5f37e3270edb95bd8bdc0e755fadf2626e726295d1f",
+    "build/kernels/prefill-projection/bf16-prefill-projection-8192-2048-b1/config.json": "6b82e0119af580b1e088dc72c730891e941dd2d6bcce30fe1e57f1368023a6fb",
+    "build/kernels/prefill-projection/bf16-prefill-projection-8192-2048-b1/design.xclbin": "08add1bd3c7ed85bea6d65e7999e98c989dd41c65c8cd71f597511fda1da4778",
+    "build/kernels/prefill-projection/bf16-prefill-projection-8192-2048-b1/instructions.bin": "c5d7d894423b95f40c7ca84a922b44b35124c666e744c432611c39628b4a048e",
+    "build/kernels/prefill-projection/bf16-prefill-projection-8192-2048-b2/config.json": "35e8670e00509c451509d5c19adcde524fdc863d13dd6941e0b987bf51dd013e",
+    "build/kernels/prefill-projection/bf16-prefill-projection-8192-2048-b2/design.xclbin": "910eeb12c40f494a0fa86396439399d209ca79934849078a3afa979977ddb987",
+    "build/kernels/prefill-projection/bf16-prefill-projection-8192-2048-b2/instructions.bin": "1ef4199030226af6b73d3ab5600b99e92f40a61a48edeb0b192add07b9acb2f8"
+  },
+  "raw_logs": "reports/runs/prefill-projection-2026-10-03"
+}

@@ -70,3 +70,7 @@ add_executable(rwkv-vector-exp-test inference/vector_exp_test.cpp)
 target_link_libraries(rwkv-vector-exp-test PRIVATE rwkv::xdna)
 add_executable(rwkv-activation-test inference/activation_test.cpp)
 target_link_libraries(rwkv-activation-test PRIVATE rwkv::xdna)
+add_executable(rwkv-prefill-projection-test inference/prefill_projection_test.cpp)
+target_link_libraries(rwkv-prefill-projection-test PRIVATE rwkv::xdna)
+target_include_directories(rwkv-prefill-projection-test PRIVATE
+    "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
