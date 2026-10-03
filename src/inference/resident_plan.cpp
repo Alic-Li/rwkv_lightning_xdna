@@ -56,6 +56,12 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
   if (capture_prefill) {
+    if (weight_mode != WeightMode::Int8FFNOutput)
+      for (int stride : {55296, 61440})
+        check_artifact(root, "bf16-prefill-output-b2-s" + std::to_string(stride),
+            {{"schema_version", 1}, {"channels", 2048}, {"batch", 2}, {"cores", 16},
+             {"input_stride", stride}, {"dtype", "bfloat16"},
+             {"residual_layout", "separate_tokens"}, {"output_layout", "token_projection_residual"}});
     for (int count : {3, 4})
       check_artifact(root, "bf16-attention-projections-" + std::to_string(count) + "-b2",
           {{"schema_version", 1}, {"dtype", "bfloat16"}, {"channels", 2048},

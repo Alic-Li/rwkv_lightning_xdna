@@ -112,6 +112,13 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
         auto &attention = session(root, "bf16-attention-projections-" + std::to_string(branches) + "-b2");
         prefill_body.push_back({attention.prepare({paired_view(args[0]), args[1],
             paired_view(args[2]), paired_view(args[3]), paired_view(args[4])}), Stage::Attention, 2});
+      } else if (stage == 3 && weight_mode != WeightMode::Int8FFNOutput) {
+        const auto &args = bindings[index].arguments;
+        auto input = paired_view(args[0]);
+        const size_t stride = input.size() / sizeof(float) - 2048;
+        auto &output = session(root, "bf16-prefill-output-b2-s" + std::to_string(stride));
+        prefill_body.push_back({output.prepare({input, args[1], remap(args[2], false),
+            remap(args[2], true), paired_outputs[l]}), Stage::Output, 2});
       } else {
         prefill_body.push_back(bind(index, false));
         prefill_body.push_back(bind(index, true));

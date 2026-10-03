@@ -1,0 +1,141 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "34ef6bb",
+  "decision": "Accepted for BF16 output weights, including INT8 FFN-only mode. INT8 FFN+output retains its existing output schedule.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "design": "DMA gathers two recurrence output vectors at strides 55296 or 61440 floats. Five-BO ABI uses separate residual inputs; shared weight tiles feed both tokens with unchanged GEMV reduction and FP32 residual addition. Outputs scatter directly to the existing paired projection arena.",
+  "memory": "No new activation BOs or resident bytes. Two additional program sessions for paired BF16 output. Host upload/download payload unchanged.",
+  "stage": {
+    "input_strides": [
+      2048,
+      55296,
+      61440
+    ],
+    "validation": "All three strides pass FP64 oracle, bitwise equivalence to two decode kernels, and allocation guards.",
+    "max_abs": [
+      1.2815e-06,
+      1.28127e-06,
+      1.51107e-06
+    ],
+    "samples_per_run": 200,
+    "order": "A/B/B/A",
+    "single_pair_us": {
+      "55296": [
+        554.227,
+        554.586
+      ],
+      "61440": [
+        553.8,
+        561.373
+      ]
+    },
+    "batch_us": {
+      "55296": [
+        279.184,
+        274.704
+      ],
+      "61440": [
+        285.483,
+        275.308
+      ]
+    }
+  },
+  "whole_model_protocol": {
+    "order": "A/B/B/A per precision; serial hardware dispatch",
+    "prompt_tokens": 32,
+    "decode_tokens": 24,
+    "trials_per_process": 2,
+    "baseline_executable": "build/prefill-output-baseline-bench",
+    "candidate_executable": "build/release/rwkv-bench",
+    "note": "Modest gains; baseline BF16 process means span 3.644\u20133.695 seconds, so avoid overstating precision. Isolated speedup does not transfer directly to whole-model timing."
+  },
+  "performance": {
+    "bf16": {
+      "baseline": {
+        "prefill_seconds": 3.66936208,
+        "decode_ms": 202.67589830208334,
+        "prefill_runs": 3106,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2947313664,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.6284549349999997,
+        "decode_ms": 201.85253078124998,
+        "prefill_runs": 2722,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2947313664,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 1.1148298834548487,
+      "decode_improvement_percent": 0.40624836388101215
+    },
+    "int8-ffn": {
+      "baseline": {
+        "prefill_seconds": 3.6454958885,
+        "decode_ms": 187.5853220729167,
+        "prefill_runs": 3106,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2154590208,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.59761142675,
+        "decode_ms": 187.37015136458336,
+        "prefill_runs": 2722,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2154590208,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 1.3135239543419996,
+      "decode_improvement_percent": 0.11470551424578312
+    }
+  },
+  "correctness": {
+    "bf16": {
+      "mode": "verify",
+      "prefill_pair_runs": 172,
+      "prefill_runs": 6679,
+      "resident_bytes": 2947313664,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "bf16"
+    },
+    "int8-ffn": {
+      "mode": "verify",
+      "prefill_pair_runs": 172,
+      "prefill_runs": 6679,
+      "resident_bytes": 2154590208,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn"
+    },
+    "int8-output": {
+      "mode": "verify",
+      "prefill_pair_runs": 196,
+      "prefill_runs": 7567,
+      "resident_bytes": 2055499776,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn_output"
+    }
+  },
+  "host_checks": "Release and test builds; 3/3 CTest passed.",
+  "remaining": [
+    "Paired INT8 output not implemented.",
+    "FP32 recurrence still dominates substantial prefill time and executes sequentially.",
+    "Whole-model hardware limits are not established."
+  ],
+  "logs": "reports/runs/prefill-output-2026-10-03"
+}

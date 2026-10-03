@@ -10,12 +10,13 @@ extern "C" void rwkv7_prefill_output_zero(float *out) {
     aie::store_v(out + i, aie::zeros<float, 32>());
 }
 extern "C" void rwkv7_prefill_output_residual(const float *projection,
-                                              const float *residual, float *out) {
+                                              const float *r0, const float *r1,
+                                              float *out, int core) {
   for (int token = 0; token < 2; ++token)
     for (int i = 0; i < 256; i += 32) {
       auto v = aie::load_v<32>(projection + token * 256 + i);
       aie::store_v(out + token * 512 + i, v);
       aie::store_v(out + token * 512 + 256 + i,
-                   aie::add(v, aie::load_v<32>(residual + token * 256 + i)));
+                   aie::add(v, aie::load_v<32>((token == 0 ? r0 : r1) + core * 256 + i)));
     }
 }

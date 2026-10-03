@@ -91,16 +91,18 @@ cmake --build --preset release --target kernels-release-prefill-batch2
 ./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 32 24 2 --prefill-batch2
 ```
 
-`batch2` 每层 attention projections 和 FFN 各用一次提交处理两行；norm/mix、WKV
-和 output projection 仍顺序执行两个 token。共享已打包权重、session 和 FP32 recurrent state。仅增加 activation BO，奇数尾 token
+`batch2` 每层 attention projections 和 FFN 各用一次提交处理两行；BF16 output projection
+也使用一次提交处理两行（适用于 BF16 和 INT8 FFN-only 模式）。norm/mix、WKV 及
+INT8 output projection 仍顺序执行两个 token。共享已打包权重、session 和 FP32 recurrent state。仅增加 activation BO，奇数尾 token
 使用原 resident decode。只计算并下载最后一个 prompt token 的 logits，因此不兼容
 逐 token `--dump-logits` 或 tensor trace。CPU 不支持此模式。
 C++ API 使用 `DecodeGraph(weights, root, WeightMode::BFloat16, PrefillMode::Batched2)`，
 先 `load_state`，再 `prefill_resident(tokens)`；空输入返回空向量且不改变状态。
 返回后可直接 `replay_resident`，也可 export/reset/branch。
 
-24层模型的 pair body 为194次提交，最后 logits 再加2次；32-token prompt 共3106次
-（97.0625/token），原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
+24层模型的 BF16 / INT8 FFN-only pair body 为170次提交，最后 logits 再加2次；
+32-token prompt 共2722次（85.0625/token）。INT8 FFN+output 仍为194次 pair body、
+3106次 prompt 提交；原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
 262144字节 logits。Benchmark JSON 分开报告 prefill 提交/host BO流量和 decode 指标；
 这些数值不包含设备内部 DMA，也不等于硬件带宽计数。
 2026-10-03 首版仅 FFN batching 的 BF16 A/B/B/A 中，32-token prefill 平均6.532→4.009 s（1.63倍吞吐），
@@ -141,6 +143,12 @@ INT8 FFN+output 3.890→3.571 s；同精度的三种模式均通过1,533个向�
 逐位 logits/state 回归。
 阶段 FP64/bitwise/guard 和整模型验收见
 [attention prefill 验证](../reports/rwkv7-prefill-attention-2026-10-03.json)。
+
+BF16 output batching 通过 stride 55296/61440 的 DMA gather 直接读取两个 recurrence
+视图，分别读取两个残差 BO；不增加主机拷贝或常驻 activation 内存。
+重新编译 prefill target 会生成 `bf16-prefill-output-b2-s{55296,61440}`。
+数值、整模型性能及尚未覆盖的 INT8 output 路径见
+[输出投影 prefill 验证](../reports/rwkv7-prefill-output-resident-2026-10-03.json)。
 
 可用 `RWKV_XDNA_PROFILE=1` 诊断 batch2：
 
