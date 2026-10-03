@@ -14,9 +14,9 @@ int main(int argc, char **argv) {
     if (argc != 2) throw std::runtime_error("usage: activation-test KERNEL_ROOT");
     auto root = std::filesystem::path(argv[1]) / "activation-test";
     Session session(root / "design.xclbin", root / "instructions.bin");
-    Guarded input(session, 2048 * 4), output(session, 4096 * 4);
+    Guarded input(session, 2048 * 4), output(session, 6144 * 4);
     auto run = session.prepare({input.data, output.data});
-    std::vector<float> x(2048), y(4096), same(2048);
+    std::vector<float> x(2048), y(6144), same(2048);
     size_t checked = 0;
     auto check = [&] {
       input.data.upload(x.data(), input.bytes);
@@ -26,6 +26,7 @@ int main(int argc, char **argv) {
         const double v = x[i] > 0 ? double(x[i]) : 0;
         const float reference = float(v * v);
         if (std::memcmp(&y[i], &y[2048+i], 4) ||
+            std::memcmp(&y[i], &y[4096+i], 4) ||
             std::memcmp(&reference, &y[2048+i], 4))
           throw std::runtime_error("Square scalar/vector/FP64 oracle bits differ at case " +
                                    std::to_string(checked + i));
@@ -59,7 +60,7 @@ int main(int argc, char **argv) {
         x[i] = from_bits((exponent << 23) | (i < 1024 ? i : 0x7fffffu - (i - 1024)));
       check();
     }
-    std::cout << "activation scalar/vector/FP64 bits and guards passed values=" << checked << '\n';
+    std::cout << "activation scalar/vector2048/vector32/FP64 bits and guards passed values=" << checked << '\n';
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n'; return 1;
   }

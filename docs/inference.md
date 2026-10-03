@@ -227,6 +227,28 @@ FP64 oracle、batch=1/2 逐位比较、输入/权重不可变性和 BO guard 检
 顺序 WKV state 更新和 prefill→decode 状态交接。详见
 [batched projection 证据](../reports/rwkv7-prefill-projection-2026-10-03.json)。
 
+在此基础上，`rwkv7_prefill_channel_mix.py` 将两个 token 的 norm/mix、key、ReLU²、
+value、residual 合为一次提交。shift 在 NPU 上顺序更新；权重 tile 在两个 token 间
+复用。内部 gather 使用 `[core,token,channel]` 排布，下游核直接寻址，不经 CPU
+转置。输出和诊断 DMA 写回 token-major 布局；五个 BO 参数分别为输入、参数、
+权重、FP32 arena、BF16 arena。arena 偏移记录在产物 `config.json`。
+
+```bash
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/prefill-ffn" \
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
+  .venv/bin/python tools/compile/rwkv7_prefill_channel_mix.py
+cmake --build --preset test
+./build/test/rwkv-prefill-ffn-test build/kernels/prefill-ffn build/kernels/rwkv7-bf16 300
+```
+
+阶段测试比较两次生产 ChannelMix 与一次 fused batch：mixed BF16、key/value projection、
+ReLU² BF16、residual 和 final shift 均逐位检查，另做 FP64 oracle、连续 chunk、
+reset/branch、不可变输入和 BO guard 检查。先前五次提交的分离方案未加速，已删除；
+最终300样本/组 A/B/B/A 中，每两个 token 为3.960→2.016 ms，阶段吞吐提升1.96倍。
+共享 ReLU² helper 的提取也通过 BF16 / INT8 FFN+output 的128步整模型回归。
+它尚未接入整模型 prefill，也未实现 INT8 batch；完整结果、
+驱动参数接口限制和未完成工作见 [fused FFN 证据](../reports/rwkv7-prefill-ffn-2026-10-03.json)。
+
 2026-10-03 首轮调优将 ChannelMix value 权重 FIFO 改为双缓冲，A/B/B/A 整模型
 对比为240.53→233.68 ms/token（约2.85%），128步 logits/state 逐位回归通过。
 这不是整体优化任务完成或已达到硬件上限的声明；实验范围、未采用方案及待完成的

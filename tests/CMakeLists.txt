@@ -74,3 +74,8 @@ add_executable(rwkv-prefill-projection-test inference/prefill_projection_test.cp
 target_link_libraries(rwkv-prefill-projection-test PRIVATE rwkv::xdna)
 target_include_directories(rwkv-prefill-projection-test PRIVATE
     "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+add_executable(rwkv-prefill-ffn-test inference/prefill_ffn_test.cpp)
+target_link_libraries(rwkv-prefill-ffn-test PRIVATE rwkv::xdna)
+target_include_directories(rwkv-prefill-ffn-test PRIVATE
+    "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+target_compile_options(rwkv-prefill-ffn-test PRIVATE -Wall -Wextra -ffp-contract=off)

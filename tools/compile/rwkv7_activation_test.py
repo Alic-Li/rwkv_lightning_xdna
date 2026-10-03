@@ -11,11 +11,11 @@ def design(x: In, y: Out):
     fn = external(
         "rwkv7_activation_test",
         "activation_test.cc",
-        [typ(2048), typ(4096)],
+        [typ(2048), typ(6144)],
         optimization="-O3",
     )
     xi = ObjectFifo(typ(2048), name="input", depth=1)
-    yo = ObjectFifo(typ(4096), name="output", depth=1)
+    yo = ObjectFifo(typ(6144), name="output", depth=1)
 
     def core(x, y, fn):
         a, b = x.acquire(1), y.acquire(1)
@@ -31,7 +31,7 @@ def design(x: In, y: Out):
 
     return Program(
         iron.get_current_device(),
-        Runtime(seq, [typ(2048), typ(4096), xi.prod(), yo.cons()]),
+        Runtime(seq, [typ(2048), typ(6144), xi.prod(), yo.cons()]),
         workers=[worker],
     ).resolve_program()
 

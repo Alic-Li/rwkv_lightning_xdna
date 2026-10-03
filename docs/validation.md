@@ -82,6 +82,8 @@ ReLU² 向量化使用24位 significand 的精确整数乘积及一次 nearest-e
 AIE 的 BF16 分解式 FP32 乘法产生1 ULP 差异。独立设备测试遍历指数为0时的全部
 8,388,608个 normal significand，并覆盖随机指数、边界、subnormal、溢出、零、
 无穷及 quiet NaN；同时比较原始设备 scalar 结果与独立主机 FP64 oracle。
+共享 ReLU² helper 另外比较2048元素调用与 prefill 使用的32元素分块调用，所有输出
+逐位一致。测试输出 ABI 扩展为6144个 FP32 元素，使用新测试程序前须重编译下述产物。
 
 ```bash
 RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/activation-test" \

@@ -1,0 +1,187 @@
+{
+  "date": "2026-10-03",
+  "status": "fused_two_token_FFN_verified; full_model_prefill_incomplete",
+  "baseline_commit": "12a50c7ecd2757d484fab49c6eddab4aad99df15",
+  "hardware_software": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano; power mode not reverified",
+  "changes": [
+    "One-submission, two-token BF16 ChannelMix: NPU norm/mix, sequential shift update, shared streamed key/value weights, exact ReLU-square and residual",
+    "Four key and four value workers; internal [core,token,channel] gather layout addressed directly by downstream kernels; diagnostic DMA scatters to token-major",
+    "Five BO ABI: x, parameters, weights, packed FP32 state/diagnostics/output, packed BF16 diagnostics; no CPU arithmetic or transfers between stages",
+    "Extract unchanged exact ReLU-square math into a shared size-specialized helper; use 32-element scratch on batched key workers",
+    "Remove the unsuccessful standalone five-stage FFN prototype; retain only the fused implementation and guarded C++ test"
+  ],
+  "experiments": {
+    "five_run_path": {
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 3.5762786865234375e-07,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete two-token BF16 FFN stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "timing_abba": [
+        {
+          "mean_us_per_two_tokens": 3807.1962700000004,
+          "p95_us_per_two_tokens": 4209.312,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 3883.607410000001,
+          "p95_us_per_two_tokens": 4062.645,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 5,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 3880.00375,
+          "p95_us_per_two_tokens": 4091.209,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 5,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 3846.425969999999,
+          "p95_us_per_two_tokens": 4229.471,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 100
+        }
+      ]
+    },
+    "nine_BO_interface": "Compiled but dispatch rejected before numerical validation; kernel log reported aie2_init_exec_req: Unsupported op 4. Packed five-BO version dispatches. No universal BO argument limit inferred.",
+    "strided_join_layout": "Rejected during descriptor inspection: noncontiguous join offsets produced lengths of 2048/2048/2048/10240 instead of four 4096-element streams. Replaced by contiguous core stripes and downstream addressing."
+  },
+  "fused_validation": {
+    "input_passes": 4,
+    "intermediates_output_shift_bitwise": "passed",
+    "oracle_max_abs": 3.5762786865234375e-07,
+    "reset_branch_guards_immutable_inputs": "passed",
+    "scope": "Complete two-token BF16 FFN stage; model attention/WKV and prefill integration not included.",
+    "status": "passed",
+    "timing_abba": [
+      {
+        "mean_us_per_two_tokens": 4103.998056666669,
+        "p95_us_per_two_tokens": 4908.528,
+        "path": "production_decode",
+        "runs_per_two_tokens": 2,
+        "samples": 300
+      },
+      {
+        "mean_us_per_two_tokens": 2094.9696366666685,
+        "p95_us_per_two_tokens": 2176.721,
+        "path": "batched_ffn",
+        "runs_per_two_tokens": 1,
+        "samples": 300
+      },
+      {
+        "mean_us_per_two_tokens": 1937.6910366666666,
+        "p95_us_per_two_tokens": 2139.801,
+        "path": "batched_ffn",
+        "runs_per_two_tokens": 1,
+        "samples": 300
+      },
+      {
+        "mean_us_per_two_tokens": 3815.40779,
+        "p95_us_per_two_tokens": 4191.578,
+        "path": "production_decode",
+        "runs_per_two_tokens": 2,
+        "samples": 300
+      }
+    ]
+  },
+  "fused_performance": {
+    "order": "A/B/B/A",
+    "samples_per_block": 300,
+    "baseline_us_per_two_tokens": 3959.7029233333346,
+    "fused_us_per_two_tokens": 2016.3303366666676,
+    "throughput_ratio": 1.9638165688065716,
+    "latency_reduction_percent": 49.078747176081286,
+    "submissions_per_two_tokens": [
+      2,
+      1
+    ],
+    "matrix_weight_payload_bytes_per_two_tokens": [
+      134217728,
+      67108864
+    ],
+    "limits": "Isolated stage timing includes submit/wait and DMA, excludes setup, reset and host uploads/readbacks. Static weight payload is not measured bandwidth. Block means show drift; the approximately 2x stage gain is not a whole-model speedup claim."
+  },
+  "relu_validation": "activation scalar/vector2048/vector32/FP64 bits and guards passed values=9175040",
+  "production_helper_refactor": {
+    "host_builds": "release and test presets passed",
+    "host_tests": "3/3 CTest passed",
+    "device_stages": {
+      "bf16": "ChannelMix oracle/shift/replay/guards passed max_abs=2.42144e-07",
+      "int8": "passed"
+    },
+    "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "model_checks": {
+      "bf16": {
+        "baseline_ms_per_token": 203.84015866666664,
+        "candidate_ms_per_token": 203.67875287499996,
+        "latency_change_percent": -0.07918252846860208,
+        "regression": {
+          "download_bytes": 262144,
+          "first_token_nodes": 960,
+          "mean_ms": 204.05420088976382,
+          "measured_steps": 127,
+          "mode": "verify",
+          "resident_bytes": 2917120000,
+          "runs_per_token": 123,
+          "status": "passed",
+          "tokens_per_second": 4.9006587251797376,
+          "upload_bytes": 8192,
+          "vectors_checked": 1116,
+          "weights": "bf16"
+        }
+      },
+      "int8": {
+        "baseline_ms_per_token": 186.03676077083333,
+        "candidate_ms_per_token": 186.12109077083338,
+        "latency_change_percent": 0.0453297507710948,
+        "regression": {
+          "download_bytes": 262144,
+          "first_token_nodes": 960,
+          "mean_ms": 186.14404855118119,
+          "measured_steps": 127,
+          "mode": "verify",
+          "resident_bytes": 2025306112,
+          "runs_per_token": 123,
+          "status": "passed",
+          "tokens_per_second": 5.3721835738683055,
+          "upload_bytes": 8192,
+          "vectors_checked": 1116,
+          "weights": "int8-ffn-output"
+        }
+      }
+    },
+    "scope": "No arithmetic changes intended. 128-token snapshots, 1116 checked vectors per precision. Single before/after benchmark pair per precision is a regression check, not a speedup claim. INT8 measurement is FFN+output mode.",
+    "runtime_artifacts_promoted": 33,
+    "retained_root": "build/kernels/rwkv7-bf16",
+    "tested_root": "build/kernels/prefill-ffn-decode",
+    "prechange_backup": "build/kernels/before-prefill-ffn-helper"
+  },
+  "remaining_work": [
+    "Integrate a layer-wise two-token prefill schedule with DecodeGraph, sharing its resident weights, sessions and FP32 state; do not create a second model-weight copy",
+    "Bind fused FFN shift to the decode state and adapt residual-input gather to the existing projection/result layout without host copies",
+    "Validate prefill-to-decode logits and per-layer state, nonzero initial state, reset/branch, odd prompt tails and larger prompts against sequential production execution",
+    "Batch remaining attention matrices and add INT8 batched FFN; benchmark whole-model prefill before enabling a new default",
+    "Continue decode/INT8 bottleneck profiling; hardware-limit objective is not achieved"
+  ],
+  "sha256": {
+    "kernels/rwkv/prefill_channel_bf16.cc": "552d8f76743f0549cb7a3a67cf3481dc722bc010e85206b51080850c2dd2f659",
+    "kernels/rwkv/prefill_mix_bf16.cc": "7759d7a6b9f68e657747b72ac87c911a10ae1fa05e7f3062b76480553686f9f5",
+    "kernels/rwkv/relu_squared_fp32.hpp": "b4b84b0452a98fd67ba3f217734fc36acbc40f85f21490b623ab4414cad8fc1e",
+    "kernels/rwkv/ffn_common.hpp": "7b36a9fca950e4cd451285a498f5ced30c0e881656725a5d092b1cab64ba7f1a",
+    "tools/compile/rwkv7_prefill_channel_mix.py": "7c460f48782991cbc68509d402de7fe3c62ed7d02302134068b437567b444dae",
+    "tests/inference/prefill_ffn_test.cpp": "321762fd7aaa57f99f2cd8d0961a30be8337e3fb89fc1a653a7569d69dd1d094",
+    "kernels/rwkv/activation_test.cc": "b8ebc0835420d4a4feef108a2ffe5c9667a3a6163800669eff9d19d70850e065",
+    "tests/inference/activation_test.cpp": "52184507984d0565c0ad85d870fd9cac40316116c27523589392e9dd4ff13d7c",
+    "tools/compile/rwkv7_activation_test.py": "50d65e66dbab9387ff7ae10749ebd4835ca23cfea55eea120aad97872b322816",
+    "build/kernels/prefill-ffn/bf16-prefill-ffn-b2/design.xclbin": "5ef0927e2a1f33fc590d050a1005dc4f3f750e4a9d99cde79b0fda5f21e1d453",
+    "build/kernels/prefill-ffn/bf16-prefill-ffn-b2/instructions.bin": "8d385d4d28d900be731b38568fa35662ec85d15c4877649889dc7a732c02d223",
+    "build/kernels/prefill-ffn/bf16-prefill-ffn-b2/config.json": "6f399df1005e81b0f1ea1cc798f02ff14ca9cf8ba689c6862cc98d38e9415526"
+  },
+  "raw_logs": "reports/runs/prefill-ffn-2026-10-03"
+}
