@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#ifndef RWKV_EXACT_FP32
-#define RWKV_FAST_EXP
-#endif
-#include "ops_fp32.cc"
+#include "math_fp32.hpp"
 extern "C" void rwkv7_value_residual(const float *p, const float *first,
                                      float *out) {
   for (int i = 0; i < 256; ++i)

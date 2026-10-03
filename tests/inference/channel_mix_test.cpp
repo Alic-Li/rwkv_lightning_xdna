@@ -10,24 +10,16 @@ using namespace rwkv::xdna::test;
 using V = std::vector<float>;
 int main(int argc, char **argv) {
   try {
-    if (argc != 3)
-      throw std::runtime_error("usage: channel-mix-test BASE_ROOT NEW_ROOT");
+    if (argc != 2)
+      throw std::runtime_error("usage: channel-mix-test KERNEL_ROOT");
     auto session = [](std::filesystem::path root, std::string name) {
       return Session(root / name / "design.xclbin",
                      root / name / "instructions.bin");
     };
-    auto norm = session(argv[1], "fused-norm-mix-1"),
-         ffn = session(argv[1], "bf16-ffn-pipeline"),
-         fused = session(argv[2], "bf16-channel-mix");
+    auto fused = session(argv[1], "bf16-channel-mix");
     Guarded x(fused, 2048 * 4), params(fused, 6144 * 4),
         weights(fused, 33554432 * 2), diag(fused, 22528 * 4),
-        out(fused, 4096 * 4), old(fused, 2048 * 4), npair(fused, 4096 * 4),
-        mixed(fused, 2048 * 4), hidden(fused, 16384 * 4),
-        baseline(fused, 4096 * 4);
-    auto n =
-        norm.prepare({x.data, params.data, old.data, npair.data, mixed.data});
-    auto f = ffn.prepare(
-        {mixed.data, weights.data, x.data, hidden.data, baseline.data});
+        out(fused, 4096 * 4);
     auto run =
         fused.prepare({x.data, params.data, weights.data, diag.data, out.data});
     std::mt19937 rng(730);
@@ -37,8 +29,7 @@ int main(int argc, char **argv) {
       v = bf16(d(rng) / 64);
     weights.data.upload(w.data(), weights.bytes);
     V input(2048), constants(6144), previous(2048), actual_diag(22528),
-        actual(4096), base(4096), base_hidden(16384), base_pair(4096),
-        base_mixed(2048);
+        actual(4096);
     for (auto &v : constants)
       v = d(rng) / 8;
     for (size_t i = 0; i < 2048; ++i)
@@ -46,8 +37,7 @@ int main(int argc, char **argv) {
     for (auto &v : previous)
       v = d(rng);
     params.data.upload(constants.data(), params.bytes);
-    old.data.upload(previous.data(), old.bytes);
-    diag.data.upload(previous.data(), old.bytes);
+    diag.data.upload(previous.data(), previous.size() * 4);
     auto pos = [](size_t row, size_t col, size_t K) {
       return ((row / 16) * (K / 256) + col / 256) * 4096 + (row % 16) * 256 +
              col % 256;
@@ -64,23 +54,9 @@ int main(int argc, char **argv) {
       for (auto &v : input)
         v = d(rng) * (pass + 1);
       x.data.upload(input.data(), x.bytes);
-      n.execute();
-      f.execute();
       run.execute();
       diag.data.download(actual_diag.data(), diag.bytes);
       out.data.download(actual.data(), out.bytes);
-      baseline.data.download(base.data(), baseline.bytes);
-      hidden.data.download(base_hidden.data(), hidden.bytes);
-      npair.data.download(base_pair.data(), npair.bytes);
-      mixed.data.download(base_mixed.data(), mixed.bytes);
-      if (actual != base ||
-          !std::equal(base_hidden.begin(), base_hidden.end(),
-                      actual_diag.begin() + 6144) ||
-          !std::equal(base_pair.begin(), base_pair.end(),
-                      actual_diag.begin()) ||
-          !std::equal(base_mixed.begin(), base_mixed.end(),
-                      actual_diag.begin() + 4096))
-        throw std::runtime_error("ChannelMix same-precision mismatch");
       double mean = 0, var = 0;
       for (auto v : input)
         mean += v;
@@ -117,28 +93,7 @@ int main(int argc, char **argv) {
         check(actual[2048 + row], actual[row] + input[row]);
       }
     }
-    auto measure = [&](int mode) {
-      std::vector<double> us;
-      for (int i = 0; i < 50; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        if (mode == 1 || mode == 2)
-          run.execute();
-        if (mode == 0 || mode == 2 || mode == 3)
-          n.execute();
-        if (mode == 0)
-          f.execute();
-        if (i >= 20)
-          us.push_back(std::chrono::duration<double, std::micro>(
-                           std::chrono::steady_clock::now() - start)
-                           .count());
-      }
-      std::sort(us.begin(), us.end());
-      return std::make_pair(us.front(), us[15]);
-    };
-    auto before = measure(0), after = measure(1);
-    const auto norm_only = measure(3), alternating = measure(2);
-    for (auto *p : {&x, &params, &weights, &diag, &out, &old, &npair, &mixed,
-                    &hidden, &baseline})
+    for (auto *p : {&x, &params, &weights, &diag, &out})
       p->guard();
     V ix(input.size()), cp(constants.size());
     x.data.download(ix.data(), x.bytes);
@@ -147,20 +102,8 @@ int main(int argc, char **argv) {
     weights.data.download(same.data(), weights.bytes);
     if (ix != input || cp != constants || same != w)
       throw std::runtime_error("immutable input overwritten");
-    std::cout << "ChannelMix same-precision/oracle/shift/replay/guards passed "
-                 "max_abs="
-              << worst << " before_min_us=" << before.first
-              << " before_median_us=" << before.second
-              << " after_min_us=" << after.first
-              << " after_median_us=" << after.second << '\n';
-    std::cout
-        << "{\"case\":\"ChannelMix context alternation\",\"norm_median_us\":"
-        << norm_only.second << ",\"channel_median_us\":" << after.second
-        << ",\"alternating_pair_median_us\":" << alternating.second
-        << ",\"alternation_excess_us\":"
-        << alternating.second - norm_only.second - after.second
-        << ",\"scope\":\"distinct programs, includes scheduling/PDI/cache "
-           "effects\"}\n";
+    std::cout << "ChannelMix oracle/shift/replay/guards passed max_abs="
+              << worst << '\n';
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
     return 1;

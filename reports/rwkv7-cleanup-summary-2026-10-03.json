@@ -1,0 +1,133 @@
+{
+  "date": "2026-10-03",
+  "scope": "Structural cleanup only: one BF16 resident NPU pipeline; FP32 accumulation, recurrence and state retained; no new performance optimization.",
+  "baseline_commit": "36517ae357c50110b012f3dd91a3b47176a9a0eb",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "model_shape": {
+    "layers": 24,
+    "channels": 2048,
+    "heads": 32,
+    "head_size": 64,
+    "ffn": 8192,
+    "vocabulary": 65536
+  },
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / XRT 2.25 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / MLIR-AIE 1.4.4.dev53+gd53582d / CMake 4.1.0",
+  "precision": "BF16 matrix weights/inputs, FP32 accumulation/state/outputs; native nonlinear arithmetic and existing double statistics helpers unchanged. CPU FP32 reference remains explicit.",
+  "modules": [
+    "graph.cpp: logical graph recording and API",
+    "resident_plan.cpp: arena aliases then fixed run binding",
+    "graph_execution.cpp: state, replay and diagnostics",
+    "weight_layout.cpp: host packing and BF16 conversion without XRT",
+    "artifacts.cpp: production ABI checks before device allocations"
+  ],
+  "removed": [
+    "NPU FP32 GEMV/rank and full_npu_backend",
+    "hybrid NPU backend and scalar WKV experiment",
+    "NPU eager/host-transfer graph and independent sequence-prefill path",
+    "runtime optional-fusion and precision switches",
+    "historical stage compilation, dataflow mock, benchmark and runlist probes"
+  ],
+  "production_programs": [
+    "bf16-array-gemv-2048-65536",
+    "bf16-attention-projections-3",
+    "bf16-attention-projections-4",
+    "bf16-channel-mix",
+    "bf16-projection-residual",
+    "fused-norm-mix-6",
+    "fused-recurrence-stage",
+    "fused-value",
+    "upstream-norm"
+  ],
+  "baseline_snapshot_sha256": "9d9872b1048c19843837adc49dba6809b6f3ae9e476df6384738fce1590fb62e",
+  "baseline_executable_sha256": "1356472af14be106d81c6812b0a89369911231352d63c6826dad13f2d03015c0",
+  "regression": {
+    "before": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 236.16109985826768,
+      "measured_steps": 127,
+      "mode": "record",
+      "resident_bytes": 2917128192,
+      "runs_per_token": 146,
+      "status": "passed",
+      "tokens_per_second": 4.234397623487319,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116
+    },
+    "after": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 237.718393984252,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 146,
+      "status": "passed",
+      "tokens_per_second": 4.20665806814363,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116
+    },
+    "max_abs_logits_and_state": 0,
+    "state_checkpoints": [
+      1,
+      8,
+      32,
+      128
+    ],
+    "first_token_trace_nodes": 960,
+    "latency_change_percent": 0.6594202546138739,
+    "timing_scope": "127 steps after first token; hooks disabled after first-token trace; state exports excluded; NPU dispatches serial",
+    "additional_checks": [
+      "reset",
+      "state branch/resume",
+      "invalid token and malformed state preserve device state",
+      "host-state replay matches resident replay"
+    ]
+  },
+  "independent_checks": {
+    "channel-mix.log": "ChannelMix oracle/shift/replay/guards passed max_abs=2.42144e-07",
+    "recurrence.log": "recurrence oracle/replay/guards passed max_abs=1.19209e-06",
+    "projection-residual.log": "projection/residual oracle/replay/guards passed max_abs=1.29192e-06",
+    "projection-oracle.log": "BF16 real-input projection oracle passed projections=1340 max_abs=1.52588e-05"
+  },
+  "host_checks": [
+    "CMake preset configure/build passed",
+    "CPU recurrent/text CTest passed",
+    "FP32/FP16/BF16 PTH and safetensors, noncontiguous stride, invalid archives passed",
+    "CPU eager/graph state, reset, branch and prefill continuation passed",
+    "CMake install and external package consumer build/run passed",
+    "hybrid, NPU eager, NPU sequence prefill and unsupported small model rejected",
+    "Python offline compiler syntax passed; no Python NPU dispatch"
+  ],
+  "generation": {
+    "prompt": "Question: What is the largest planet in the Solar System?\nAnswer:",
+    "prompt_tokens": 15,
+    "generated_tokens": 32,
+    "decode_forwards": 31,
+    "top_k": 1,
+    "text_equal": true,
+    "before_decode_seconds": 7.35878,
+    "after_decode_seconds": 7.4486,
+    "before_ttft_seconds": 11.079,
+    "after_ttft_seconds": 11.1637
+  },
+  "commands": [
+    "cmake --preset dev && cmake --build --preset dev",
+    ".venv/bin/python tools/compile/rwkv7_optimized.py",
+    "./build/host/rwkv-cleanup-regression \"$MODEL\" build/kernels/rwkv7-bf16 verify build/baselines/36517ae/regression.bin",
+    "./build/host/rwkv-alignment-test \"$MODEL\" build/kernels/rwkv7-bf16",
+    "./build/host/rwkv-channel-mix-test build/kernels/rwkv7-bf16",
+    "./build/host/rwkv-recurrence-stage-test build/kernels/rwkv7-bf16",
+    "./build/host/rwkv-projection-residual-test build/kernels/rwkv7-bf16",
+    ".venv/bin/python tools/validation/rwkv7_reference.py",
+    "./build/host/rwkv-graph-test build/tests/rwkv7/f32.pth"
+  ],
+  "limitations": [
+    "NPU supports the current C=2048, 32x64 heads, FFN=8192, vocab=65536 shape; other shapes explicitly rejected",
+    "BF16 arithmetic is not IEEE FP16 arithmetic",
+    "Historical BF16 versus pure FP32 whole-model pointwise tolerance failure remains; this cleanup validates same-precision equality",
+    "128-token regression and short generation do not establish full-context quality",
+    "Small timing differences are not evidence of a performance optimization; no statistical confidence interval measured"
+  ],
+  "detailed_logs": "reports/runs/cleanup-2026-10-03"
+}

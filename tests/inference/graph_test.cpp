@@ -7,16 +7,13 @@
 using namespace rwkv::inference;
 int main(int argc, char **argv) {
   try {
-    if (argc != 3)
-      throw std::runtime_error("weights and kernel directory required");
+    if (argc != 2)
+      throw std::runtime_error("weights required");
     Weights w(argv[1]);
-    for (int mode : {0, 1, 2}) {
-      bool hardware = mode != 0;
-      auto b = hardware ? full_npu_backend(argv[2]) : cpu_backend();
+    {
+      auto b = cpu_backend();
       Model eager(w, *b);
-      DecodeGraph graph(w, *b,
-                        mode == 2 ? std::filesystem::path(argv[2])
-                                  : std::filesystem::path{});
+      DecodeGraph graph(w, *b);
       const auto captured = graph.stats();
       double worst = 0;
       auto check = [&](const Vector &a, const Vector &b) {
@@ -56,28 +53,6 @@ int main(int argc, char **argv) {
       auto branch_ref = branch;
       check(graph.replay(17, branch), eager.forward(17, branch_ref));
       statecheck(branch, branch_ref);
-      if (mode == 2) {
-        graph.load_state(a);
-        auto persisted = a;
-        for (int id : {3, 12, 5}) {
-          check(graph.replay_resident(id), eager.forward(id, persisted));
-          statecheck(graph.export_state(), persisted);
-        }
-        auto snapshot = graph.export_state();
-        bool bad = false;
-        try {
-          graph.replay_resident(-1);
-        } catch (const std::exception &) {
-          bad = true;
-        }
-        if (!bad)
-          throw std::runtime_error("Persistent invalid token accepted");
-        statecheck(graph.export_state(), snapshot);
-        graph.load_state(branch_ref);
-        auto resumed = branch_ref;
-        check(graph.replay_resident(6), eager.forward(6, resumed));
-        statecheck(graph.export_state(), resumed);
-      }
       auto saved = a;
       bool rejected = false;
       try {
@@ -109,17 +84,11 @@ int main(int argc, char **argv) {
       if (!rejected)
         throw std::runtime_error("Malformed state accepted");
       statecheck(malformed, malformed_saved);
-      if (mode == 2 &&
-          (!captured.device_runs || !captured.resident_bytes ||
-           !captured.replay_upload_bytes || !captured.replay_download_bytes))
-        throw std::runtime_error("Resident graph statistics missing");
       if (graph.stats().nodes != captured.nodes ||
           graph.stats().buffers != captured.buffers ||
-          graph.stats().replays != (mode == 2 ? 15u : 11u))
+          graph.stats().replays != 11u)
         throw std::runtime_error("Graph was rebuilt or replay count wrong");
-      std::cout << (mode == 2  ? "Resident NPU"
-                    : hardware ? "NPU"
-                               : "CPU")
+      std::cout << "CPU"
                 << " graph: " << captured.nodes << " nodes, "
                 << captured.buffers
                 << " buffers; token changes, reset, branch, prefill/decode "

@@ -2,14 +2,13 @@
 """BF16 attention output projection and FP32 residual in one program."""
 
 import json
-import os
 import numpy as np
 from ml_dtypes import bfloat16
 import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import KERNEL_ROOT, typ, external
+from rwkv7_common import KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -104,7 +103,7 @@ if __name__ == "__main__":
                 dtype="bfloat16",
                 channels=2048,
                 cores=11,
-                exact_fp32=os.environ.get("RWKV_XDNA_EXACT", "1") == "1",
+                exact_fp32=False,
             )
         )
         + "\n"

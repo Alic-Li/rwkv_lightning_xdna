@@ -5,7 +5,7 @@ import json
 import os
 import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
-from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
+from rwkv7_common import ROOT, KERNEL_ROOT, typ, external
 
 os.environ["MLIR_AIE_KERNEL_SOURCES"] = str(ROOT / "third_party/mlir-aie")
 

@@ -1,1384 +1,156 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "rwkv/inference/graph.hpp"
-#include "rwkv/xdna/session.hpp"
+#include "graph_internal.hpp"
 #include <algorithm>
-#include <array>
-#include <chrono>
-#include <cmath>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <limits>
-#include <nlohmann/json.hpp>
 #include <stdexcept>
 
 namespace rwkv::inference {
-struct DecodeGraph::Impl {
-  using Id = size_t;
-  static constexpr Id none = std::numeric_limits<Id>::max();
-  enum class Kind { Element, Linear, Recurrent };
-  struct Buffer {
-    size_t size;
-    const Vector *constant = nullptr;
-    Vector value;
-  };
-  struct Node {
-    Kind kind;
-    Op op = Op::Add;
-    std::array<Id, 7> inputs{none, none, none, none, none, none, none};
-    Id output = none;
-    const Tensor *weight = nullptr;
-    bool transpose = false;
-    size_t group = 1;
-    float epsilon = 0;
-    int layer = -1;
-  };
-  struct StateBinding {
-    Id old_attention, old_ffn, matrix, new_attention, new_ffn;
-  };
-  const Weights &weights;
-  RecurrentBackend &backend;
-  std::vector<Buffer> buffers;
-  std::vector<Node> nodes;
-  int recording_layer = -1;
-  std::vector<StateBinding> states;
-  std::map<const Vector *, Id> constants;
-  Id embedding, logits;
-  size_t replays = 0;
-  DecodeGraph::Trace trace;
-  DecodeGraph::ProjectionTrace projection_trace;
-  std::vector<size_t> node_run_ends;
-  bool device_failed = false, resident_state_valid = false;
-  std::vector<xdna::DeviceRun> shift_runs;
-  const Vector empty;
-  std::map<std::string, std::unique_ptr<xdna::Session>> sessions;
-  std::vector<xdna::DeviceBuffer> device_buffers;
-  std::vector<xdna::DeviceRun> runs;
-  size_t resident_bytes = 0, upload_bytes = 0, download_bytes = 0, root_bos = 0;
-  xdna::Session &session(const std::filesystem::path &root,
-                         const std::string &name) {
-    auto &s = sessions[name];
-    if (!s) {
-      try {
-        s = std::make_unique<xdna::Session>(root / name / "design.xclbin",
-                                           root / name / "instructions.bin");
-      } catch (const std::exception &e) {
-        throw std::runtime_error("Create resident session " + name + ": " + e.what());
-      }
-    }
-    return *s;
-  }
-  xdna::DeviceBuffer initialized(xdna::Session &s, const Vector &v) {
-    auto b = s.allocate(v.size() * sizeof(float));
-    b.upload(v.data(), v.size() * sizeof(float));
-    resident_bytes += b.size();
-    ++root_bos;
-    return b;
-  }
-  xdna::DeviceBuffer initialized_bf16(xdna::Session &s, const Vector &v) {
-    std::vector<uint16_t> half(v.size());
-    for (size_t i = 0; i < v.size(); ++i) {
-      uint32_t bits;
-      std::memcpy(&bits, &v[i], 4);
-      half[i] = static_cast<uint16_t>((bits + 0x7fff + ((bits >> 16) & 1)) >> 16);
-    }
-    auto b = s.allocate(half.size() * 2);
-    b.upload(half.data(), half.size() * 2);
-    resident_bytes += b.size();
-    ++root_bos;
-    return b;
-  }
-  void prepare_resident(const std::filesystem::path &root) {
-    const bool bf16 = std::getenv("RWKV_XDNA_BF16") != nullptr;
-    if (bf16 && (weights.channels() != 2048 || weights.heads() != 32))
-      throw std::runtime_error("BF16 projection mode requires C=2048 and 32 heads");
-    for (const auto &name : {"resident-ops", "resident-decode"}) {
-      std::ifstream in(root / name / "config.json");
-      nlohmann::json j;
-      if (!in || !(in >> j) || j.at("schema_version") != 1 ||
-          j.at("abi") != name || j.at("dtype") != "float32")
-        throw std::runtime_error("Missing/incompatible resident ABI: " +
-                                 std::string(name));
-    }
-    const std::map<std::string, nlohmann::json> optional_abis = {
-        {"fused-value",
-         {{"schema_version", 1}, {"dtype", "float32"}, {"channels", 2048}}},
-        {"upstream-norm",
-         {{"schema_version", 1},
-          {"dtype", "float32"},
-          {"channels", 2048},
-          {"epsilon", 1e-5}}},
-        {"fused-mix",
-         {{"schema_version", 3},
-          {"dtype", "float32"},
-          {"count", 2048},
-          {"mixes", 6},
-          {"state_update", true}}},
-        {"fused-shift-mix",
-         {{"schema_version", 1},
-          {"dtype", "float32"},
-          {"count", 2048},
-          {"state_update", true}}},
-        {"fused-prepare",
-         {{"schema_version", 2},
-          {"dtype", "float32"},
-          {"channels", 2048},
-          {"head_size", 64},
-          {"stage", "prepare"}}},
-        {"fused-finish",
-         {{"schema_version", 2},
-          {"dtype", "float32"},
-          {"channels", 2048},
-          {"head_size", 64},
-          {"stage", "finish"}}},
-        {"fused-ffn-key",
-         {{"schema_version", 1},
-          {"dtype", "float32"},
-          {"rows", 8192},
-          {"k", 2048}}},
-        {"resident-ops-fast",
-         {{"schema_version", 1},
-          {"dtype", "float32"},
-          {"abi", "resident-ops-fast"}}}};
-    auto check_optional = [&](const std::string &name,
-                              const nlohmann::json &expected) {
-      if (!std::filesystem::exists(root / name / "config.json"))
-        return;
-      std::ifstream config(root / name / "config.json");
-      nlohmann::json j;
-      config >> j;
-      for (auto it = expected.begin(); it != expected.end(); ++it)
-        if (!j.contains(it.key()) || j.at(it.key()) != it.value())
-          throw std::runtime_error("Incompatible fused ABI: " + name);
+DecodeGraph::Impl::Id DecodeGraph::Impl::allocate(size_t size) {
+  Id id = buffers.size();
+  buffers.push_back({size, nullptr, Vector(size)});
+  return id;
+}
+DecodeGraph::Impl::Id DecodeGraph::Impl::constant(const Vector &v) {
+  auto it = constants.find(&v);
+  if (it != constants.end())
+    return it->second;
+  Id id = buffers.size();
+  buffers.push_back({v.size(), &v, {}});
+  constants[&v] = id;
+  return id;
+}
+const Vector &DecodeGraph::Impl::read(Id id) const {
+  return id == none                ? empty
+         : buffers.at(id).constant ? *buffers[id].constant
+                                   : buffers[id].value;
+}
+DecodeGraph::Impl::Id DecodeGraph::Impl::element(Op op, Id x, Id y, Id z, Id w,
+                                                 size_t group, float eps) {
+  Node node;
+  node.layer = recording_layer;
+  node.kind = Kind::Element;
+  node.op = op;
+  node.inputs = {x, y, z, w, none, none, none};
+  node.group = group;
+  node.epsilon = eps;
+  node.output = allocate(buffers.at(x).size);
+  nodes.push_back(node);
+  return node.output;
+}
+DecodeGraph::Impl::Id DecodeGraph::Impl::norm(Id x, const Tensor &w,
+                                              const Tensor &b, size_t group,
+                                              float eps) {
+  return element(Op::Norm, x, constant(w.data), constant(b.data), none, group,
+                 eps);
+}
+DecodeGraph::Impl::Id DecodeGraph::Impl::linear(Id x, const Tensor &w,
+                                                bool transpose) {
+  size_t input = transpose ? w.shape.at(0) : w.shape.at(1),
+         output = transpose ? w.shape.at(1) : w.shape.at(0);
+  if (buffers.at(x).size != input)
+    throw std::runtime_error("Graph projection shape mismatch");
+  Node node;
+  node.layer = recording_layer;
+  node.kind = Kind::Linear;
+  node.inputs[0] = x;
+  node.weight = &w;
+  node.transpose = transpose;
+  node.output = allocate(output);
+  nodes.push_back(node);
+  return node.output;
+}
+DecodeGraph::Impl::Id DecodeGraph::Impl::recurrent(Id state, Id r, Id d, Id k,
+                                                   Id v, Id a, Id b) {
+  Node node;
+  node.layer = recording_layer;
+  node.kind = Kind::Recurrent;
+  node.inputs = {state, r, d, k, v, a, b};
+  node.group = weights.head_size();
+  node.output = allocate(weights.channels());
+  nodes.push_back(node);
+  return node.output;
+}
+DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
+                        const std::filesystem::path &resident)
+    : weights(w), backend(b) {
+  const size_t c = w.channels(), n = w.head_size();
+  embedding = allocate(c);
+  Id x = norm(embedding, w.at("blocks.0.ln0.weight"), w.at("blocks.0.ln0.bias"),
+              c, 1e-5f),
+     first_v = none;
+  for (size_t layer = 0; layer < w.layers(); ++layer) {
+    recording_layer = static_cast<int>(layer);
+    std::string prefix = "blocks." + std::to_string(layer) + ".";
+    auto get = [&](const std::string &key) -> const Tensor & {
+      return w.at(prefix + key);
     };
-    for (const auto &entry : optional_abis)
-      check_optional(entry.first, entry.second);
-    if (bf16) {
-      if (!std::filesystem::exists(root / "bf16-fused-ffn-key/config.json"))
-        throw std::runtime_error("Missing BF16 fused FFN artifact");
-      check_optional("bf16-fused-ffn-key", {{"schema_version", 1},
-                                            {"dtype", "bfloat16"},
-                                            {"rows", 8192}, {"k", 2048}});
-    }
-    for (int a = 0; a < 3; ++a)
-      check_optional("fused-rank-" + std::to_string(a), {{"schema_version", 1},
-                                                         {"dtype", "float32"},
-                                                         {"channels", 2048},
-                                                         {"rank", 256},
-                                                         {"activation", a}});
-    if (weights.head_size() != 64 || weights.channels() > 2048 ||
-        2048 % weights.channels())
-      throw std::runtime_error(
-          "Resident graph requires head_size=64 and channels dividing 2048");
-    bool exact_fp32 = false;
-    if (std::filesystem::exists(root / "resident-ops-fast/config.json")) {
-      std::ifstream config(root / "resident-ops-fast/config.json");
-      nlohmann::json j;
-      config >> j;
-      exact_fp32 = j.value("exact_fp32", false);
-    }
-    for (const auto &name : {"array-decode", "fused-mix", "fused-shift-mix",
-                             "fused-rank-0", "fused-rank-1", "fused-rank-2",
-                             "fused-prepare", "fused-finish", "fused-value"}) {
-      if (!std::filesystem::exists(root / name / "config.json"))
-        continue;
-      std::ifstream config(root / name / "config.json");
-      nlohmann::json j;
-      config >> j;
-      if (!j.contains("exact_fp32") || j.at("exact_fp32") != exact_fp32)
-        throw std::runtime_error(
-            "Mixed/missing FP32 arithmetic contract: " + std::string(name) +
-            "; rebuild with rwkv7_optimized.py");
-    }
-    auto &ops = session(
-        root, std::filesystem::exists(root / "resident-ops-fast/config.json")
-                  ? "resident-ops-fast"
-                  : "resident-ops");
-    const bool array_wkv =
-        weights.heads() == 32 &&
-        std::filesystem::exists(root / "array-decode/config.json");
-    if (array_wkv) {
-      std::ifstream config(root / "array-decode/config.json");
-      nlohmann::json j;
-      config >> j;
-      if (j.at("schema_version") != 1 || j.at("dtype") != "float32" ||
-          j.at("heads") != 32 || j.at("head_size") != 64)
-        throw std::runtime_error("Incompatible array WKV ABI");
-    }
-    auto &wkv = session(root, array_wkv ? "array-decode" : "resident-decode");
-    device_buffers.resize(buffers.size());
-    std::map<Id, xdna::DeviceBuffer> recurrent_vectors;
-    std::map<size_t, std::vector<xdna::DeviceBuffer>> stage_args;
-    std::map<size_t, xdna::DeviceBuffer> recurrence_stages;
-    const bool combined_recurrence = array_wkv &&
-        std::filesystem::exists(root / "fused-recurrence-stage/config.json");
-    if (combined_recurrence)
-      check_optional("fused-recurrence-stage", {{"schema_version", 1},
-          {"dtype", "float32"}, {"channels", 2048}, {"head_size", 64},
-          {"arena_vectors", 27}, {"exact_fp32", exact_fp32}});
-    for (size_t ni = 0; ni < nodes.size(); ++ni) {
-      const auto &node = nodes[ni];
-      if (node.kind != Kind::Recurrent)
-        continue;
-      if (combined_recurrence) {
-        if (ni < 6 || ni + 4 >= nodes.size())
-          throw std::runtime_error("Incomplete recurrence stage");
-        const auto *pre = &nodes[ni - 6];
-        const auto *post = &nodes[ni + 1];
-        const Op prep_ops[] = {Op::NormalizeKey, Op::Sigmoid, Op::Negate,
-                              Op::Multiply, Op::KeyScale, Op::Decay};
-        const Op post_ops[] = {Op::Norm, Op::Rkv, Op::Add, Op::Multiply};
-        for (size_t j = 0; j < 6; ++j)
-          if (pre[j].kind != Kind::Element || pre[j].op != prep_ops[j])
-            throw std::runtime_error("Unexpected recurrence preparation");
-        for (size_t j = 0; j < 4; ++j)
-          if (post[j].kind != Kind::Element || post[j].op != post_ops[j])
-            throw std::runtime_error("Unexpected recurrence finishing");
-        if (pre[0].group != 64 || post[0].group != 64 ||
-            post[0].epsilon != 64e-5f || post[0].inputs[0] != node.output ||
-            pre[2].inputs[0] != pre[0].output ||
-            pre[3].inputs[0] != pre[0].output || pre[3].inputs[1] != pre[1].output ||
-            pre[4].inputs[0] != pre[0].inputs[0] || pre[4].inputs[1] != pre[1].output ||
-            post[2].inputs[0] != post[0].output || post[2].inputs[1] != post[1].output ||
-            post[3].inputs[0] != post[2].output)
-          throw std::runtime_error("Unexpected recurrence stage dependencies");
-        std::vector<Id> ids(27, none);
-        const std::vector<Id> pi{pre[0].inputs[0], pre[1].inputs[0], pre[5].inputs[0],
-            pre[0].inputs[1], pre[4].inputs[2], pre[1].inputs[1], pre[5].inputs[1]};
-        std::copy(pi.begin(), pi.end(), ids.begin());
-        const std::vector<Id> fi{node.output, post[0].inputs[1], post[0].inputs[2],
-            post[1].inputs[2], post[3].inputs[1]};
-        std::copy(fi.begin(), fi.end(), ids.begin() + 8);
-        for (size_t j = 0; j < 6; ++j) ids[13 + j] = node.inputs[1 + j];
-        ids[19] = pre[0].output;
-        ids[20] = pre[1].output;
-        for (size_t j = 0; j < 4; ++j) ids[21 + j] = post[j].output;
-        Vector values(27 * 2048, 0);
-        for (size_t j = 0; j < ids.size(); ++j)
-          if (ids[j] != none && buffers[ids[j]].constant)
-            std::copy(read(ids[j]).begin(), read(ids[j]).end(), values.begin() + j * 2048);
-        auto arena = initialized(ops, values);
-        for (size_t j = 0; j < ids.size(); ++j) {
-          if (ids[j] == none) continue;
-          if (device_buffers[ids[j]].size() || buffers[ids[j]].size != 2048)
-            throw std::runtime_error("Unsupported recurrence arena alias");
-          device_buffers[ids[j]] = arena.slice(j * 2048 * 4, 2048 * 4);
-        }
-        auto rec = arena.slice(13 * 2048 * 4, 6 * 2048 * 4);
-        recurrent_vectors.emplace(node.output, rec);
-        recurrence_stages.emplace(ni - 6, arena);
-        stage_args[ni - 6] = {arena.slice(0, 8 * 2048 * 4), rec,
-                             arena.slice(19 * 2048 * 4, 2 * 2048 * 4)};
-        stage_args[ni + 1] = {arena.slice(8 * 2048 * 4, 5 * 2048 * 4), rec,
-                             arena.slice(21 * 2048 * 4, 6 * 2048 * 4)};
-        continue;
-      }
-      auto packed = initialized(ops, Vector(6 * 2048, 0));
-      recurrent_vectors.emplace(node.output, packed);
-      for (size_t i = 1; i < 7; ++i) {
-        Id id = node.inputs[i];
-        if (device_buffers[id].size() || buffers[id].size > 2048)
-          throw std::runtime_error("Unsupported recurrent vector alias");
-        device_buffers[id] = packed.slice((i - 1) * 2048 * 4, 2048 * 4);
-      }
-    }
-    std::map<Id, xdna::DeviceBuffer> mixed_inputs;
-    auto pack_vectors = [&](const std::vector<Id> &ids, size_t slots) {
-      Vector value(slots * 2048, 0);
-      for (size_t i = 0; i < ids.size(); ++i) {
-        if (buffers[ids[i]].constant)
-          std::copy(read(ids[i]).begin(), read(ids[i]).end(),
-                    value.begin() + i * 2048);
-        if (device_buffers[ids[i]].size())
-          throw std::runtime_error("Stage input alias");
-      }
-      auto packed = initialized(ops, value);
-      for (size_t i = 0; i < ids.size(); ++i)
-        device_buffers[ids[i]] = packed.slice(i * 2048 * 4, 2048 * 4);
-      return packed;
+    auto coeff = [&](const std::string &key) {
+      return constant(get(key).data);
     };
-    for (size_t i = 0; i < nodes.size(); ++i) {
-      const auto *n = &nodes[i];
-      if (n->kind != Kind::Element || stage_args.count(i))
-        continue;
-      if (n->op == Op::ValueResidual &&
-          std::filesystem::exists(root / "fused-value/config.json")) {
-        auto input =
-            pack_vectors({n->inputs[0], n->inputs[2], n->inputs[3]}, 3);
-        stage_args[i] = {input, device_buffers[n->inputs[1]],
-                         device_buffers[n->output]};
-      }
-
-      if (n->op == Op::NormalizeKey &&
-          std::filesystem::exists(root / "fused-prepare/config.json")) {
-        if (i + 6 >= nodes.size() || n[6].kind != Kind::Recurrent)
-          throw std::runtime_error("Stage topology");
-        auto input = pack_vectors(
-            {n[0].inputs[0], n[1].inputs[0], n[5].inputs[0], n[0].inputs[1],
-             n[4].inputs[2], n[1].inputs[1], n[5].inputs[1]},
-            8);
-        auto out = pack_vectors({n[0].output, n[1].output}, 2);
-        stage_args[i] = {input, recurrent_vectors.at(n[6].output), out};
-      }
-      if (n->op == Op::Norm && n->group == 64 && i &&
-          nodes[i - 1].kind == Kind::Recurrent &&
-          std::filesystem::exists(root / "fused-finish/config.json")) {
-        auto input =
-            pack_vectors({n[0].inputs[0], n[0].inputs[1], n[0].inputs[2],
-                          n[1].inputs[2], n[3].inputs[1]},
-                         5);
-        auto out = pack_vectors(
-            {n[0].output, n[1].output, n[2].output, n[3].output}, 6);
-        stage_args[i] = {input, recurrent_vectors.at(nodes[i - 1].output), out};
-      }
-    }
-    // One root BO for constants and activation slots. Offsets stay fixed;
-    // recurrent gather slots have their own six-vector backing allocation.
-    size_t arena_floats = 0;
-    for (size_t id = 0; id < buffers.size(); ++id)
-      if (!device_buffers[id].size())
-        arena_floats += ((buffers[id].size + 2047) / 2048) * 2048;
-    Vector arena_data(arena_floats, 0);
-    size_t offset = 0;
-    for (size_t id = 0; id < buffers.size(); ++id) {
-      if (device_buffers[id].size())
-        continue;
-      const auto &b = buffers[id];
-      if (b.constant)
-        std::copy(b.constant->begin(), b.constant->end(),
-                  arena_data.begin() + offset);
-      offset += ((b.size + 2047) / 2048) * 2048;
-    }
-    auto arena = initialized(ops, arena_data);
-    offset = 0;
-    for (size_t id = 0; id < buffers.size(); ++id) {
-      if (device_buffers[id].size())
-        continue;
-      size_t size = ((buffers[id].size + 2047) / 2048) * 2048;
-      device_buffers[id] = arena.slice(offset * 4, size * 4);
-      offset += size;
-    }
-    auto zero = initialized(ops, Vector(2048, 0));
-    std::map<std::array<float, 4>, xdna::DeviceBuffer> metadata;
-    auto meta_buffer = [&](const Vector &v) {
-      const std::array<float, 4> key{v[0], v[1], v[2], v[3]};
-      auto &b = metadata[key];
-      if (!b.size())
-        b = initialized(ops, v);
-      return b;
+    Id old_att = allocate(c), old_ffn = allocate(c), matrix = allocate(c * n);
+    Id xx = norm(x, get("ln1.weight"), get("ln1.bias"), c, 1e-5f);
+    auto mix = [&](const std::string &name) {
+      return element(Op::Mix, xx, old_att, coeff("att.x_" + name));
     };
-    auto slice = [&](Id id, size_t start, size_t count) {
-      return device_buffers.at(id).slice(start * 4, count * 4);
+    Id xr = mix("r"), xw = mix("w"), xk = mix("k"), xv = mix("v"),
+       xa = mix("a"), xg = mix("g");
+    auto rank = [&](Id in, const std::string &name, int activation) {
+      Id z = linear(in, get("att." + name + "1"), true);
+      if (activation == 1)
+        z = element(Op::Tanh, z);
+      if (activation == 2)
+        z = element(Op::Sigmoid, z);
+      return linear(z, get("att." + name + "2"), true);
     };
-    struct Branch { size_t first, last, hidden; int activation; };
-    auto rank_branches = [&](size_t cursor) {
-      std::vector<Branch> branches;
-      for (int activation : {1, 0, 2, 0}) {
-        if (cursor >= nodes.size() || nodes[cursor].kind != Kind::Linear ||
-            !nodes[cursor].transpose || buffers[nodes[cursor].inputs[0]].size != 2048 ||
-            buffers[nodes[cursor].output].size > 256) break;
-        size_t last = cursor + 1;
-        if (activation) {
-          if (last >= nodes.size() || nodes[last].kind != Kind::Element ||
-              nodes[last].op != (activation == 1 ? Op::Tanh : Op::Sigmoid) ||
-              nodes[last].inputs[0] != nodes[cursor].output)
-            throw std::runtime_error("Unexpected batched rank activation");
-          ++last;
-        }
-        if (last >= nodes.size() || nodes[last].kind != Kind::Linear || !nodes[last].transpose ||
-            nodes[last].inputs[0] != nodes[last - 1].output || buffers[nodes[last].output].size != 2048)
-          throw std::runtime_error("Unexpected batched rank output");
-        branches.push_back({cursor,last,buffers[nodes[cursor].output].size,activation});
-        cursor=last+1;
-      }
-      return branches;
-    };
-    auto pack_rank = [&](const std::vector<Branch> &branches, size_t first_cores,
-                         size_t second_cores, const xdna::DeviceBuffer &auxiliary) {
-      const size_t count=branches.size(), first_stripe=256/first_cores, second_stripe=2048/second_cores;
-      Vector packed(count*2*256*2048,0);
-      for(size_t p=0;p<count;++p) {
-        const auto &branch=branches[p];
-        const auto &first=nodes[branch.first];
-        const auto &last=nodes[branch.last];
-        device_buffers[first.output]=auxiliary.slice(p*256*4,256*4);
-        if(branch.activation)
-          device_buffers[nodes[branch.last-1].output]=auxiliary.slice((count+p)*256*4,256*4);
-        for(size_t row=0;row<branch.hidden;++row)
-          for(size_t col=0;col<2048;++col) {
-            size_t pos=((row/first_stripe*count+p)*(first_stripe/16)+(row%first_stripe)/16)*8*4096+
-                       col/256*4096+(row%16)*256+col%256;
-            packed[pos]=first.weight->data[col*branch.hidden+row];
-          }
-        for(size_t row=0;row<2048;++row)
-          for(size_t col=0;col<branch.hidden;++col) {
-            size_t pos=((row/second_stripe*count+p)*(second_stripe/16)+(row%second_stripe)/16)*4096+
-                       (row%16)*256+col;
-            packed[count*256*2048+pos]=last.weight->data[col*2048+row];
-          }
-      }
-      return packed;
-    };
-    for (size_t node_index = 0; node_index < nodes.size(); ++node_index) {
-      const auto &node = nodes[node_index];
-      const auto &a = node.inputs;
-      if (!exact_fp32 && node.kind == Kind::Element && node.op == Op::Norm &&
-          node.group == 2048 && node.epsilon == 1e-5f && node_index + 1 < nodes.size()) {
-        size_t count = 0;
-        const Id old = nodes[node_index + 1].inputs[1];
-        while (node_index + 1 + count < nodes.size()) {
-          const auto &mix = nodes[node_index + 1 + count];
-          if (mix.kind != Kind::Element || mix.op != Op::Mix ||
-              mix.inputs[0] != node.output || mix.inputs[1] != old)
-            break;
-          ++count;
-        }
-        if (bf16 && count == 1 && node_index + 5 < nodes.size() &&
-            std::filesystem::exists(root / "bf16-channel-mix/config.json")) {
-          const auto *n = &nodes[node_index];
-          if (n[2].kind != Kind::Linear || n[2].transpose ||
-              n[2].inputs[0] != n[1].output ||
-              n[2].weight->shape != std::vector<size_t>{8192, 2048} ||
-              n[3].kind != Kind::Element || n[3].op != Op::ReluSquared ||
-              n[3].inputs[0] != n[2].output || n[4].kind != Kind::Linear ||
-              n[4].transpose || n[4].inputs[0] != n[3].output ||
-              n[4].weight->shape != std::vector<size_t>{2048, 8192} ||
-              n[5].kind != Kind::Element || n[5].op != Op::Add ||
-              n[5].inputs[0] != a[0] || n[5].inputs[1] != n[4].output ||
-              !std::any_of(states.begin(), states.end(),
-                           [&](const StateBinding &s) { return s.old_ffn == old; }))
-            throw std::runtime_error("Unexpected ChannelMix topology");
-          check_optional("bf16-channel-mix", {{"schema_version", 1}, {"dtype", "bfloat16"},
-              {"channels", 2048}, {"hidden", 8192}, {"key_cores", 4},
-              {"value_cores", 4}, {"exact_fp32", false}});
-          auto &stage = session(root, "bf16-channel-mix");
-          Vector parameters(6144);
-          for (size_t j = 0; j < 3; ++j) {
-            const auto &value = read(j < 2 ? a[j + 1] : n[1].inputs[2]);
-            if (value.size() != 2048) throw std::runtime_error("Unexpected ChannelMix parameter shape");
-            std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
-          }
-          Vector packed(33554432);
-          size_t offset = 0;
-          for (const auto *weight : {n[2].weight, n[4].weight}) {
-            const size_t rows = weight->shape[0], k = weight->shape[1];
-            for (size_t r = 0; r < rows; ++r)
-              for (size_t c = 0; c < k; ++c) {
-                const size_t pos = ((r / 16) * (k / 256) + c / 256) * 4096 +
-                                   (r % 16) * 256 + c % 256;
-                packed[offset + pos] = weight->data[r * k + c];
-              }
-            offset += rows * k;
-          }
-          auto diagnostic = initialized(stage, Vector(22528, 0));
-          auto result = initialized(stage, Vector(4096, 0));
-          device_buffers[old] = diagnostic.slice(0, 2048 * 4);
-          device_buffers[n[0].output] = device_buffers[old];
-          device_buffers[n[1].output] = diagnostic.slice(4096 * 4, 2048 * 4);
-          device_buffers[n[2].output] = diagnostic.slice(6144 * 4, 8192 * 4);
-          device_buffers[n[3].output] = diagnostic.slice(14336 * 4, 8192 * 4);
-          device_buffers[n[4].output] = result.slice(0, 2048 * 4);
-          device_buffers[n[5].output] = result.slice(2048 * 4, 2048 * 4);
-          runs.push_back(stage.prepare({device_buffers[a[0]], initialized(stage, parameters),
-                                        initialized_bf16(stage, packed), diagnostic, result}));
-          for (size_t j = 0; j < 6; ++j) node_run_ends.push_back(runs.size());
-          node_index += 5;
-          continue;
-        }
-        const auto name = "fused-norm-mix-" + std::to_string(count);
-        if ((count == 1 || count == 6) && std::filesystem::exists(root / name / "config.json")) {
-          check_optional(name, {{"schema_version", 1}, {"dtype", "float32"},
-              {"channels", 2048}, {"mixes", count}, {"exact_fp32", false}});
-          if (!std::any_of(states.begin(), states.end(), [&](const StateBinding &s) {
-                return count == 6 ? s.old_attention == old : s.old_ffn == old;
-              }))
-            throw std::runtime_error("Unexpected norm/mix shift binding");
-          auto &stage = session(root, name);
-          Vector parameters((2 + count) * 2048);
-          for (size_t j = 0; j < 2 + count; ++j) {
-            const auto &value = read(j < 2 ? a[1 + j] : nodes[node_index + j - 1].inputs[2]);
-            if (value.size() != 2048) throw std::runtime_error("Unexpected norm/mix parameter shape");
-            std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
-          }
-          auto pair = initialized(stage, Vector(4096, 0));
-          auto mixed = initialized(stage, Vector(count * 2048, 0));
-          device_buffers[node.output] = pair.slice(0, 2048 * 4);
-          for (size_t j = 0; j < count; ++j)
-            device_buffers[nodes[node_index + 1 + j].output] = mixed.slice(j * 2048 * 4, 2048 * 4);
-          if (count == 6) {
-            mixed_inputs.emplace(nodes[node_index + 1].output, mixed);
-            mixed_inputs.emplace(nodes[node_index + 2].output, mixed);
-          }
-          runs.push_back(stage.prepare({device_buffers[a[0]], initialized(stage, parameters),
-                                        device_buffers[old], pair, mixed}));
-          for (size_t j = 0; j <= count; ++j) node_run_ends.push_back(runs.size());
-          node_index += count;
-          continue;
-        }
-      }
-      if (bf16 && node.kind == Kind::Linear && !node.transpose &&
-          node.weight->shape == std::vector<size_t>{8192, 2048} && node_index + 3 < nodes.size() &&
-          std::filesystem::exists(root / "bf16-ffn-pipeline/config.json")) {
-        const auto *n = &nodes[node_index];
-        if (n[1].kind != Kind::Element || n[1].op != Op::ReluSquared || n[1].inputs[0] != n[0].output ||
-            n[2].kind != Kind::Linear || n[2].transpose || n[2].inputs[0] != n[1].output ||
-            n[2].weight->shape != std::vector<size_t>{2048, 8192} ||
-            n[3].kind != Kind::Element || n[3].op != Op::Add || n[3].inputs[1] != n[2].output)
-          throw std::runtime_error("Unexpected FFN pipeline topology");
-        check_optional("bf16-ffn-pipeline", {{"schema_version", 1}, {"dtype", "bfloat16"},
-            {"channels", 2048}, {"hidden", 8192}, {"key_cores", 4}, {"value_cores", 8},
-            {"exact_fp32", exact_fp32}});
-        auto &stage = session(root, "bf16-ffn-pipeline");
-        Vector packed(33554432);
-        size_t offset = 0;
-        for (const auto *weight : {n[0].weight, n[2].weight}) {
-          size_t rows = weight->shape[0], k = weight->shape[1];
-          for (size_t r = 0; r < rows; ++r)
-            for (size_t c = 0; c < k; ++c) {
-              size_t pos = ((r / 16) * (k / 256) + c / 256) * 4096 + (r % 16) * 256 + c % 256;
-              packed[offset + pos] = weight->data[r * k + c];
-            }
-          offset += rows * k;
-        }
-        auto hidden = initialized(stage, Vector(16384, 0));
-        auto result = initialized(stage, Vector(4096, 0));
-        device_buffers[n[0].output] = hidden.slice(0, 8192 * 4);
-        device_buffers[n[1].output] = hidden.slice(8192 * 4, 8192 * 4);
-        device_buffers[n[2].output] = result.slice(0, 2048 * 4);
-        device_buffers[n[3].output] = result.slice(2048 * 4, 2048 * 4);
-        runs.push_back(stage.prepare({device_buffers[a[0]], initialized_bf16(stage, packed),
-                                      device_buffers[n[3].inputs[0]], hidden, result}));
-        for (size_t j = 0; j < 4; ++j) node_run_ends.push_back(runs.size());
-        node_index += 3;
-        continue;
-      }
-      if (bf16 && node.kind == Kind::Linear && !node.transpose &&
-          node.weight->shape == std::vector<size_t>{2048, 2048} && node_index + 1 < nodes.size() &&
-          nodes[node_index + 1].kind == Kind::Element && nodes[node_index + 1].op == Op::Add &&
-          nodes[node_index + 1].inputs[1] == node.output &&
-          std::filesystem::exists(root / "bf16-projection-residual/config.json")) {
-        check_optional("bf16-projection-residual", {{"schema_version", 1}, {"dtype", "bfloat16"},
-            {"channels", 2048}, {"cores", 11}, {"exact_fp32", exact_fp32}});
-        auto &stage = session(root, "bf16-projection-residual");
-        Vector packed(4194304);
-        for (size_t r = 0; r < 2048; ++r)
-          for (size_t c = 0; c < 2048; ++c) {
-            size_t pos = ((r / 16) * 8 + c / 256) * 4096 + (r % 16) * 256 + c % 256;
-            packed[pos] = node.weight->data[r * 2048 + c];
-          }
-        auto result = initialized(stage, Vector(4096, 0));
-        device_buffers[node.output] = result.slice(0, 2048 * 4);
-        device_buffers[nodes[node_index + 1].output] = result.slice(2048 * 4, 2048 * 4);
-        runs.push_back(stage.prepare({device_buffers[a[0]], initialized_bf16(stage, packed),
-            device_buffers[nodes[node_index + 1].inputs[0]], result}));
-        node_run_ends.push_back(runs.size());
-        node_run_ends.push_back(runs.size());
-        ++node_index;
-        continue;
-      }
-      if (bf16 && node.kind == Kind::Linear && node.transpose &&
-          mixed_inputs.count(a[0])) {
-        const auto branches = rank_branches(node_index);
-        const size_t cursor = branches.empty() ? node_index : branches.back().last + 1;
-        const size_t count = branches.size();
-        const auto name = "bf16-rank-batch-" + std::to_string(count);
-        if ((count == 3 || count == 4) &&
-            std::filesystem::exists(root / name / "config.json")) {
-          check_optional(name, {{"schema_version", 2},
-                                {"dtype", "bfloat16"},
-                                {"channels", 2048},
-                                {"rank", 256},
-                                {"branches", count},
-                                {"exact_fp32", exact_fp32}});
-          auto &batch = session(root, name);
-          auto auxiliary = initialized(batch, Vector(count * 512, 0));
-          auto packed = pack_rank(branches, 4, 8, auxiliary);
-          // W and A already share prepare's input BO. Keep those aliases so
-          // no intermediate copy or extra dispatch is needed for the six-BO
-          // ABI.
-          const size_t prepare_index = cursor + (count == 4 ? 1 : 0);
-          if (prepare_index >= nodes.size() ||
-              nodes[prepare_index].op != Op::NormalizeKey ||
-              !stage_args.count(prepare_index) ||
-              nodes[prepare_index + 5].inputs[0] !=
-                  nodes[branches[0].last].output ||
-              nodes[prepare_index + 1].inputs[0] !=
-                  nodes[branches[1].last].output)
-            throw std::runtime_error("Unexpected batched rank prepare layout");
-          std::vector<xdna::DeviceBuffer> args{
-              mixed_inputs.at(a[0]),
-              initialized_bf16(batch, packed),
-              auxiliary,
-              stage_args.at(prepare_index)[0],
-              device_buffers[nodes[branches[2].last].output],
-              count == 4 ? device_buffers[nodes[branches[3].last].output]
-                         : zero};
-          runs.push_back(batch.prepare(args));
-          for (size_t i = node_index; i < cursor; ++i)
-            node_run_ends.push_back(runs.size());
-          node_index = cursor - 1;
-          continue;
-        }
-      }
-      if (bf16 && combined_recurrence && node.kind == Kind::Linear && !node.transpose &&
-          mixed_inputs.count(a[0]) && node_index + 3 < nodes.size()) {
-        const auto branches = rank_branches(node_index + 3);
-        const size_t count = branches.size();
-        const size_t cursor = branches.empty() ? node_index : branches.back().last + 1;
-        const size_t prepare_index = cursor + (count == 4 ? 1 : 0);
-        const auto name = "bf16-attention-projections-" + std::to_string(count);
-        if ((count == 3 || count == 4) && recurrence_stages.count(prepare_index) &&
-            std::filesystem::exists(root / name / "config.json")) {
-          check_optional(name, {{"schema_version", 1}, {"dtype", "bfloat16"},
-              {"channels", 2048}, {"rank", 256}, {"branches", count}, {"cores", 14},
-              {"exact_fp32", exact_fp32}});
-          if (nodes[prepare_index].inputs[0] != nodes[node_index + 1].output ||
-              nodes[prepare_index + 5].inputs[0] != nodes[branches[0].last].output ||
-              nodes[prepare_index + 1].inputs[0] != nodes[branches[1].last].output ||
-              nodes[prepare_index + 10].inputs[1] != nodes[branches[2].last].output ||
-              (count == 4 && (nodes[cursor].op != Op::ValueResidual ||
-                  nodes[cursor].inputs[0] != nodes[node_index + 2].output ||
-                  nodes[cursor].inputs[2] != nodes[branches[3].last].output)))
-            throw std::runtime_error("Unexpected attention projection arena layout");
-          auto &stage = session(root, name);
-          auto auxiliary = initialized(stage, Vector(count * 512, 0));
-          auto ranks = pack_rank(branches, 2, 4, auxiliary);
-          Vector packed(3 * 2048 * 2048);
-          for (size_t p = 0; p < 3; ++p) {
-            const auto &n = nodes[node_index + p];
-            if (n.kind != Kind::Linear || n.transpose || n.weight->shape != std::vector<size_t>{2048,2048})
-              throw std::runtime_error("Unexpected attention RKV topology");
-            for (size_t row = 0; row < 2048; ++row)
-              for (size_t col = 0; col < 2048; ++col) {
-                size_t pos=((row/256*3+p)*16+(row%256)/16)*8*4096+col/256*4096+(row%16)*256+col%256;
-                packed[pos]=n.weight->data[row*2048+col];
-              }
-          }
-          packed.insert(packed.end(), ranks.begin(), ranks.end());
-          auto value_aux = count == 4 ? stage_args.at(cursor)[0] : initialized(stage, Vector(6144,0));
-          runs.push_back(stage.prepare({mixed_inputs.at(a[0]),initialized_bf16(stage,packed),
-              recurrence_stages.at(prepare_index),value_aux,auxiliary}));
-          for (size_t j=node_index;j<cursor;++j) node_run_ends.push_back(runs.size());
-          node_index=cursor-1;
-          continue;
-        }
-      }
-      if (bf16 && node.kind == Kind::Linear && !node.transpose &&
-          mixed_inputs.count(a[0]) && node_index + 2 < nodes.size() &&
-          std::filesystem::exists(root / "bf16-rkv/config.json")) {
-        check_optional("bf16-rkv", {{"schema_version", 1}, {"dtype", "bfloat16"},
-                                     {"channels", 2048}, {"cores", 8},
-                                     {"layout", "worker_projection_row_tile_k_tile"},
-                                     {"input_slots", {0, 2, 3}}});
-        auto &rkv = session(root, "bf16-rkv");
-        Vector packed(3 * 2048 * 2048);
-        std::vector<xdna::DeviceBuffer> args{mixed_inputs.at(a[0])};
-        for (size_t projection = 0; projection < 3; ++projection) {
-          const auto &n = nodes[node_index + projection];
-          if (n.kind != Kind::Linear || n.transpose ||
-              n.weight->shape != std::vector<size_t>{2048, 2048})
-            throw std::runtime_error("Unexpected RKV topology");
-          for (size_t row = 0; row < 2048; ++row)
-            for (size_t col = 0; col < 2048; ++col) {
-              size_t pos = ((row / 256 * 3 + projection) * 16 + (row % 256) / 16) * 8 * 4096 +
-                           (col / 256) * 4096 + (row % 16) * 256 + col % 256;
-              packed[pos] = n.weight->data[row * 2048 + col];
-            }
-        }
-        args.push_back(initialized_bf16(rkv, packed));
-        for (size_t p = 0; p < 3; ++p)
-          args.push_back(device_buffers[nodes[node_index + p].output]);
-        runs.push_back(rkv.prepare(args));
-        for (size_t p = 0; p < 3; ++p)
-          node_run_ends.push_back(runs.size());
-        node_index += 2;
-        continue;
-      }
-      if (node.kind == Kind::Linear && node.transpose &&
-          buffers[a[0]].size == 2048 && buffers[node.output].size <= 256) {
-        size_t last = node_index + 1;
-        int activation = 0;
-        if (last < nodes.size() && nodes[last].kind == Kind::Element &&
-            (nodes[last].op == Op::Tanh || nodes[last].op == Op::Sigmoid) &&
-            nodes[last].inputs[0] == node.output &&
-            nodes[last].inputs[1] == none) {
-          activation = nodes[last].op == Op::Tanh ? 1 : 2;
-          ++last;
-        }
-        auto name = "fused-rank-" + std::to_string(activation);
-        const bool bf16_rank = bf16 && std::filesystem::exists(root / ("bf16-" + name) / "config.json");
-        if (bf16_rank) {
-          name = "bf16-" + name;
-          check_optional(name, {{"schema_version", 1}, {"dtype", "bfloat16"},
-                                {"channels", 2048}, {"rank", 256},
-                                {"activation", activation}, {"exact_fp32", exact_fp32}});
-        }
-        if (last < nodes.size() && nodes[last].kind == Kind::Linear &&
-            nodes[last].transpose &&
-            nodes[last].inputs[0] == nodes[last - 1].output &&
-            buffers[nodes[last].output].size == 2048 &&
-            std::filesystem::exists(root / name / "config.json")) {
-          auto &rank = session(root, name);
-          auto pack = [&](const Tensor &w, size_t in, size_t out,
-                          size_t padded_in, size_t padded_out) {
-            Vector v(padded_in * padded_out, 0);
-            for (size_t row = 0; row < out; ++row)
-              for (size_t col = 0; col < in; ++col) {
-                size_t pos =
-                    ((row / 16) * (padded_in / 256) + col / 256) * 4096 +
-                    (row % 16) * 256 + col % 256;
-                v[pos] = w.data[col * out + row];
-              }
-            return bf16_rank ? initialized_bf16(rank, v) : initialized(rank, v);
-          };
-          const size_t hidden = buffers[node.output].size;
-          auto w1 = pack(*node.weight, 2048, hidden, 2048, 256);
-          auto w2 = pack(*nodes[last].weight, hidden, 2048, 256, 2048);
-          auto activated = activation ? device_buffers[nodes[last - 1].output]
-                                      : initialized(rank, Vector(256, 0));
-          runs.push_back(rank.prepare({device_buffers[a[0]], w1, w2,
-                                       device_buffers[node.output], activated,
-                                       device_buffers[nodes[last].output]}));
-          for (size_t j = node_index; j <= last; ++j)
-            node_run_ends.push_back(runs.size());
-          node_index = last;
-          continue;
-        }
-      }
-      auto is_op = [&](size_t offset, Op op) {
-        return node_index + offset < nodes.size() &&
-               nodes[node_index + offset].kind == Kind::Element &&
-               nodes[node_index + offset].op == op;
-      };
-      if (recurrence_stages.count(node_index)) {
-        auto &stage = session(root, "fused-recurrence-stage");
-        runs.push_back(stage.prepare({device_buffers[nodes[node_index + 6].inputs[0]],
-                                      recurrence_stages.at(node_index)}));
-        for (size_t j = 0; j < 11; ++j) node_run_ends.push_back(runs.size());
-        node_index += 10;
-        continue;
-      }
-      if (is_op(0, Op::NormalizeKey) && is_op(1, Op::Sigmoid) &&
-          is_op(2, Op::Negate) && is_op(3, Op::Multiply) &&
-          is_op(4, Op::KeyScale) && is_op(5, Op::Decay) &&
-          std::filesystem::exists(root / "fused-prepare/config.json")) {
-        const auto *n = &nodes[node_index];
-        if (n[2].inputs[0] != n[0].output || n[3].inputs[0] != n[0].output ||
-            n[3].inputs[1] != n[1].output || n[4].inputs[0] != n[0].inputs[0] ||
-            n[4].inputs[1] != n[1].output || n[0].group != 64)
-          throw std::runtime_error(
-              "Unexpected attention preparation dependencies");
-        auto &stage = session(root, "fused-prepare");
-        runs.push_back(stage.prepare(stage_args.at(node_index)));
-        for (size_t j = 0; j < 6; ++j)
-          node_run_ends.push_back(runs.size());
-        node_index += 5;
-        continue;
-      }
-      if (is_op(0, Op::Norm) && node.group == 64 && is_op(1, Op::Rkv) &&
-          is_op(2, Op::Add) && is_op(3, Op::Multiply) &&
-          std::filesystem::exists(root / "fused-finish/config.json")) {
-        const auto *n = &nodes[node_index];
-        if (n[2].inputs[0] != n[0].output || n[2].inputs[1] != n[1].output ||
-            n[3].inputs[0] != n[2].output || n[1].group != 64 ||
-            n[0].epsilon != 64e-5f)
-          throw std::runtime_error("Unexpected attention finish dependencies");
-        auto &stage = session(root, "fused-finish");
-        runs.push_back(stage.prepare(stage_args.at(node_index)));
-        for (size_t j = 0; j < 4; ++j)
-          node_run_ends.push_back(runs.size());
-        node_index += 3;
-        continue;
-      }
-      if (node.kind == Kind::Element && node.op == Op::Mix &&
-          node_index + 6 <= nodes.size() &&
-          std::filesystem::exists(root / "fused-mix/config.json")) {
-        bool six = true;
-        for (size_t j = 0; j < 6; ++j) {
-          const auto &m = nodes[node_index + j];
-          six &= m.kind == Kind::Element && m.op == Op::Mix &&
-                 m.inputs[0] == a[0] && m.inputs[1] == a[1];
-        }
-        if (six) {
-          auto &mix = session(root, "fused-mix");
-          Vector coeff(6 * 2048, 0);
-          for (size_t j = 0; j < 6; ++j) {
-            const auto &v = read(nodes[node_index + j].inputs[2]);
-            std::copy(v.begin(), v.end(), coeff.begin() + j * 2048);
-          }
-          auto mixed = initialized(mix, Vector(6 * 2048, 0));
-          mixed_inputs.emplace(nodes[node_index].output, mixed);
-          mixed_inputs.emplace(nodes[node_index + 1].output, mixed);
-          for (size_t j = 0; j < 6; ++j)
-            device_buffers[nodes[node_index + j].output] =
-                mixed.slice(j * 2048 * 4, 2048 * 4);
-          std::vector<xdna::DeviceBuffer> args{device_buffers[a[0]],
-                                               device_buffers[a[1]],
-                                               initialized(mix, coeff), mixed};
-          runs.push_back(mix.prepare(args));
-          for (size_t j = 0; j < 6; ++j)
-            node_run_ends.push_back(runs.size());
-          node_index += 5;
-          continue;
-        }
-      }
-      if (node.kind == Kind::Element && node.op == Op::ValueResidual &&
-          std::filesystem::exists(root / "fused-value/config.json")) {
-        auto &value = session(root, "fused-value");
-        runs.push_back(value.prepare(stage_args.at(node_index)));
-      } else if (!exact_fp32 && node.kind == Kind::Element &&
-                 node.op == Op::Norm && node.group == 2048 &&
-                 node.epsilon == 1e-5f &&
-                 std::filesystem::exists(root / "upstream-norm/config.json")) {
-        auto &norm = session(root, "upstream-norm");
-        runs.push_back(
-            norm.prepare({device_buffers[a[0]], device_buffers[a[1]],
-                          device_buffers[a[2]], device_buffers[node.output]}));
-      } else if (node.kind == Kind::Element && node.op == Op::Mix &&
-                 std::filesystem::exists(root /
-                                         "fused-shift-mix/config.json") &&
-                 std::any_of(states.begin(), states.end(),
-                             [&](const StateBinding &s) {
-                               return s.old_ffn == a[1];
-                             })) {
-        auto &mix = session(root, "fused-shift-mix");
-        runs.push_back(
-            mix.prepare({device_buffers[a[0]], device_buffers[a[1]],
-                         device_buffers[a[2]], device_buffers[node.output]}));
-      } else if (node.kind == Kind::Element) {
-        for (size_t start = 0; start < buffers[node.output].size;
-             start += 2048) {
-          Vector meta(16, 0);
-          meta[0] = static_cast<int>(node.op);
-          meta[1] = std::min(size_t(2048), buffers[node.output].size - start);
-          meta[2] = node.group;
-          meta[3] = node.epsilon;
-          std::vector<xdna::DeviceBuffer> args{meta_buffer(meta)};
-          for (size_t i = 0; i < 4; ++i)
-            args.push_back(a[i] == none ? zero : slice(a[i], start, 2048));
-          args.push_back(slice(node.output, start, 2048));
-          runs.push_back(ops.prepare(args));
-        }
-      } else if (node.kind == Kind::Linear) {
-        const auto &w = *node.weight;
-        size_t inputs = buffers[a[0]].size, outputs = buffers[node.output].size;
-        size_t k = ((inputs + 255) / 256) * 256;
-        auto array_name = "array-gemv-" + std::to_string(k);
-        size_t array_rows = 2048;
-        const bool full_head = bf16 && k == 2048 && outputs == 65536 &&
-            std::filesystem::exists(root / "bf16-array-gemv-2048-65536/config.json");
-        if (full_head) {
-          array_name += "-65536";
-          array_rows = 65536;
-        } else if (outputs >= 8192 && outputs % 8192 == 0 &&
-            std::filesystem::exists(root / (array_name + "-8192") /
-                                    "config.json")) {
-          array_name += "-8192";
-          array_rows = 8192;
-        }
-        auto array32_name = array_name;
-        array32_name.replace(0, 5, "array32");
-        const bool array32 = !bf16 &&
-            array_rows == 8192 &&
-            std::filesystem::exists(root / array32_name / "config.json");
-        if (array32)
-          array_name = array32_name;
-        const bool array =
-            outputs >= 2048 &&
-            (full_head || std::filesystem::exists(root / array_name / "config.json"));
-        const size_t rows = array ? array_rows : 256;
-        if (bf16 && array)
-          array_name = "bf16-" + array_name;
-        if (array) {
-          std::ifstream config(root / array_name / "config.json");
-          nlohmann::json j;
-          config >> j;
-          if (j.at("schema_version") != (array32 ? 2 : 1) ||
-              j.at("dtype") != (bf16 ? "bfloat16" : "float32") || j.at("rows") != rows ||
-              j.at("cores") != (array32 ? 32 : 8) || j.at("k") != k ||
-              (array32 && j.at("layout") != "column_block_lane"))
-            throw std::runtime_error("Incompatible array GEMV ABI");
-        }
-        const std::string ffn_name = bf16 ? "bf16-fused-ffn-key" : "fused-ffn-key";
-        const bool ffn =
-            inputs == 2048 && outputs == 8192 && rows == 8192 &&
-            is_op(1, Op::ReluSquared) &&
-            nodes[node_index + 1].inputs[0] == node.output &&
-            std::filesystem::exists(root / ffn_name / "config.json");
-        auto &gemv = session(root, ffn     ? ffn_name
-                                   : array ? array_name
-                                           : "gemv-" + std::to_string(k));
-        for (size_t start = 0; start < outputs; start += rows) {
-          Vector packed(rows * k, 0);
-          for (size_t r = 0; r < std::min(rows, outputs - start); ++r)
-            for (size_t col = 0; col < inputs; ++col) {
-              size_t pos = ((r / 16) * (k / 256) + col / 256) * 4096 +
-                           (r % 16) * 256 + col % 256;
-              if (array32 && !ffn) {
-                size_t stripe = rows / 32;
-                pos = (((r / (stripe * 4) * (stripe / 16) + (r % stripe) / 16) *
-                            (k / 256) +
-                        col / 256) *
-                           4 +
-                       (r / stripe) % 4) *
-                          4096 +
-                      (r % 16) * 256 + col % 256;
-              }
-              packed[pos] = w.data[node.transpose ? col * outputs + start + r
-                                                  : (start + r) * inputs + col];
-            }
-          auto weight = bf16 && array ? initialized_bf16(gemv, packed)
-                                      : initialized(gemv, packed);
-          std::vector<xdna::DeviceBuffer> args{slice(a[0], 0, k), weight,
-                                               slice(node.output, start, rows)};
-          if (ffn)
-            args.push_back(device_buffers[nodes[node_index + 1].output]);
-          runs.push_back(gemv.prepare(args));
-        }
-        if (ffn) {
-          node_run_ends.push_back(runs.size());
-          ++node_index;
-        }
-      } else if (array_wkv) {
-        runs.push_back(wkv.prepare({device_buffers[a[0]],
-                                    recurrent_vectors.at(node.output),
-                                    device_buffers[node.output]}));
-      } else {
-        for (size_t h = 0; h < weights.heads(); ++h) {
-          std::vector<xdna::DeviceBuffer> args{
-              slice(a[0], h * 4096, 4096),
-              recurrent_vectors.at(node.output).slice(h * 64 * 4, 10304 * 4),
-              slice(node.output, h * 64, 64)};
-          runs.push_back(wkv.prepare(args));
-        }
-      }
-      node_run_ends.push_back(runs.size());
-    }
-    for (const auto &s : states) {
-      Vector meta(16, 0);
-      meta[0] = static_cast<int>(Op::Add);
-      meta[1] = weights.channels();
-      meta[2] = 1;
-      for (auto pair : {std::pair<Id, Id>{s.new_attention, s.old_attention},
-                        std::pair<Id, Id>{s.new_ffn, s.old_ffn}})
-        if (!std::filesystem::exists(root /
-                                     (pair.second == s.old_attention
-                                          ? "fused-mix"
-                                          : "fused-shift-mix") /
-                                     "config.json"))
-          shift_runs.push_back(
-              ops.prepare({meta_buffer(meta), device_buffers[pair.first], zero,
-                           zero, zero, device_buffers[pair.second]}));
-    }
-    upload_bytes = weights.channels() * 4;
-    download_bytes = weights.vocabulary() * 4;
-    for (const auto &s : states) {
-      size_t bytes = (buffers[s.old_attention].size + buffers[s.old_ffn].size +
-                      buffers[s.matrix].size) *
-                     4;
-      upload_bytes += bytes;
-      download_bytes += bytes;
-    }
+    Id r = linear(xr, get("att.receptance.weight")),
+       k = linear(xk, get("att.key.weight")),
+       v = linear(xv, get("att.value.weight"));
+    Id d = rank(xw, "w", 1), a = rank(xa, "a", 0), g = rank(xg, "g", 2);
+    if (layer == 0)
+      first_v = v;
+    else
+      v = element(Op::ValueResidual, v, first_v, rank(xv, "v", 0),
+                  coeff("att.v0"));
+    Id kk = element(Op::NormalizeKey, k, coeff("att.k_k"), none, none, n);
+    a = element(Op::Sigmoid, a, coeff("att.a0"));
+    Id neg = element(Op::Negate, kk), kb = element(Op::Multiply, kk, a);
+    k = element(Op::KeyScale, k, a, coeff("att.k_a"));
+    d = element(Op::Decay, d, coeff("att.w0"));
+    Id y = recurrent(matrix, r, d, k, v, neg, kb);
+    y = norm(y, get("att.ln_x.weight"), get("att.ln_x.bias"), n, 64e-5f);
+    Id residual = element(Op::Rkv, r, k, coeff("att.r_k"), v, n);
+    y = element(Op::Multiply, element(Op::Add, y, residual), g);
+    x = element(Op::Add, x, linear(y, get("att.output.weight")));
+    Id ff = norm(x, get("ln2.weight"), get("ln2.bias"), c, 1e-5f);
+    Id f = linear(element(Op::Mix, ff, old_ffn, coeff("ffn.x_k")),
+                  get("ffn.key.weight"));
+    f = element(Op::ReluSquared, f);
+    x = element(Op::Add, x, linear(f, get("ffn.value.weight")));
+    states.push_back({old_att, old_ffn, matrix, xx, ff});
   }
-  Id allocate(size_t size) {
-    Id id = buffers.size();
-    buffers.push_back({size, nullptr, Vector(size)});
-    return id;
+  recording_layer = -1;
+  logits = linear(norm(x, w.at("ln_out.weight"), w.at("ln_out.bias"), c, 1e-5f),
+                  w.at("head.weight"));
+  // Check the recorded dependency schedule before any replay is allowed.
+  std::vector<bool> ready(buffers.size(), true);
+  for (const auto &node : nodes)
+    ready[node.output] = false;
+  for (const auto &node : nodes) {
+    for (Id id : node.inputs)
+      if (id != none && !ready.at(id))
+        throw std::runtime_error("Non-topological graph dependency");
+    ready[node.output] = true;
   }
-  Id constant(const Vector &v) {
-    auto it = constants.find(&v);
-    if (it != constants.end())
-      return it->second;
-    Id id = buffers.size();
-    buffers.push_back({v.size(), &v, {}});
-    constants[&v] = id;
-    return id;
-  }
-  const Vector &read(Id id) const {
-    return id == none                ? empty
-           : buffers.at(id).constant ? *buffers[id].constant
-                                     : buffers[id].value;
-  }
-  Id element(Op op, Id x, Id y = none, Id z = none, Id w = none,
-             size_t group = 1, float eps = 0) {
-    Node node;
-    node.layer = recording_layer;
-    node.kind = Kind::Element;
-    node.op = op;
-    node.inputs = {x, y, z, w, none, none, none};
-    node.group = group;
-    node.epsilon = eps;
-    node.output = allocate(buffers.at(x).size);
-    nodes.push_back(node);
-    return node.output;
-  }
-  Id norm(Id x, const Tensor &w, const Tensor &b, size_t group, float eps) {
-    return element(Op::Norm, x, constant(w.data), constant(b.data), none, group,
-                   eps);
-  }
-  Id linear(Id x, const Tensor &w, bool transpose = false) {
-    size_t input = transpose ? w.shape.at(0) : w.shape.at(1),
-           output = transpose ? w.shape.at(1) : w.shape.at(0);
-    if (buffers.at(x).size != input)
-      throw std::runtime_error("Graph projection shape mismatch");
-    Node node;
-    node.layer = recording_layer;
-    node.kind = Kind::Linear;
-    node.inputs[0] = x;
-    node.weight = &w;
-    node.transpose = transpose;
-    node.output = allocate(output);
-    nodes.push_back(node);
-    return node.output;
-  }
-  Id recurrent(Id state, Id r, Id d, Id k, Id v, Id a, Id b) {
-    Node node;
-    node.layer = recording_layer;
-    node.kind = Kind::Recurrent;
-    node.inputs = {state, r, d, k, v, a, b};
-    node.group = weights.head_size();
-    node.output = allocate(weights.channels());
-    nodes.push_back(node);
-    return node.output;
-  }
-  Impl(const Weights &w, RecurrentBackend &b,
-       const std::filesystem::path &resident)
-      : weights(w), backend(b) {
-    const size_t c = w.channels(), n = w.head_size();
-    embedding = allocate(c);
-    Id x = norm(embedding, w.at("blocks.0.ln0.weight"),
-                w.at("blocks.0.ln0.bias"), c, 1e-5f),
-       first_v = none;
-    for (size_t layer = 0; layer < w.layers(); ++layer) {
-      recording_layer = static_cast<int>(layer);
-      std::string prefix = "blocks." + std::to_string(layer) + ".";
-      auto get = [&](const std::string &key) -> const Tensor & {
-        return w.at(prefix + key);
-      };
-      auto coeff = [&](const std::string &key) {
-        return constant(get(key).data);
-      };
-      Id old_att = allocate(c), old_ffn = allocate(c), matrix = allocate(c * n);
-      Id xx = norm(x, get("ln1.weight"), get("ln1.bias"), c, 1e-5f);
-      auto mix = [&](const std::string &name) {
-        return element(Op::Mix, xx, old_att, coeff("att.x_" + name));
-      };
-      Id xr = mix("r"), xw = mix("w"), xk = mix("k"), xv = mix("v"),
-         xa = mix("a"), xg = mix("g");
-      auto rank = [&](Id in, const std::string &name, int activation) {
-        Id z = linear(in, get("att." + name + "1"), true);
-        if (activation == 1)
-          z = element(Op::Tanh, z);
-        if (activation == 2)
-          z = element(Op::Sigmoid, z);
-        return linear(z, get("att." + name + "2"), true);
-      };
-      Id r = linear(xr, get("att.receptance.weight")),
-         k = linear(xk, get("att.key.weight")),
-         v = linear(xv, get("att.value.weight"));
-      Id d = rank(xw, "w", 1), a = rank(xa, "a", 0), g = rank(xg, "g", 2);
-      if (layer == 0)
-        first_v = v;
-      else
-        v = element(Op::ValueResidual, v, first_v, rank(xv, "v", 0),
-                    coeff("att.v0"));
-      Id kk = element(Op::NormalizeKey, k, coeff("att.k_k"), none, none, n);
-      a = element(Op::Sigmoid, a, coeff("att.a0"));
-      Id neg = element(Op::Negate, kk), kb = element(Op::Multiply, kk, a);
-      k = element(Op::KeyScale, k, a, coeff("att.k_a"));
-      d = element(Op::Decay, d, coeff("att.w0"));
-      Id y = recurrent(matrix, r, d, k, v, neg, kb);
-      y = norm(y, get("att.ln_x.weight"), get("att.ln_x.bias"), n, 64e-5f);
-      Id residual = element(Op::Rkv, r, k, coeff("att.r_k"), v, n);
-      y = element(Op::Multiply, element(Op::Add, y, residual), g);
-      x = element(Op::Add, x, linear(y, get("att.output.weight")));
-      Id ff = norm(x, get("ln2.weight"), get("ln2.bias"), c, 1e-5f);
-      Id f = linear(element(Op::Mix, ff, old_ffn, coeff("ffn.x_k")),
-                    get("ffn.key.weight"));
-      f = element(Op::ReluSquared, f);
-      x = element(Op::Add, x, linear(f, get("ffn.value.weight")));
-      states.push_back({old_att, old_ffn, matrix, xx, ff});
-    }
-    recording_layer = -1;
-    logits =
-        linear(norm(x, w.at("ln_out.weight"), w.at("ln_out.bias"), c, 1e-5f),
-               w.at("head.weight"));
-    // Check the recorded dependency schedule before any replay is allowed.
-    std::vector<bool> ready(buffers.size(), true);
-    for (const auto &node : nodes)
-      ready[node.output] = false;
-    for (const auto &node : nodes) {
-      for (Id id : node.inputs)
-        if (id != none && !ready.at(id))
-          throw std::runtime_error("Non-topological graph dependency");
-      ready[node.output] = true;
-    }
-    if (!resident.empty())
-      prepare_resident(resident);
-  }
-  void validate_state(const State &state) const {
-    if (state.layers.size() != states.size())
-      throw std::runtime_error("Invalid state layers");
-    for (const auto &s : state.layers)
-      if (s.attention_shift.size() != weights.channels() ||
-          s.ffn_shift.size() != weights.channels() ||
-          s.matrix.size() != weights.channels() * weights.head_size())
-        throw std::runtime_error("Invalid state dimensions");
-  }
-  void load_state(const State &state) {
-    if (device_buffers.empty() || device_failed)
-      throw std::runtime_error("Resident graph unavailable");
-    validate_state(state);
-    resident_state_valid = false;
-    for (size_t i = 0; i < states.size(); ++i) {
-      const auto &s = states[i];
-      const auto &v = state.layers[i];
-      device_buffers[s.old_attention].upload(v.attention_shift.data(),
-                                             v.attention_shift.size() * 4);
-      device_buffers[s.old_ffn].upload(v.ffn_shift.data(),
-                                       v.ffn_shift.size() * 4);
-      device_buffers[s.matrix].upload(v.matrix.data(), v.matrix.size() * 4);
-    }
-    resident_state_valid = true;
-  }
-  State export_state() const {
-    if (!resident_state_valid || device_failed)
-      throw std::runtime_error("No valid resident state");
-    State out;
-    for (const auto &s : states) {
-      LayerState v{Vector(weights.channels()), Vector(weights.channels()),
-                   Vector(weights.channels() * weights.head_size())};
-      device_buffers[s.old_attention].download(v.attention_shift.data(),
-                                               v.attention_shift.size() * 4);
-      device_buffers[s.old_ffn].download(v.ffn_shift.data(),
-                                         v.ffn_shift.size() * 4);
-      device_buffers[s.matrix].download(v.matrix.data(), v.matrix.size() * 4);
-      out.layers.push_back(std::move(v));
-    }
-    return out;
-  }
-  Vector replay(int token, State &state, bool persistent = false) {
-    if (device_failed)
-      throw std::runtime_error(
-          "Recreate resident graph after a device dispatch failure");
-    const size_t c = weights.channels(), n = weights.head_size();
-    if (token < 0 || size_t(token) >= weights.vocabulary() ||
-        (!persistent && state.layers.size() != states.size()))
-      throw std::runtime_error("Invalid graph token/state");
-    auto bind = [&](Id id, const Vector &v) {
-      if (v.size() != buffers[id].size)
-        throw std::runtime_error("Graph state dimension mismatch");
-      std::copy(v.begin(), v.end(), buffers[id].value.begin());
-    };
-    if (persistent && (!resident_state_valid || device_buffers.empty()))
-      throw std::runtime_error("load_state required before resident replay");
-    if (!persistent)
-      for (size_t i = 0; i < states.size(); ++i) {
-        auto &s = state.layers[i];
-        if (s.attention_shift.size() != c || s.ffn_shift.size() != c ||
-            s.matrix.size() != c * n)
-          throw std::runtime_error("Graph state dimensions mismatch");
-      }
-    const auto &emb = weights.at("emb.weight").data;
-    std::copy_n(emb.data() + size_t(token) * c, c,
-                buffers[embedding].value.data());
-    if (!persistent)
-      for (size_t i = 0; i < states.size(); ++i) {
-        bind(states[i].old_attention, state.layers[i].attention_shift);
-        bind(states[i].old_ffn, state.layers[i].ffn_shift);
-        bind(states[i].matrix, state.layers[i].matrix);
-      }
-    if (!device_buffers.empty()) {
-      const bool profile = std::getenv("RWKV_XDNA_PROFILE") != nullptr;
-      const auto transfer_begin = profile ? std::chrono::steady_clock::now()
-                                          : std::chrono::steady_clock::time_point{};
-      auto upload = [&](Id id) {
-        const auto &v = read(id);
-        device_buffers[id].upload(v.data(), v.size() * 4);
-      };
-      upload(embedding);
-      resident_state_valid = false;
-      if (!persistent)
-        for (const auto &s : states) {
-          upload(s.old_attention);
-          upload(s.old_ffn);
-          upload(s.matrix);
-        }
-      size_t node_index = 0;
-      const auto transfer_end = profile ? std::chrono::steady_clock::now()
-                                        : std::chrono::steady_clock::time_point{};
-      std::map<std::string, std::pair<size_t, double>> timings;
-      std::map<int, std::pair<size_t, double>> layer_timings;
-      double submit_us = 0, wait_us = 0;
-      for (size_t i = 0; i < runs.size(); ++i) {
-        try {
-          const auto start = profile ? std::chrono::steady_clock::now()
-                                     : std::chrono::steady_clock::time_point{};
-          xdna::RunTiming run_timing;
-          runs[i].execute(30000, profile ? &run_timing : nullptr);
-          if (profile) {
-            const size_t owner = std::lower_bound(node_run_ends.begin(),
-                                                  node_run_ends.end(), i + 1) -
-                                 node_run_ends.begin();
-            const auto &n = nodes[owner];
-            submit_us += run_timing.submit_us;
-            wait_us += run_timing.wait_us;
-            const auto ms = std::chrono::duration<double, std::milli>(
-                                std::chrono::steady_clock::now() - start)
-                                .count();
-            std::string category;
-            if (n.kind == Kind::Recurrent)
-              category = "wkv";
-            else if (n.kind == Kind::Linear)
-              category = n.transpose                         ? "rank"
-                         : n.output == logits                ? "head"
-                         : buffers[n.output].size == 8192    ? "ffn_key"
-                         : buffers[n.inputs[0]].size == 8192 ? "ffn_value"
-                                                             : "projection";
-            else
-              category = n.op == Op::Norm ? (n.group == 64 ? "finish" : "norm")
-                         : n.op == Op::NormalizeKey ? "prepare"
-                         : n.op == Op::Mix          ? "mix"
-                                                    : "element";
-            const size_t span = std::upper_bound(node_run_ends.begin(),
-                node_run_ends.end(), i + 1) - node_run_ends.begin() - owner;
-            if (span > 1 && n.kind == Kind::Element && n.op == Op::Norm)
-              category = span == 6 ? "channel_mix" : "norm_mix";
-            else if (span > 1 && n.kind == Kind::Element && n.op == Op::NormalizeKey)
-              category = "recurrence_stage";
-            else if (span > 2 && n.kind == Kind::Linear && !n.transpose &&
-                     buffers[n.output].size == 2048)
-              category = "attention_projections";
-            else if (span == 2 && n.kind == Kind::Linear && !n.transpose)
-              category = "projection_residual";
-            auto &t = timings[category];
-            ++t.first;
-            t.second += ms;
-            auto &layer = layer_timings[n.layer];
-            ++layer.first;
-            layer.second += ms;
-          }
-          while ((trace || projection_trace) && node_index < nodes.size() &&
-                 i + 1 == node_run_ends[node_index]) {
-            const auto &node = nodes[node_index];
-            auto &out = buffers[node.output].value;
-            device_buffers[node.output].download(out.data(), out.size() * 4);
-            Vector *matrix = nullptr;
-            if (node.kind == Kind::Recurrent) {
-              matrix = &buffers[node.inputs[0]].value;
-              device_buffers[node.inputs[0]].download(matrix->data(),
-                                                      matrix->size() * 4);
-            }
-            if (projection_trace && node.kind == Kind::Linear) {
-              Vector input(buffers[node.inputs[0]].size);
-              device_buffers[node.inputs[0]].download(input.data(), input.size() * 4);
-              projection_trace(node_index, input, *node.weight, node.transpose, out);
-            }
-            if (trace)
-              trace(node_index, out, matrix);
-            ++node_index;
-          }
-        } catch (const std::exception &e) {
-          device_failed = true;
-          const size_t failed_node =
-              std::lower_bound(node_run_ends.begin(), node_run_ends.end(),
-                               i + 1) -
-              node_run_ends.begin();
-          throw std::runtime_error(
-              "Resident run " + std::to_string(i) + " node " +
-              std::to_string(failed_node) + " kind " +
-              std::to_string(static_cast<int>(nodes[failed_node].kind)) +
-              " op " + std::to_string(static_cast<int>(nodes[failed_node].op)) +
-              ": " + e.what());
-        }
-      }
-      if (profile)
-        for (const auto &entry : timings)
-          std::cerr << "decode_profile " << entry.first
-                    << " runs=" << entry.second.first
-                    << " ms=" << entry.second.second << '\n';
-      if (profile) {
-        for (const auto &entry : layer_timings)
-          std::cerr << "decode_layer layer=" << entry.first
-                    << " runs=" << entry.second.first
-                    << " ms=" << entry.second.second << '\n';
-        std::cerr << "decode_host submit_us=" << submit_us
-                  << " wait_us=" << wait_us << " upload_us="
-                  << std::chrono::duration<double, std::micro>(transfer_end - transfer_begin).count()
-                  << '\n';
-      }
-      auto download = [&](Id id) {
-        auto &v = buffers[id].value;
-        device_buffers[id].download(v.data(), v.size() * 4);
-      };
-      const auto download_begin = profile ? std::chrono::steady_clock::now()
-                                          : std::chrono::steady_clock::time_point{};
-      download(logits);
-      if (profile)
-        std::cerr << "decode_logits download_us="
-                  << std::chrono::duration<double, std::micro>(
-                         std::chrono::steady_clock::now() - download_begin).count()
-                  << '\n';
-      if (!persistent)
-        for (const auto &s : states) {
-          download(s.new_attention);
-          download(s.new_ffn);
-          download(s.matrix);
-        }
-    } else
-      for (const auto &node : nodes) {
-        const auto &a = node.inputs;
-        Vector result;
-        if (node.kind == Kind::Element)
-          result = backend.element(node.op, read(a[0]), read(a[1]), read(a[2]),
-                                   read(a[3]), node.group, node.epsilon);
-        else if (node.kind == Kind::Linear)
-          result = backend.linear(read(a[0]), *node.weight, node.transpose);
-        else
-          result = backend.step(buffers[a[0]].value, read(a[1]), read(a[2]),
-                                read(a[3]), read(a[4]), read(a[5]), read(a[6]),
-                                node.group);
-        if (result.size() != buffers[node.output].size)
-          throw std::runtime_error("Graph output shape mismatch");
-        std::copy(result.begin(), result.end(),
-                  buffers[node.output].value.begin());
-        if (trace)
-          trace(&node - nodes.data(), read(node.output),
-                node.kind == Kind::Recurrent ? &buffers[a[0]].value : nullptr);
-      }
-    for (float f : read(logits))
-      if (!std::isfinite(f)) {
-        if (!device_buffers.empty())
-          device_failed = true;
-        throw std::runtime_error("Nonfinite graph logits");
-      }
-    if (persistent) {
-      try {
-        for (auto &run : shift_runs)
-          run.execute();
-      } catch (...) {
-        device_failed = true;
-        throw;
-      }
-      resident_state_valid = true;
-      ++replays;
-      return read(logits);
-    }
-    // Commit only after the complete token succeeds. No recorded inputs are
-    // replayed.
-    for (size_t i = 0; i < states.size(); ++i) {
-      state.layers[i].attention_shift = read(states[i].new_attention);
-      state.layers[i].ffn_shift = read(states[i].new_ffn);
-      state.layers[i].matrix = read(states[i].matrix);
-    }
-    ++replays;
-    return read(logits);
-  }
-};
-DecodeGraph::DecodeGraph(const Weights &w, RecurrentBackend &b,
+  if (!resident.empty())
+    prepare_resident(resident);
+}
+DecodeGraph::DecodeGraph(const Weights &w, RecurrentBackend &b)
+    : impl_(std::make_unique<Impl>(w, &b, std::filesystem::path{})) {}
+DecodeGraph::DecodeGraph(const Weights &w,
                          const std::filesystem::path &resident)
-    : impl_(std::make_unique<Impl>(w, b, resident)) {}
+    : impl_(std::make_unique<Impl>(w, nullptr, resident)) {
+  if (resident.empty())
+    throw std::invalid_argument("NPU artifact directory is required");
+}
 DecodeGraph::~DecodeGraph() = default;
 Vector DecodeGraph::replay(int token, State &state) {
   return impl_->replay(token, state);
@@ -1402,7 +174,7 @@ GraphStats DecodeGraph::stats() const {
           impl_->upload_bytes,
           impl_->download_bytes,
           impl_->root_bos,
-          impl_->runs.size() + impl_->shift_runs.size(),
+          impl_->runs.size(),
           impl_->weights.channels() * 4,
           impl_->weights.vocabulary() * 4};
 }

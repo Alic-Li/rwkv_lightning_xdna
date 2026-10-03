@@ -2,14 +2,13 @@
 """R/K/V and W/A/G/(V) in one 14-core BF16 program, 16 shim input streams."""
 
 import json
-import os
 import numpy as np
 from ml_dtypes import bfloat16
 import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import KERNEL_ROOT, typ, external
+from rwkv7_common import KERNEL_ROOT, typ, external
 
 
 def projections(count):
@@ -245,7 +244,7 @@ if __name__ == "__main__":
                     branches=count,
                     rank=256,
                     cores=14,
-                    exact_fp32=os.environ.get("RWKV_XDNA_EXACT", "1") == "1",
+                    exact_fp32=False,
                 )
             )
             + "\n"

@@ -2,12 +2,11 @@
 """Official FP32 LayerNorm feeding resident mix/shift without a host boundary."""
 
 import json
-import os
 import aie.iron as iron
 from aie.iron import In, InOut, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import KERNEL_ROOT, typ, external
+from rwkv7_common import KERNEL_ROOT, typ, external
 
 
 def norm_mix(count):
@@ -89,9 +88,7 @@ def norm_mix(count):
 
 
 if __name__ == "__main__":
-    if os.environ.get("RWKV_XDNA_EXACT", "1") != "0":
-        raise RuntimeError("norm/mix uses the native upstream FP32 arithmetic contract")
-    for count in [1, 6]:
+    for count in [6]:
         path = KERNEL_ROOT / f"fused-norm-mix-{count}"
         path.mkdir(parents=True, exist_ok=True)
         norm_mix(count).compile(path / "design.xclbin", path / "instructions.bin")

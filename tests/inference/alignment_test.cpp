@@ -10,11 +10,10 @@
 #include <omp.h>
 #endif
 using namespace rwkv::inference;
-// Independent CPU oracle for the BF16 main-projection contract. Low-rank
-// projections remain FP32. Double scalar dots do not mirror the AIE tree.
+// Independent CPU oracle for all BF16 projections. Double scalar dots do not
+// mirror the AIE tree.
 class Bf16Reference : public RecurrentBackend {
   std::unique_ptr<RecurrentBackend> cpu = cpu_backend();
-  bool low_rank;
   static float rounded(float x) {
     uint32_t u;
     std::memcpy(&u, &x, 4);
@@ -24,10 +23,7 @@ class Bf16Reference : public RecurrentBackend {
   }
 
 public:
-  explicit Bf16Reference(bool low = false) : low_rank(low) {}
   Vector linear(const Vector &x, const Tensor &w, bool transposed) override {
-    if (transposed && !low_rank)
-      return cpu->linear(x, w, true);
     Vector y(w.shape[transposed ? 1 : 0]), input(x);
     for (auto &f : input)
       f = rounded(f);
@@ -50,25 +46,16 @@ public:
 };
 int main(int argc, char **argv) {
   try {
-    if (argc != 3 && argc != 4)
+    if (argc != 3)
       throw std::runtime_error("weights and kernels required");
 #ifdef _OPENMP
     omp_set_num_threads(8);
 #endif
     Weights w(argv[1]);
-    auto cpu = cpu_backend(), npu = full_npu_backend(argv[2]);
-    if (argc == 4) {
-      if (std::string(argv[3]) != "--bf16" &&
-          std::string(argv[3]) != "--bf16-projections" &&
-          std::string(argv[3]) != "--bf16-all-projections")
-        throw std::runtime_error("unknown option");
-      setenv("RWKV_XDNA_BF16", "1", 1);
-      cpu = std::make_unique<Bf16Reference>(std::string(argv[3]) ==
-                                            "--bf16-all-projections");
-    }
+    auto cpu = std::make_unique<Bf16Reference>();
     Model model(w, *cpu);
-    DecodeGraph reference(w, *cpu), actual(w, *npu, argv[2]);
-    if (argc == 4 && std::string(argv[3]) != "--bf16") {
+    DecodeGraph actual(w, argv[2]);
+    {
       size_t checked = 0;
       double worst = 0;
       actual.set_projection_trace([&](size_t node, const Vector &input,
@@ -95,62 +82,6 @@ int main(int argc, char **argv) {
       std::cout << "BF16 real-input projection oracle passed projections="
                 << checked << " max_abs=" << worst << std::endl;
       return 0;
-    }
-    std::vector<Vector> outputs(reference.stats().nodes),
-        matrices(outputs.size());
-    reference.set_trace([&](size_t i, const Vector &x, const Vector *s) {
-      outputs.at(i) = x;
-      if (s)
-        matrices.at(i) = *s;
-    });
-    double max_abs = 0, max_scaled = 0;
-    auto check = [&](const Vector &x, const Vector &y, size_t node) {
-      if (x.size() != y.size())
-        throw std::runtime_error("shape mismatch");
-      double err = 0, scale = 0, sq = 0, refsq = 0;
-      for (size_t i = 0; i < x.size(); ++i) {
-        if (!std::isfinite(x[i]) || !std::isfinite(y[i]))
-          throw std::runtime_error("nonfinite");
-        err = std::max(err, std::abs(double(x[i]) - y[i]));
-        scale = std::max(scale, std::abs(double(y[i])));
-        sq += std::pow(double(x[i]) - y[i], 2);
-        refsq += double(y[i]) * y[i];
-      }
-      max_abs = std::max(max_abs, err);
-      max_scaled = std::max(max_scaled, err / std::max(1., scale));
-      // FP32 serial CPU reduction vs AIE vector tree: norm-scaled error, plus
-      // L2.
-      if (err > 2e-5 + 2e-4 * scale ||
-          std::sqrt(sq) > 2e-5 * std::sqrt(x.size()) + 2e-4 * std::sqrt(refsq))
-        throw std::runtime_error("alignment node=" + std::to_string(node) +
-                                 " abs=" + std::to_string(err) +
-                                 " scale=" + std::to_string(scale));
-    };
-    actual.set_trace([&](size_t i, const Vector &x, const Vector *s) {
-      check(x, outputs.at(i), i);
-      if (s)
-        check(*s, matrices.at(i), i);
-    });
-    auto a = model.initial_state(), b = a;
-    int token = 1;
-    for (int t = 0; t < 8; ++t) {
-      auto x = reference.replay(token, a), y = actual.replay(token, b);
-      check(y, x, outputs.size());
-      auto greedy = [](const Vector &v) {
-        return std::max_element(v.begin(), v.end()) - v.begin();
-      };
-      if (greedy(x) != greedy(y))
-        throw std::runtime_error("greedy mismatch");
-      for (size_t l = 0; l < a.layers.size(); ++l) {
-        check(b.layers[l].matrix, a.layers[l].matrix, l);
-        check(b.layers[l].attention_shift, a.layers[l].attention_shift, l);
-        check(b.layers[l].ffn_shift, a.layers[l].ffn_shift, l);
-      }
-      token = t < 4 ? std::vector<int>{2, 7, 9, 3}[t] : int(greedy(x));
-      std::cout << "step=" << t << " next_input=" << token
-                << " greedy=" << greedy(x) << " all_nodes=" << outputs.size()
-                << " max_abs=" << max_abs << " max_scaled=" << max_scaled
-                << std::endl;
     }
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

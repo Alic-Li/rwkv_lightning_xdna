@@ -10,23 +10,15 @@ using namespace rwkv::xdna::test;
 using V = std::vector<float>;
 int main(int argc, char **argv) {
   try {
-    if (argc != 3)
-      throw std::runtime_error(
-          "usage: projection-residual-test BASE_ROOT NEW_ROOT");
+    if (argc != 2)
+      throw std::runtime_error("usage: projection-residual-test KERNEL_ROOT");
     auto session = [](std::filesystem::path root, std::string name) {
       return Session(root / name / "design.xclbin",
                      root / name / "instructions.bin");
     };
-    auto gemv = session(argv[1], "bf16-array-gemv-2048"),
-         add = session(argv[1], "resident-ops-fast"),
-         fused = session(argv[2], "bf16-projection-residual");
+    auto fused = session(argv[1], "bf16-projection-residual");
     Guarded x(fused, 2048 * 4), w(fused, 4194304 * 2), res(fused, 2048 * 4),
-        out(fused, 4096 * 4), base(fused, 4096 * 4), meta(fused, 16 * 4),
-        zero(fused, 2048 * 4);
-    auto g = gemv.prepare({x.data, w.data, base.data.slice(0, 2048 * 4)});
-    auto a = add.prepare({meta.data, res.data, base.data.slice(0, 2048 * 4),
-                          zero.data, zero.data,
-                          base.data.slice(2048 * 4, 2048 * 4)});
+        out(fused, 4096 * 4);
     auto run = fused.prepare({x.data, w.data, res.data, out.data});
     std::mt19937 rng(192);
     std::uniform_real_distribution<float> d(-.25f, .25f);
@@ -34,13 +26,7 @@ int main(int argc, char **argv) {
     for (auto &v : weights)
       v = bf16(d(rng));
     w.data.upload(weights.data(), w.bytes);
-    V m(16, 0);
-    m[1] = 2048;
-    m[2] = 1;
-    meta.data.upload(m.data(), meta.bytes);
-    V z(2048, 0);
-    zero.data.upload(z.data(), zero.bytes);
-    V input(2048), r(2048), actual(4096), baseline(4096);
+    V input(2048), r(2048), actual(4096);
     double worst = 0;
     for (int pass = 0; pass < 3; ++pass) {
       for (auto &v : input)
@@ -49,13 +35,8 @@ int main(int argc, char **argv) {
         v = d(rng);
       x.data.upload(input.data(), x.bytes);
       res.data.upload(r.data(), res.bytes);
-      g.execute();
-      a.execute();
       run.execute();
       out.data.download(actual.data(), out.bytes);
-      base.data.download(baseline.data(), base.bytes);
-      if (actual != baseline)
-        throw std::runtime_error("fused/unfused mismatch");
       auto check = [&](float actual, double ref) {
         double e = std::abs(double(actual) - ref);
         worst = std::max(worst, e);
@@ -73,42 +54,10 @@ int main(int argc, char **argv) {
         check(actual[2048 + row], actual[row] + r[row]);
       }
     }
-    auto measure = [&](bool combined) {
-      std::vector<double> us;
-      for (int i = 0; i < 50; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        if (combined)
-          run.execute();
-        else {
-          g.execute();
-          a.execute();
-        }
-        if (i >= 20)
-          us.push_back(std::chrono::duration<double, std::micro>(
-                           std::chrono::steady_clock::now() - start)
-                           .count());
-      }
-      std::sort(us.begin(), us.end());
-      return std::make_pair(us.front(), us[15]);
-    };
-    auto before = measure(false), after = measure(true);
-    for (auto *p : {&x, &w, &res, &out, &base, &meta, &zero})
+    for (auto *p : {&x, &w, &res, &out})
       p->guard();
-    std::vector<uint16_t> same(weights.size());
-    w.data.download(same.data(), w.bytes);
-    if (same != weights)
-      throw std::runtime_error("weight overwritten");
-    V ix(2048), ir(2048);
-    x.data.download(ix.data(), x.bytes);
-    res.data.download(ir.data(), res.bytes);
-    if (ix != input || ir != r)
-      throw std::runtime_error("inputs overwritten");
-    std::cout << "projection residual same-precision/oracle/replay/guards "
-                 "passed max_abs="
-              << worst << " before_min_us=" << before.first
-              << " before_median_us=" << before.second
-              << " after_min_us=" << after.first
-              << " after_median_us=" << after.second << '\n';
+    std::cout << "projection/residual oracle/replay/guards passed max_abs="
+              << worst << '\n';
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
     return 1;

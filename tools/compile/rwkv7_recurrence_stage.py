@@ -2,12 +2,11 @@
 """Fuse preparation, FP32 recurrent update and finishing in one dispatch."""
 
 import json
-import os
 import aie.iron as iron
 from aie.iron import InOut, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import KERNEL_ROOT, typ, external
+from rwkv7_common import KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -107,7 +106,7 @@ if __name__ == "__main__":
                 channels=2048,
                 head_size=64,
                 arena_vectors=27,
-                exact_fp32=os.environ.get("RWKV_XDNA_EXACT", "1") == "1",
+                exact_fp32=False,
             )
         )
         + "\n"

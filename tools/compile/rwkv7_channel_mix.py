@@ -2,14 +2,13 @@
 """Native LayerNorm/shift/mix plus BF16 FFN with on-chip intermediates."""
 
 import json
-import os
 import numpy as np
 from ml_dtypes import bfloat16
 import aie.iron as iron
 from aie.iron import In, InOut, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import KERNEL_ROOT, typ, external
+from rwkv7_common import KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -196,8 +195,6 @@ def design(x: In, parameters: In, weights: In, diagnostic: InOut, result: Out):
 
 
 if __name__ == "__main__":
-    if os.environ.get("RWKV_XDNA_EXACT", "1") != "0":
-        raise RuntimeError("ChannelMix uses native upstream LayerNorm")
     path = KERNEL_ROOT / "bf16-channel-mix"
     path.mkdir(parents=True, exist_ok=True)
     design.compile(path / "design.xclbin", path / "instructions.bin")
@@ -210,7 +207,7 @@ if __name__ == "__main__":
                 hidden=8192,
                 key_cores=4,
                 value_cores=4,
-                exact_fp32=os.environ.get("RWKV_XDNA_EXACT", "1") == "1",
+                exact_fp32=False,
             )
         )
         + "\n"

@@ -318,6 +318,6 @@ ctest --preset dev
 
 外部文档链接按本次查阅补充；涉及本机特定行为的结论以实际日志和验证报告为依据。
 
-RWKV 模型的严格 FP32 融合 decode 编译、状态常驻接口与实测结果见
+RWKV 模型的 BF16 投影 / FP32 recurrence decode 编译、状态常驻接口与实测结果见
 [inference.md](inference.md)。使用 `tools/compile/rwkv7_optimized.py` 编译当前模型路径；
 上面296个通用算子配置的历史验证不代表新增融合图已经自动验收。

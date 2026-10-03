@@ -53,9 +53,6 @@ enum class Op {
 class RecurrentBackend {
 public:
   virtual ~RecurrentBackend() = default;
-  // Release idle device contexts before switching from prefill to resident
-  // decode.
-  virtual void release_device_cache() {}
   virtual std::vector<Vector>
   prefill(Vector &state, const std::vector<Vector> &r,
           const std::vector<Vector> &decay, const std::vector<Vector> &k,
@@ -74,10 +71,6 @@ public:
                       const Vector &b, size_t head_size) = 0;
 };
 std::unique_ptr<RecurrentBackend> cpu_backend();
-std::unique_ptr<RecurrentBackend>
-npu_backend(const std::filesystem::path &artifacts);
-std::unique_ptr<RecurrentBackend>
-full_npu_backend(const std::filesystem::path &artifacts);
 class Model {
 public:
   Model(const Weights &weights, RecurrentBackend &backend)

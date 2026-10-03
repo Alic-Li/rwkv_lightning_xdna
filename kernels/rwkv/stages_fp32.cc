@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#ifndef RWKV_EXACT_FP32
-#define RWKV_FAST_EXP
-#endif
-#include "ops_fp32.cc"
+#include "math_fp32.hpp"
 // Per-head fused preparation, [k,a,d,k_k,k_a,a0,w0,pad].
 extern "C" void rwkv7_prepare_head(const float *p, float *out) {
   double ss = 0;

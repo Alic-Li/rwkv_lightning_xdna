@@ -63,35 +63,23 @@ static void reference(V &state, V &aux) {
 }
 int main(int argc, char **argv) {
   try {
-    if (argc != 3)
-      throw std::runtime_error(
-          "usage: recurrence-stage-test BASE_ROOT NEW_ROOT");
+    if (argc != 2)
+      throw std::runtime_error("usage: recurrence-stage-test KERNEL_ROOT");
     auto session = [](std::filesystem::path root, const char *name) {
       return Session(root / name / "design.xclbin",
                      root / name / "instructions.bin");
     };
-    auto pre = session(argv[1], "fused-prepare"),
-         wkv = session(argv[1], "array-decode"),
-         post = session(argv[1], "fused-finish"),
-         fused = session(argv[2], "fused-recurrence-stage");
-    Guarded bs(pre, 131072 * 4), ba(pre, 55296 * 4), fs(fused, 131072 * 4),
-        fa(fused, 55296 * 4);
-    auto part = [&](size_t v, size_t n) {
-      return ba.data.slice(v * 2048 * 4, n * 2048 * 4);
-    };
-    auto rpre = pre.prepare({part(0, 8), part(13, 6), part(19, 2)});
-    auto rwkv = wkv.prepare({bs.data, part(13, 6), part(8, 1)});
-    auto rpost = post.prepare({part(8, 5), part(13, 6), part(21, 6)});
+    auto fused = session(argv[1], "fused-recurrence-stage");
+    Guarded fs(fused, 131072 * 4), fa(fused, 55296 * 4);
     auto run = fused.prepare({fs.data, fa.data});
     V state(131072), aux(55296), ref, expected, actual_s(state.size()),
-        actual_a(aux.size()), base_s(state.size()), base_a(aux.size());
+        actual_a(aux.size());
     std::mt19937 rng(20261003);
     std::uniform_real_distribution<float> d(-.125f, .125f);
     for (auto &f : state)
       f = d(rng);
     for (auto &f : aux)
       f = d(rng);
-    bs.data.upload(state.data(), bs.bytes);
     fs.data.upload(state.data(), fs.bytes);
     double worst = 0;
     for (int pass = 0; pass < 3; ++pass) {
@@ -101,18 +89,10 @@ int main(int argc, char **argv) {
       expected = aux;
       ref = state;
       reference(ref, expected);
-      ba.data.upload(aux.data(), ba.bytes);
       fa.data.upload(aux.data(), fa.bytes);
-      rpre.execute();
-      rwkv.execute();
-      rpost.execute();
       run.execute();
-      bs.data.download(base_s.data(), bs.bytes);
-      ba.data.download(base_a.data(), ba.bytes);
       fs.data.download(actual_s.data(), fs.bytes);
       fa.data.download(actual_a.data(), fa.bytes);
-      if (base_s != actual_s || base_a != actual_a)
-        throw std::runtime_error("fused/unfused mismatch");
       auto check = [&](const V &a, const V &b) {
         for (size_t i = 0; i < a.size(); ++i) {
           double e = std::abs(double(a[i]) - b[i]);
@@ -128,36 +108,10 @@ int main(int argc, char **argv) {
       state = actual_s;
       aux = actual_a;
     }
-    auto measure = [&](bool combined) {
-      std::vector<double> us;
-      for (int i = 0; i < 50; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        if (combined)
-          run.execute();
-        else {
-          rpre.execute();
-          rwkv.execute();
-          rpost.execute();
-        }
-        if (i >= 20)
-          us.push_back(std::chrono::duration<double, std::micro>(
-                           std::chrono::steady_clock::now() - start)
-                           .count());
-      }
-      std::sort(us.begin(), us.end());
-      return std::make_pair(us.front(), us[15]);
-    };
-    auto before = measure(false), after = measure(true);
-    bs.guard();
-    ba.guard();
     fs.guard();
     fa.guard();
-    std::cout << "recurrence stage exact same-precision/oracle/replay/guards "
-                 "passed max_abs="
-              << worst << " before_min_us=" << before.first
-              << " before_median_us=" << before.second
-              << " after_min_us=" << after.first
-              << " after_median_us=" << after.second << '\n';
+    std::cout << "recurrence oracle/replay/guards passed max_abs=" << worst
+              << '\n';
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
     return 1;

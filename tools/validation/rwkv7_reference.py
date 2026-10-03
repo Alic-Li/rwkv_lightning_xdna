@@ -150,7 +150,6 @@ def safetensors(path, weights):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--npu", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(2)
     out = ROOT / "build/tests/rwkv7"
@@ -175,7 +174,7 @@ def main():
     fixtures.append((safe, weights))
     for path, ws in fixtures:
         expected = oracle(ws, tokens)
-        for backend in (["cpu", "npu"] if args.npu else ["cpu"]):
+        for backend in ["cpu"]:
             dump = out / (path.name + "." + backend + ".bin")
             cmd = [
                 str(ROOT / "build/host/rwkv-cli"),

@@ -2,11 +2,10 @@
 """Eight-way value residual, retaining the selected scalar arithmetic contract."""
 
 import json
-import os
 import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_full import ROOT, KERNEL_ROOT, typ, external
+from rwkv7_common import ROOT, KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -65,7 +64,7 @@ if __name__ == "__main__":
                 schema_version=1,
                 dtype="float32",
                 channels=2048,
-                exact_fp32=os.environ.get("RWKV_XDNA_EXACT", "1") == "1",
+                exact_fp32=False,
             )
         )
         + "\n"

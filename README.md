@@ -2,7 +2,7 @@
 
 面向 Ryzen AI NPU 的 C++ 开发仓库。当前阶段已完成运行库基础、官方 C++
 内核导入和实机验证，并提供 RWKV-7 C++ CLI 推理基线。默认除 embedding、tokenizer、sampler 外全部模型计算在 NPU 执行，
-提供独立 prefill kernel、代码内 decode graph 和中间数据常驻 BO 的 `--decode resident`；支持直接加载 PTH 和 safetensors。
+默认使用 BF16 resident decode，WKV/state 与必要累加保持 FP32；prefill 复用逐 token decode。支持直接加载 PTH 和 safetensors。
 
 模型运行、工程结构和验证方法见 [RWKV-7 推理说明](docs/inference.md)。
 
@@ -21,7 +21,7 @@ render 权限、memlock 锁页限制、驱动兼容设置、uv 环境、单算�
 include/rwkv/xdna/        C++ 公共 API
 src/runtime/             XRT 会话、设备缓冲区及同步调用
 apps/xdna_run.cpp        独立 C++ 测试执行器，无 Python 运行依赖
-kernels/rwkv/            RWKV-7 decode/prefill/GEMV/归一化/门控内核
+kernels/rwkv/            RWKV-7 BF16 投影与 FP32 recurrence/归一化内核
 third_party/mlir-aie/    复制的完整官方内核与 LUT/运行时辅助源码
 third_party/kernel_tests/ 同版本官方测试配置和级联设计
 third_party/nlohmann/    固定版本 JSON 单头文件及许可证
@@ -113,7 +113,7 @@ cmake --build build/package-test
 - 测试采用上游数值容差，不能通过放宽容差或删掉失败配置伪造通过。
 - 新的设计编译脚本和原始数据布局必须一起维护，避免主机/设备 ABI 不一致。
 - 不提交 `.venv/`、编译产物、测试输入输出或模型权重。
-- RWKV-7 以 FP32 正确性为基线；decode graph 仍逐节点提交原生 run。`--decode resident` 已保留中间激活和投影权重于 NPU 可访问 BO，状态在 token 边界同步，尚未实现整图单次提交。
+- RWKV-7 生产路径为 BF16 投影、FP32 累加和 recurrence，146 runs/token；状态跨 token 常驻设备，CPU FP32 仅作显式参考。历史 NPU 纯 FP32 推理和实验选择分支已删除。
 
 许可证：本项目基础代码为 Apache-2.0；第三方代码保留各自许可证，见
 [第三方说明](third_party/README.md)。

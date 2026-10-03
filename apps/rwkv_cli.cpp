@@ -18,11 +18,11 @@
 namespace {
 void usage() {
   std::cout
-      << "RWKV-7 FP32 reference CLI (C++ runtime)\n"
+      << "RWKV-7 BF16 NPU / FP32 CPU reference CLI (C++ runtime)\n"
          "  rwkv-cli --model MODEL.pth --prompt TEXT [options]\n"
-         "  --backend npu|hybrid|cpu       default npu: all model arithmetic "
+         "  --backend npu|cpu       default npu: all model arithmetic "
          "on NPU\n"
-         "  --kernel-dir DIR        default build/kernels/rwkv7-full\n"
+         "  --kernel-dir DIR        default build/kernels/rwkv7-bf16\n"
          "  --vocab FILE            default assets/rwkv_vocab_v20230424.txt\n"
          "  --prompt-file FILE      UTF-8 prompt file, exclusive with "
          "--prompt\n"
@@ -34,9 +34,11 @@ void usage() {
          "  --presence-penalty F    default 0\n"
          "  --frequency-penalty F   default 0\n"
          "  --penalty-decay F       [0,1], default 0.996\n"
-         "  --decode graph|resident|eager  default graph; resident keeps "
+         "  --decode graph|resident|eager  default resident on NPU, graph on "
+         "CPU; resident keeps "
          "intermediates in NPU BOs\n"
-         "  --prefill sequence|decode  sequence kernel or decode reference\n"
+         "  --prefill sequence|decode  default decode; sequence available on "
+         "CPU\n"
          "  --threads N             CPU threads, default 8\n"
          "  --tokens 1,2,3 --dump-logits FILE  diagnostic: dump FP32 logits "
          "after every input token\n";
@@ -61,7 +63,7 @@ int main(int argc, char **argv) {
   try {
     std::map<std::string, std::string> opts{
         {"--backend", "npu"},
-        {"--kernel-dir", "build/kernels/rwkv7-full"},
+        {"--kernel-dir", "build/kernels/rwkv7-bf16"},
         {"--vocab", "assets/rwkv_vocab_v20230424.txt"},
         {"--max-tokens", "128"},
         {"--temperature", "1"},
@@ -72,8 +74,8 @@ int main(int argc, char **argv) {
         {"--frequency-penalty", "0"},
         {"--penalty-decay", "0.996"},
         {"--threads", "8"},
-        {"--prefill", "sequence"},
-        {"--decode", "graph"},
+        {"--prefill", "decode"},
+        {"--decode", "resident"},
         {"--model", ""},
         {"--prompt", ""},
         {"--prompt-file", ""},
@@ -114,9 +116,8 @@ int main(int argc, char **argv) {
         temperature > 5 || topp < 0 || topp > 1 || presence < 0 ||
         frequency < 0 || decay < 0 || decay > 1)
       throw std::runtime_error("Sampling/generation option out of range");
-    if (opts["--backend"] != "cpu" && opts["--backend"] != "npu" &&
-        opts["--backend"] != "hybrid")
-      throw std::runtime_error("--backend must be cpu, hybrid or npu");
+    if (opts["--backend"] != "cpu" && opts["--backend"] != "npu")
+      throw std::runtime_error("--backend must be cpu or npu");
 #ifdef _OPENMP
     omp_set_num_threads(int(threads));
 #endif
@@ -160,16 +161,18 @@ int main(int argc, char **argv) {
               << " heads; backend=" << opts["--backend"]
               << (opts["--backend"] == "npu"
                       ? " (all model arithmetic on NPU; CPU embedding/sampling)"
-                  : opts["--backend"] == "hybrid"
-                      ? " (WKV on NPU, other ops on CPU)"
                       : " (all CPU)")
               << '\n';
-    auto backend =
-        opts["--backend"] == "cpu" ? rwkv::inference::cpu_backend()
-        : opts["--backend"] == "hybrid"
-            ? rwkv::inference::npu_backend(
-                  std::filesystem::path(opts["--kernel-dir"]) / "decode")
-            : rwkv::inference::full_npu_backend(opts["--kernel-dir"]);
+    // The CPU backend is used only for the explicit CPU reference and state
+    // creation. NPU graph construction has no arithmetic backend to fall back
+    // to.
+    auto backend = rwkv::inference::cpu_backend();
+    if (opts["--backend"] == "cpu" && !seen["--decode"])
+      opts["--decode"] = "graph";
+    if (opts["--backend"] == "npu" &&
+        (opts["--decode"] != "resident" || opts["--prefill"] != "decode"))
+      throw std::runtime_error(
+          "NPU inference requires --decode resident --prefill decode");
     rwkv::inference::Model model(weights, *backend);
     auto state = model.initial_state();
     if (opts["--decode"] != "graph" && opts["--decode"] != "resident" &&
@@ -183,14 +186,14 @@ int main(int argc, char **argv) {
       if (graph || opts["--decode"] == "eager")
         return;
       const auto graph_start = std::chrono::steady_clock::now();
-      backend->release_device_cache();
       if (opts["--decode"] == "resident" && opts["--backend"] != "npu")
         throw std::runtime_error("resident decode requires --backend npu");
-      graph = std::make_unique<rwkv::inference::DecodeGraph>(
-          weights, *backend,
-          opts["--decode"] == "resident"
-              ? std::filesystem::path(opts["--kernel-dir"])
-              : std::filesystem::path{});
+      if (opts["--backend"] == "npu")
+        graph = std::make_unique<rwkv::inference::DecodeGraph>(
+            weights, opts["--kernel-dir"]);
+      else
+        graph =
+            std::make_unique<rwkv::inference::DecodeGraph>(weights, *backend);
       graph_setup_seconds += std::chrono::duration<double>(
                                  std::chrono::steady_clock::now() - graph_start)
                                  .count();

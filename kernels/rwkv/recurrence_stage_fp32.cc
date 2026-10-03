@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "stages_fp32.cc"
-#ifdef RWKV_EXACT_FP32
-#include "wkv7_fp32.cc"
-#else
 #include "wkv7_vector_fp32.cc"
-#endif
 
 // One head of a shared 27-vector arena: prepare inputs [0,8), finish
 // inputs [8,13), recurrent vectors [13,19), prepare outputs [19,21),

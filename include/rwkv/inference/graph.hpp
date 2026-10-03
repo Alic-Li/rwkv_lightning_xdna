@@ -21,8 +21,10 @@ struct GraphStats {
 // Weights/backend must outlive the graph. One graph instance is serial-only.
 class DecodeGraph {
 public:
-  DecodeGraph(const Weights &, RecurrentBackend &,
-              const std::filesystem::path &resident_artifacts = {});
+  // Explicit host reference graph.
+  DecodeGraph(const Weights &, RecurrentBackend &);
+  // Production BF16 NPU graph; no host arithmetic backend or fallback.
+  DecodeGraph(const Weights &, const std::filesystem::path &resident_artifacts);
   ~DecodeGraph();
   DecodeGraph(const DecodeGraph &) = delete;
   DecodeGraph &operator=(const DecodeGraph &) = delete;
@@ -34,8 +36,8 @@ public:
   // Diagnostic projection oracle hook. Reads device inputs and outputs;
   // never enable it for performance measurements. Includes the preserved
   // intermediate tensors of fused low-rank projections.
-  using ProjectionTrace = std::function<void(size_t, const Vector &,
-                                             const Tensor &, bool, const Vector &)>;
+  using ProjectionTrace = std::function<void(
+      size_t, const Vector &, const Tensor &, bool, const Vector &)>;
   void set_projection_trace(ProjectionTrace trace);
   // Explicit device-owned request state. load once after prefill/reset, export
   // only for checkpoint/branch. No implicit pointer-identity state cache.

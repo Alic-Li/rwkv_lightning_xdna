@@ -1,16 +1,19 @@
-# RWKV AIE C++ kernels
+# RWKV-7 production kernels
 
-| Source | Operation |
+The supported pipeline uses BF16 matrix weights/inputs and FP32 accumulation,
+recurrence, normalization outputs and residuals. Compile offline with
+`.venv/bin/python tools/compile/rwkv7_optimized.py`; C++ alone dispatches the NPU.
+
+| Source | Responsibility |
 |---|---|
-| `wkv7_fp32.cc` | Decode: one 64×64 `[key,value]` state transition and readout |
-| `wkv7_prefill_fp32.cc` | Prefill: up to 16 transitions, padding preserves state |
-| `gemv_fp32.cc` | FP32 projection tiles, all partial-sum arithmetic on NPU |
-| `ops_fp32.cc` | Norm, mix, gates, activations, key normalization, residuals |
+| `attention_projections_bf16.cc`, `rank_bf16.cc`, `gemv_bf16.cc` | Combined R/K/V and low-rank projections; pinned upstream BF16 MAC |
+| `channel_mix_bf16.cc`, `ffn_pipeline_bf16.cc` | FFN key/ReLU²/value/residual and output projection helpers |
+| `head_bf16.cc` | Full vocabulary projection |
+| `norm_fp32.cc`, `norm_mix_fp32.cc`, `mix_fp32.cc`, `mix_pair_fp32.cc` | Upstream LayerNorm and shift/mix |
+| `recurrence_stage_fp32.cc`, `stages_fp32.cc`, `wkv7_vector_fp32.cc` | Prepare/WKV/finish with FP32 persistent state |
+| `value_fp32.cc` | First-value residual |
+| `math_fp32.hpp` | Shared native exp/tanh/sigmoid and preserved double square-root helper |
 
-Build the complete runtime artifact bundle with
-`.venv/bin/python tools/compile/rwkv7_full.py` from the repository root.
-For resident decode, also compile `.venv/bin/python tools/compile/rwkv7_resident.py`.
-This adds DMA joins/strided gathers/splits around the same FP32 C++ kernels.
-C++ calls XRT at runtime; Python only compiles and computes offline references.
-See [inference.md](../../docs/inference.md) for layout, numerical methods,
-constraints, graph/prefill separation and tests.
+No standalone FP32 GEMV, FP32 rank, scalar WKV experiment, or sequence-prefill
+program remains. FP32 names on the retained recurrence and arithmetic helpers
+are intentional. Upstream files and numerical tolerances remain unchanged.

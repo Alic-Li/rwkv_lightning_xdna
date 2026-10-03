@@ -5,24 +5,18 @@
 细节及使用方法见 [inference.md](inference.md)。
 
 当前使用已验证的 `xrt::run` 复用。它复用对象和参数绑定，但仍逐个提交 run，
-不是整个 decode 的单次硬件图提交。默认 `--decode graph` 的中间结果仍有主机传输；
-`--decode resident` 使用固定 arena、权重预排布、阶段融合和阵列并行。
-通过 `load_state / replay_resident / export_state`，状态可跨 token 留在设备 BO 中，
-稳态只传 embedding/logits；兼容 `replay(token, State&)` 仍同步完整状态。
-本轮严格 FP32 版本为488 runs/token、约1.015秒/token，四步最终 logits/全部状态
-相对原逐节点 NPU 最大误差0。它还不是一层一次或整图一次提交。
-条件、编译命令和限制见 [inference.md](inference.md)。
+不是整个 decode 的单次硬件图提交。默认 NPU resident 路径使用 BF16 权重、固定 arena、
+阶段融合和阵列并行。通过 `load_state / replay_resident / export_state`，FP32 状态跨
+ token 留在设备 BO，稳态只传 embedding/logits；兼容 `replay(token, State&)` 同步完整状态。
+当前24层模型为146 runs/token，约236 ms/token。生产实现及验证见 [inference.md](inference.md)。
 
-此实现参考 FastFlowLM 的 BO、run 和 DMA 工具接口，仍使用本项目 RWKV FP32 kernel。
-没有启用原生 runlist，也没有修改驱动参数；以下 runlist/capture 结果为此前的历史探针记录，
-不应理解为本轮重新测试或对所有硬件版本的判断。
+以下是历史 runlist/capture 探针记录，不代表当前接口或本轮重新测试。
 
 ## 本机实验记录（2026-10-02，XRT 2.25）
 
 - 普通 run 重复执行并改变输入：通过数值检查。
 - 两条 run 组成的原生 runlist，期望复用两次并改变输入：第一次执行返回
-  `ERT_CMD_STATE_ABORT`。探针源码在 `tools/probes/xrt_runlist.cpp`，不纳入默认自动测试，
-  也未在推理中启用失败路径。
+  `ERT_CMD_STATE_ABORT`。历史探针源码已随实验清理删除；推理没有启用该路径。
 - `xrt-capture --frames 2` 包装已验证的 C++ WKV 测试：应用数值检查通过，
   产生 `capture_*.bin`，但工具报告没有 `replay.json`。
 - 使用已知 WKV ABI 手动构建 replay 描述后，工具报告指令参数 bank 连接不匹配，

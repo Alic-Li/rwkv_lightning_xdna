@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "gemv_bf16.cc"
-#ifndef RWKV_EXACT_FP32
-#define RWKV_FAST_EXP
-#endif
-#include "ops_fp32.cc"
+#include "math_fp32.hpp"
 extern "C" void rwkv7_rank_zero64(float *out) {
   for (int i = 0; i < 64; ++i)
     out[i] = 0;

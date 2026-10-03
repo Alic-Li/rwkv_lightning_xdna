@@ -8,7 +8,7 @@
 using namespace rwkv::inference;
 int main(int argc, char **argv) {
   try {
-    auto backend = argc > 1 ? npu_backend(argv[1]) : cpu_backend();
+    auto backend = cpu_backend();
     constexpr size_t n = 64, heads = 2, c = n * heads;
     std::mt19937 rng(928);
     std::uniform_real_distribution<float> dist(-0.15f, 0.15f);
