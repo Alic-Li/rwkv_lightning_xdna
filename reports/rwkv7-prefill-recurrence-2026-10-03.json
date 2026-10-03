@@ -1,0 +1,159 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "0b28961",
+  "decision": "Accepted: bitwise causal recurrence preserved, modest prefill gains in both measured precisions, fewer submissions and scheduled state transfers. Default sequential decode kernels unchanged.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "design": [
+    "Prepare both tokens for each head, multicast prepared data to state-update and finish workers.",
+    "Keep FP32 state on the update core between two temporally ordered calls to the existing vector WKV function. The second update aliases input/output state; preserve token-0 y separately.",
+    "Write final state plus both y vectors through a compact intermediate; finish both tokens with existing normalization and residual math.",
+    "The fused-value variant gathers first-layer value vectors at a 55296-float stride. No CPU arithmetic or copies added."
+  ],
+  "compilation": [
+    "Short FIFO names initially failed pool segment drainer resolution; descriptive unique names compile.",
+    "Fused-value preparation exceeded program memory by 96\u2013160 bytes with a two-iteration wrapper loop; noinline did not resolve it.",
+    "Two explicit calls to the same value-prepare function fit program memory without changing arithmetic."
+  ],
+  "state_dma_descriptor_payload": {
+    "baseline_bytes_per_layer_pair": 2097152,
+    "candidate_bytes_per_layer_pair": 1048576,
+    "saved_bytes_24_layers_32_tokens": 402653184,
+    "scope": "Scheduled state payload derived from DMA descriptors, not measured bandwidth or total internal traffic. Auxiliary payload and host payload unchanged."
+  },
+  "stage": {
+    "validation": "Regular and fused-value variants pass full state/arena bitwise comparison against two decode runs, FP64 state/y oracle using baseline-prepared vectors, reset/replay, input immutability and allocation guards.",
+    "fp64_max_abs": [
+      6.6883e-08,
+      7.39556e-08
+    ],
+    "samples_per_run": 200,
+    "order": "A/B/B/A",
+    "regular_single_pair_us": [
+      1436.78,
+      1449.25
+    ],
+    "regular_batch_us": [
+      1370.2,
+      1346.24
+    ],
+    "value_single_pair_us": [
+      1874.34,
+      1875.82
+    ],
+    "value_batch_us": [
+      1645.46,
+      1643.64
+    ]
+  },
+  "whole_model_protocol": {
+    "order": "A/B/B/A per precision, serial NPU dispatch with profiling disabled",
+    "prompt_tokens": 32,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2
+  },
+  "performance": {
+    "bf16": {
+      "baseline": {
+        "prefill_seconds": 3.64674662375,
+        "decode_ms": 203.83261915625002,
+        "prefill_runs": 2722,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2947313664,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.5961073365000003,
+        "decode_ms": 204.04347880208337,
+        "prefill_runs": 2338,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2947313664,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 1.3886154557655184,
+      "decode_change_percent": 0.10344744953294516
+    },
+    "int8-ffn-output": {
+      "baseline": {
+        "prefill_seconds": 3.46253940525,
+        "decode_ms": 186.09894320833337,
+        "prefill_runs": 2722,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2055499776,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.410564653,
+        "decode_ms": 186.41285620833332,
+        "prefill_runs": 2338,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2055499776,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 1.5010587943402043,
+      "decode_change_percent": 0.16868069994817603
+    }
+  },
+  "correctness": {
+    "bf16": {
+      "mode": "verify",
+      "prefill_pair_runs": 148,
+      "prefill_runs": 5791,
+      "resident_bytes": 2947313664,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "bf16"
+    },
+    "int8-ffn": {
+      "mode": "verify",
+      "prefill_pair_runs": 148,
+      "prefill_runs": 5791,
+      "resident_bytes": 2154590208,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn"
+    },
+    "int8-ffn-output": {
+      "mode": "verify",
+      "prefill_pair_runs": 148,
+      "prefill_runs": 5791,
+      "resident_bytes": 2055499776,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn_output"
+    }
+  },
+  "profile": {
+    "precision": "bf16",
+    "prompt_tokens": 32,
+    "initial_state": "zero",
+    "host_stage_ms_per_token": {
+      "norm": 0.16377128124999998,
+      "norm_mix": 5.560180312499999,
+      "attention_projections": 23.678071000000006,
+      "recurrence": 36.257932843750005,
+      "projection_residual": 13.955232875,
+      "channel_mix": 32.66411784375,
+      "head": 0.22993578125
+    },
+    "scope": "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output.",
+    "next_action": "Recurrence and channel mix remain the largest host stage times. Investigate recurrence/output fusion to reduce program boundaries; these host timings alone do not establish switch cost, DMA bandwidth or compute utilization."
+  },
+  "host_tests": "Release/test builds and 3/3 CTest passed.",
+  "limitations": [
+    "Decode measured means increase about 0.10% BF16 and 0.17% INT8 FFN+output with batched prefill enabled; no decode speedup claim.",
+    "Whole-model gain is smaller than isolated-stage gain.",
+    "Hardware limits for the whole model remain unproven."
+  ],
+  "logs": "reports/runs/prefill-recurrence-2026-10-03"
+}

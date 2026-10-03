@@ -56,6 +56,11 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
   if (capture_prefill) {
+    for (bool value : {false, true})
+      check_artifact(root, value ? "prefill-value-recurrence-b2" : "prefill-recurrence-b2",
+          {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"head_size", 64},
+           {"arena_vectors", value ? 30 : 27}, {"fused_value", value}, {"dtype", "float32"},
+           {"lanes", value ? 7 : 8}, {"first_stride", value ? 55296 : 0}});
     const bool int8_output = weight_mode == WeightMode::Int8FFNOutput;
     for (int stride : {55296, 61440}) {
       const auto name = std::string(int8_output ? "int8" : "bf16") +

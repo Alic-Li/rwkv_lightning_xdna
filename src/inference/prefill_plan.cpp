@@ -112,6 +112,13 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
         auto &attention = session(root, "bf16-attention-projections-" + std::to_string(branches) + "-b2");
         prefill_body.push_back({attention.prepare({paired_view(args[0]), args[1],
             paired_view(args[2]), paired_view(args[3]), paired_view(args[4])}), Stage::Attention, 2});
+      } else if (stage == 2) {
+        const auto &args = bindings[index].arguments;
+        const bool value = args.size() == 3;
+        auto &recurrence = session(root, value ? "prefill-value-recurrence-b2" : "prefill-recurrence-b2");
+        std::vector<xdna::DeviceBuffer> pair{args[0], paired_view(args[1])};
+        if (value) pair.push_back(paired_view(args[2]));
+        prefill_body.push_back({recurrence.prepare(pair), Stage::Recurrence, 2});
       } else if (stage == 3) {
         const auto &args = bindings[index].arguments;
         auto input = paired_view(args[0]);

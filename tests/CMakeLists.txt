@@ -89,3 +89,6 @@ target_compile_options(rwkv-prefill-attention-test PRIVATE -Wall -Wextra -ffp-co
 
 add_executable(rwkv-prefill-output-test inference/prefill_output_test.cpp)
 target_link_libraries(rwkv-prefill-output-test PRIVATE rwkv_xdna)
+
+add_executable(rwkv-prefill-recurrence-test inference/prefill_recurrence_test.cpp)
+target_link_libraries(rwkv-prefill-recurrence-test PRIVATE rwkv_xdna)
