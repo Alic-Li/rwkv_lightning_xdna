@@ -1,0 +1,161 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "8ca7709",
+  "decision": "Keep a reproducible diagnostic compiler. Apply co-resident programs to adjacent model stages next; no model speedup or hardware-limit claim from this microbenchmark.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "design": {
+    "workers": 12,
+    "device_columns": 8,
+    "projection_workers": 11,
+    "norm_workers": 1,
+    "arithmetic": "Existing BF16 or W8A16 projection/residual and FP32 LayerNorm kernels; no device arithmetic edits.",
+    "runtime": "Two independent four-BO instruction streams selected after resolving both FIFO graphs. Byte-addressed runtime DMA with original typed static FIFOs. Both compilations must have byte-identical PDI before sharing xclbin and UUID. Session cache then shares one hardware context while preserving independent runs and instructions.",
+    "scope": "Diagnostic roots only; production artifacts/runtime unchanged. Projection graph helper extraction reproduces both production BF16 and INT8 PDI and instruction files byte-for-byte."
+  },
+  "protocol": {
+    "order": "Separate A1, shared B1, shared B2, separate A2 for each precision; serial C++ dispatch.",
+    "weight_banks": [
+      1,
+      4,
+      32,
+      128
+    ],
+    "samples_per_case_per_round": 128,
+    "rounds_per_trial": 2,
+    "trials_per_arm": 2,
+    "timing": "Projection execute/wait wall time; excludes preceding norm call and all uploads/downloads/allocation/oracle work. Same-program means repeated projection; after_norm_program means alternating operations (one shared hardware program in arm B). Each case warms max(8,banks) calls.",
+    "validation": "FP64 projection oracle for every bank; independent FP64 norm oracle; exact saved output comparisons after timing, immutable weights/input and guard checks. No tolerance changes.",
+    "precision_note": "INT8 here is W8A16 with BF16 MAC; not evidence of native INT8 matrix arithmetic."
+  },
+  "results": {
+    "bf16": {
+      "separate_programs": {
+        "same_program": {
+          "projection_mean_us_by_banks": [
+            278.59719140625,
+            276.18442578125,
+            279.63615625,
+            275.937107421875
+          ],
+          "projection_mean_us_all_cases": 277.58872021484376
+        },
+        "after_norm_program": {
+          "projection_mean_us_by_banks": [
+            1061.2623339843751,
+            992.9416113281246,
+            987.34879296875,
+            984.5927265625
+          ],
+          "projection_mean_us_all_cases": 1006.5363662109374
+        },
+        "validation": {
+          "status": "passed",
+          "banks_per_trial": 128,
+          "max_projection_fp64_abs": 4.1420571506023407e-07
+        }
+      },
+      "shared_program": {
+        "same_program": {
+          "projection_mean_us_by_banks": [
+            277.919771484375,
+            274.07961718750005,
+            275.104611328125,
+            276.6762890625
+          ],
+          "projection_mean_us_all_cases": 275.945072265625
+        },
+        "after_norm_program": {
+          "projection_mean_us_by_banks": [
+            271.41927539062505,
+            273.7334902343749,
+            273.9142519531251,
+            274.221201171875
+          ],
+          "projection_mean_us_all_cases": 273.3220546875
+        },
+        "validation": {
+          "status": "passed",
+          "banks_per_trial": 128,
+          "max_projection_fp64_abs": 4.1420571506023407e-07
+        }
+      },
+      "pdi_sha256": "d5083bb513ac77cd88c54942d99a0cc7a1a3906d4101a0eddd21b988efec2bdc"
+    },
+    "int8": {
+      "separate_programs": {
+        "same_program": {
+          "projection_mean_us_by_banks": [
+            177.79972460937495,
+            173.824787109375,
+            172.77930664062495,
+            175.00677343750007
+          ],
+          "projection_mean_us_all_cases": 174.85264794921875
+        },
+        "after_norm_program": {
+          "projection_mean_us_by_banks": [
+            880.9733671875001,
+            880.482783203125,
+            883.02783984375,
+            883.5107246093751
+          ],
+          "projection_mean_us_all_cases": 881.9986787109376
+        },
+        "validation": {
+          "status": "passed",
+          "banks_per_trial": 128,
+          "max_projection_fp64_abs": 2.086162567138672e-06
+        }
+      },
+      "shared_program": {
+        "same_program": {
+          "projection_mean_us_by_banks": [
+            172.75946093749997,
+            173.03790625000002,
+            175.47690820312502,
+            174.352197265625
+          ],
+          "projection_mean_us_all_cases": 173.9066181640625
+        },
+        "after_norm_program": {
+          "projection_mean_us_by_banks": [
+            171.99499218750003,
+            172.21601953125003,
+            172.36737109374997,
+            174.00750195312497
+          ],
+          "projection_mean_us_all_cases": 172.64647119140625
+        },
+        "validation": {
+          "status": "passed",
+          "banks_per_trial": 128,
+          "max_projection_fp64_abs": 2.086162567138672e-06
+        }
+      },
+      "pdi_sha256": "72f23fcbe0711bd29c4a529cc4536b291e9cad5f4f232bb4fac1dddc09b613e7"
+    }
+  },
+  "runtime_evidence": {
+    "snapshot": "reports/runs/shared-program-2026-10-03/active-contexts.json",
+    "observation": "xrt-smi reports exactly one active hardware context over eight columns, zero reported errors/migrations, during a separate shared INT8 probe. Query-instrumented timings excluded from A/B results."
+  },
+  "validation": {
+    "host": "Release and test builds; 3/3 CTest passed.",
+    "production_helper": "Fresh BF16 and INT8 projection compilation compared byte-for-byte with production PDI and instructions; identical.",
+    "hardware": "All eight A/B/B/A benchmark trials passed; separate runtime-query trial passed."
+  },
+  "interpretation": [
+    "Shared-program alternation returns projection latency close to repeated-projection latency for both precisions across tested working sets.",
+    "This measures the benefit of co-resident programs plus shared context, not a decomposition of firmware load, scheduling, DMA or context-switch costs.",
+    "Full model placement, memory, numerical regression and whole-model A/B gates are still required. No hardware-limit conclusion."
+  ],
+  "next_action": "Prototype co-resident norm/mix and attention projections while preserving independent DDR interfaces and submissions; verify stage outputs/guards, full model regression and whole-model timing.",
+  "logs": "reports/runs/shared-program-2026-10-03"
+}

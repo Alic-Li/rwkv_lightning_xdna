@@ -11,10 +11,9 @@ from aie.helpers.taplib import TensorAccessPattern as TAP
 from rwkv7_common import KERNEL_ROOT, typ, external
 
 
-def projection_residual_program(quantized=False):
+def projection_residual_graph(quantized=False):
     wt = lambda n: np.ndarray[(n,), np.dtype[np.uint8 if quantized else bfloat16]]
     tile = 4160 if quantized else 4096
-    weights = tile * 1024
     fn = external(
         "rwkv7_output_int8_tile" if quantized else "rwkv7_ffn_value_tile",
         "projection_residual_int8.cc" if quantized else "ffn_pipeline_bf16.cc",
@@ -65,6 +64,14 @@ def projection_residual_program(quantized=False):
     ]
     workers += [Worker(unary, [pair.cons(), final.prod(), add], stack_size=12288)]
 
+    return workers, xfifo, ws, joins[2], final
+
+
+def projection_residual_program(quantized=False):
+    workers, xfifo, ws, residual_input, final = projection_residual_graph(quantized)
+    wt = lambda n: np.ndarray[(n,), np.dtype[np.uint8 if quantized else bfloat16]]
+    weights = (4160 if quantized else 4096) * 1024
+
     def seq(x, w, res, out, hx, hw, hr, ho):
         hx.fill(x)
         for i in range(8):
@@ -85,7 +92,7 @@ def projection_residual_program(quantized=False):
                 typ(4096),
                 xfifo.prod(),
                 [f.prod() for f in ws],
-                joins[2].prod(),
+                residual_input.prod(),
                 final.cons(),
             ],
         ),

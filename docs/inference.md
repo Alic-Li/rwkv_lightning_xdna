@@ -296,8 +296,30 @@ host 传输或数值检查。每种模式进行正反两轮，每组128次测量
 2026-10-03 测量中，BF16 连续投影约276–282 µs，交替程序后约993–1007 µs；
 W8A16 分别约173–177 µs和890–901 µs。扩大工作集的影响远小于程序交替。
 缩小编译分区到投影5列、norm 2列未改善延迟，运行时仍报告共同的8列分区。
-这不是实际 DDR 带宽或纯 context 切换计数；下一步检查多个阶段共用设备程序的效果。
+这不是实际 DDR 带宽或纯 context 切换计数。
 详见[工作集与程序交替测量](../reports/rwkv7-working-set-and-program-alternation-2026-10-03.json)。
+
+### 共用设备程序对照
+
+将原 LayerNorm 与投影的12个 worker 放入同一个设备程序，保留各自的 DMA、BO 和独立提交。
+两套指令在编译后必须具有完全相同的 PDI，才共用 xclbin/UUID 和运行时硬件上下文。
+诊断编译器只输出独立测试目录：
+
+```bash
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie .venv/bin/python \
+  tools/compile/rwkv7_shared_program_probe.py --output-root build/kernels/shared-program-bf16
+./build/test/rwkv-working-set-bench build/kernels/shared-program-bf16
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie .venv/bin/python \
+  tools/compile/rwkv7_shared_program_probe.py --output-root build/kernels/shared-program-int8 --int8
+./build/test/rwkv-working-set-bench build/kernels/shared-program-int8 --int8
+```
+
+2026-10-03 A/B/B/A 中，交替 norm 后的投影平均耗时：BF16 从1006.5降到273.3 µs，
+W8A16 从882.0降到172.6 µs，接近连续执行投影的耗时。八个测试均通过128组权重的
+FP64 oracle、重复输出与缓冲区保护检查；独立运行时查询确认只有一个硬件上下文。
+这验证了共用程序在该对照中的效果，尚不能代表整模型收益或硬件极限。
+下一步在模型相邻阶段保持原有数据接口，验证共驻布局和整模型性能。
+详见[共用程序对照记录](../reports/rwkv7-shared-program-control-2026-10-03.json)。
 
 ## C++ 接口和状态
 
