@@ -1,0 +1,65 @@
+{
+  "date": "2026-10-03",
+  "status": "validated W8A16 chunk4 FFN stage; full-model results recorded separately",
+  "precision": {
+    "weights": "signed INT8, [-127,127], per-output FP16-derived FP32 scale",
+    "activation": "BF16, no activation quantization",
+    "multiply": "INT8 codes expanded once per tile to exact BF16; BF16 MAC reused for four tokens",
+    "accumulation": "FP32; original per-token reduction order; row scale only after last K tile",
+    "shift": "FP32",
+    "WKV": "not in stage; model keeps FP32"
+  },
+  "layout": "Same key-row streaming/collect and device DDR activation blocks as BF16 chunk4",
+  "validation": {
+    "batch_tokens": 4,
+    "input_layout": "projection_residual_pairs",
+    "input_passes": 4,
+    "intermediates_output_shift_bitwise": "passed",
+    "oracle_max_abs": 2.9277987778186798e-05,
+    "reset_branch_guards_immutable_inputs": "passed",
+    "scope": "Complete FFN batch stage; model attention/WKV and prefill integration not included.",
+    "status": "passed",
+    "timing_abba": [
+      {
+        "mean_us_per_batch": 4699.427709999999,
+        "p95_us_per_batch": 4807.697,
+        "path": "production_decode",
+        "runs_per_batch": 4,
+        "samples": 100
+      },
+      {
+        "mean_us_per_batch": 3097.5261999999993,
+        "p95_us_per_batch": 3123.699,
+        "path": "batched_ffn",
+        "runs_per_batch": 1,
+        "samples": 100
+      },
+      {
+        "mean_us_per_batch": 3079.6917100000005,
+        "p95_us_per_batch": 3110.093,
+        "path": "batched_ffn",
+        "runs_per_batch": 1,
+        "samples": 100
+      },
+      {
+        "mean_us_per_batch": 4684.120449999999,
+        "p95_us_per_batch": 4801.576,
+        "path": "production_decode",
+        "runs_per_batch": 4,
+        "samples": 100
+      }
+    ],
+    "weights": "int8"
+  },
+  "bf16_refactor": "Extracted common helpers; independently recompiled BF16 PDI identical: 0eaa0e4c87ef40f54e07c10032f545eb6575525133f4c66b19bf7f9e3e76bcff",
+  "artifact_sha256": {
+    "design.xclbin": "b4e930f6f98b60cbba800e0ffdf4d2fe4c3cb8741f7eef6ffbabf203c9f1494c",
+    "instructions.bin": "0cee4abff725b343d32bb6bb035cd3f1894667e09bb361d93b2e1beb23a030d7",
+    "config.json": "0b6751db73abaf028869d3ea7b054dde42ea558f6fe05a4cd36609dff50009bd"
+  },
+  "limits": [
+    "Only projection-input INT8 layout hardware-tested at this node.",
+    "Stage timing is not model throughput. No accuracy thresholds changed."
+  ],
+  "logs": "reports/runs/throughput-resume-2026-10-03"
+}

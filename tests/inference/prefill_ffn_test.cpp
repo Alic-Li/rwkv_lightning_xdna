@@ -47,15 +47,13 @@ int main(int argc, char **argv) {
       return Session(root / name / "design.xclbin", root / name / "instructions.bin");
     };
     const std::string prefix = quantized ? "int8" : "bf16";
-    if (chunk4 && quantized)
-      throw std::runtime_error("Chunk4 experiment supports BF16 only");
     const size_t batch_size = chunk4 ? 4 : 2;
     const size_t tokens_c = batch_size * 2048, tokens_h = batch_size * 8192;
     const size_t projected_offset = 2048 + tokens_h;
     const size_t output_offset = projected_offset + tokens_c;
     const size_t arena_floats = output_offset + tokens_c;
     const size_t half_elements = tokens_c + tokens_h;
-    auto fused = session(argv[1], chunk4 ? std::string("bf16-chunk4-ffn-experiment") + (projection_input ? "-projection-input" : "") : prefix + "-prefill-ffn-b2" +
+    auto fused = session(argv[1], chunk4 ? prefix + "-chunk4-ffn-experiment" + (projection_input ? "-projection-input" : "") : prefix + "-prefill-ffn-b2" +
                          (recurrence_input ? "-recurrence-input" : projection_input ? "-projection-input" : ""));
     const size_t input_stride = recurrence_input ? 61440 : 4096;
     auto input_offset = [&](size_t t) { return projection_input ? t * input_stride + 2048 : t * 2048; };

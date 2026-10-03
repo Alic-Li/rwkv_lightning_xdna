@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Experimental four-token BF16 FFN with streamed value activations; not production."""
+"""Experimental four-token BF16/W8A16 FFN with streamed value activations; not production."""
 import argparse
 import json
 import numpy as np
 from ml_dtypes import bfloat16
 import aie.iron as iron
-from aie.iron import CompileTime, In, InOut, Out, ObjectFifo, Worker, Runtime, Program
+from aie.iron import CompileTime, In, InOut, ObjectFifo, Worker, Runtime, Program
 from aie.iron.runtime import TaskGroup
 from aie.iron.controlflow import range_
 from aie.iron.device import Tile
@@ -16,9 +16,10 @@ def bt(n):
     return np.ndarray[(n,), np.dtype[bfloat16]]
 
 @iron.jit
-def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: InOut, *, projection_input: CompileTime[bool] = False):
-    wt = bt
-    tile = 4096
+def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: InOut, *, projection_input: CompileTime[bool] = False, quantized: CompileTime[bool] = False):
+    wt = (lambda n: np.ndarray[(n,), np.dtype[np.uint8]]) if quantized else bt
+    tile = 4160 if quantized else 4096
+    matrix_stack = 20480 if quantized else 12288
     stripe, count = 1024 * tile, 8192 * tile
     packed = ObjectFifo(typ(6144), name="norm_input", depth=1)
     inputs = packed.prod().join([0, 2048, 4096], tile=Tile(0, 1), obj_types=[typ(2048)] * 3)
@@ -32,11 +33,14 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: InOut, *, proj
     mix = external("rwkv7_prefill_mix_tokens", "prefill_mix_bf16.cc",
                    [typ(2048), typ(4096), typ(2048), bt(8192), np.int32], optimization="-O3")
     init = mix.object_file.bind("rwkv7_prefill_shift_init", [typ(4096), typ(2048)])
-    key = external("rwkv7_chunk4_key", "chunk4_channel_bf16.cc",
-                   [bt(8192), bt(4096), typ(64), np.int32], optimization="-O3")
+    key = external("rwkv7_chunk4_key_int8" if quantized else "rwkv7_chunk4_key",
+                   "chunk4_channel_int8.cc" if quantized else "chunk4_channel_bf16.cc",
+                   [bt(8192), wt(tile), typ(64), np.int32], optimization="-O3",
+                   stack_size=16384 if quantized else 8192)
     zero_key = key.object_file.bind("rwkv7_chunk4_zero64", [typ(64)])
     collect = key.object_file.bind("rwkv7_chunk4_collect", [typ(64), typ(8192), bt(8192), np.int32])
-    value = key.object_file.bind("rwkv7_chunk4_value", [bt(1024), bt(4096), typ(2048), np.int32])
+    value = key.object_file.bind("rwkv7_chunk4_value_int8" if quantized else "rwkv7_chunk4_value",
+                                 [bt(1024), wt(tile), typ(2048), np.int32] + ([np.int32] if quantized else []))
     zero_value = key.object_file.bind("rwkv7_chunk4_zero2048", [typ(2048)])
     add = key.object_file.bind("rwkv7_chunk4_add", [typ(2048), typ(8192), typ(2048), np.int32])
     wk = [ObjectFifo(wt(tile), name=f"kw{i}", depth=2) for i in range(4)]
@@ -93,7 +97,10 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: InOut, *, proj
         for row in range_(32):
             for col in range_(32):
                 xv, weights = x.acquire(1), w.acquire(1)
-                f(xv, weights, pv, row)
+                if quantized:
+                    f(xv, weights, pv, row, col)
+                else:
+                    f(xv, weights, pv, row)
                 x.release(1)
                 w.release(1)
         p.release(1)
@@ -111,11 +118,11 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: InOut, *, proj
                tile=Tile(1, 2), stack_size=12288),
     ]
     workers += [Worker(keys, [mx.cons(), wk[i].cons(), packets[i].prod(), key, zero_key],
-                       tile=Tile(i, 3), stack_size=12288) for i in range(4)]
+                       tile=Tile(i, 3), stack_size=matrix_stack) for i in range(4)]
     workers += [Worker(collect_rows, [packets[i].cons(), kr[i].prod(), ka[i].prod(), collect],
                        tile=Tile(i, 4), stack_size=12288) for i in range(4)]
     workers += [Worker(values, [fanout.cons(), wv[i].cons(), vp[i].prod(), value, zero_value],
-                       tile=Tile(i + 4, 3), stack_size=12288) for i in range(4)]
+                       tile=Tile(i + 4, 3), stack_size=matrix_stack) for i in range(4)]
     workers += [Worker(residual, [residual_x.cons(), proj.cons(), final.prod(), add],
                        tile=Tile(7, 2), stack_size=12288)]
     def seq(x, p, w, f, h, hx, hw, hb, hc, hs, hkw, hvw, hm, hr, ha, hv, hres, hy, ho, hblock):
@@ -152,18 +159,20 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: InOut, *, proj
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--projection-input", action="store_true")
+    parser.add_argument("--int8", action="store_true")
     args = parser.parse_args()
-    path = KERNEL_ROOT / ("bf16-chunk4-ffn-experiment" + ("-projection-input" if args.projection_input else ""))
+    path = KERNEL_ROOT / (("int8" if args.int8 else "bf16") + "-chunk4-ffn-experiment" + ("-projection-input" if args.projection_input else ""))
     path.mkdir(parents=True, exist_ok=True)
-    design.specialize(projection_input=args.projection_input).compile(path / "design.xclbin", path / "instructions.bin")
+    design.specialize(projection_input=args.projection_input, quantized=args.int8).compile(path / "design.xclbin", path / "instructions.bin")
     (path / "config.json").write_text(json.dumps(dict(
         schema_version=1, batch=4,
         input_layout="projection_residual_pairs" if args.projection_input else "token_major", channels=2048, hidden=8192,
         validation="experimental_requires_hardware_validation",
-        weights="bfloat16", activation="bfloat16", state="float32",
+        weights="int8" if args.int8 else "bfloat16", activation="bfloat16", state="float32",
         fp32_arena_floats=51200, bf16_arena_elements=40960,
         fp32_offsets=dict(shift=0, raw=2048, projected=34816, output=43008),
         bf16_offsets=dict(mixed=0, activated=8192),
-        value_activation_ddr_read_bytes=2097152, weight_payload_bytes=67108864,
+        value_activation_ddr_read_bytes=2097152, weight_payload_bytes=34078720 if args.int8 else 67108864,
+        **(dict(tile_bytes=4160, scale="fp16_expanded_fp32") if args.int8 else {}),
     )) + "\n")
     print(path, flush=True)
