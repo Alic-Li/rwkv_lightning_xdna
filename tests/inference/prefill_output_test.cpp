@@ -10,17 +10,19 @@ using namespace rwkv::xdna::test;
 using V = std::vector<float>;
 int main(int argc, char **argv) {
   try {
+    const bool int8 = argc == 4 && std::string(argv[3]) == "--int8";
+    if (int8) --argc;
     if (argc != 3)
-      throw std::runtime_error("usage: prefill-output-test BATCH_ROOT DECODE_ROOT");
+      throw std::runtime_error("usage: prefill-output-test BATCH_ROOT DECODE_ROOT [--int8]");
     auto session = [](std::filesystem::path root, std::string name) {
       return Session(root / name / "design.xclbin",
                      root / name / "instructions.bin");
     };
     for (size_t stride : {2048, 55296, 61440}) {
       std::cout << "stride=" << stride << '\n';
-      auto fused = session(argv[1], "bf16-prefill-output-b2-s" + std::to_string(stride));
-      auto single = session(argv[2], "bf16-projection-residual");
-      Guarded x(fused, (stride + 2048) * 4), w(fused, 4194304 * 2), res(fused, 4096 * 4),
+      auto fused = session(argv[1], std::string(int8 ? "int8" : "bf16") + "-prefill-output-b2-s" + std::to_string(stride));
+      auto single = session(argv[2], int8 ? "int8-projection-residual" : "bf16-projection-residual");
+      Guarded x(fused, (stride + 2048) * 4), w(fused, int8 ? 4160 * 1024 : 4194304 * 2), res(fused, 4096 * 4),
           out(fused, 8192 * 4);
       auto run = fused.prepare({x.data, w.data, res.data.slice(0, 8192), res.data.slice(8192, 8192), out.data});
       Guarded reference(single, 8192 * 4);
@@ -32,8 +34,18 @@ int main(int argc, char **argv) {
       std::uniform_real_distribution<float> d(-.25f, .25f);
       std::vector<uint16_t> weights(4194304);
       for (auto &v : weights)
-        v = bf16(d(rng));
-      w.data.upload(weights.data(), w.bytes);
+        v = bf16(int8 ? std::round(d(rng) * 508) : d(rng));
+      std::vector<uint8_t> packed(4160 * 1024);
+      V scales(2048);
+      for (size_t row = 0; row < 2048; ++row) scales[row] = std::ldexp(1.f, int(row % 7) - 12);
+      if (int8) {
+        for (size_t tile = 0; tile < 1024; ++tile) {
+          for (size_t i = 0; i < 4096; ++i)
+            packed[tile * 4160 + i] = uint8_t(int8_t(expand(weights[tile * 4096 + i])));
+          std::memcpy(packed.data() + tile * 4160 + 4096, scales.data() + (tile / 8) * 16, 64);
+        }
+        w.data.upload(packed.data(), w.bytes);
+      } else w.data.upload(weights.data(), w.bytes);
       V input(stride + 2048), r(4096), actual(8192), expected(8192);
       double worst = 0;
       for (int pass = 0; pass < 3; ++pass) {
@@ -63,6 +75,7 @@ int main(int argc, char **argv) {
                            col % 256;
               sum += double(expand(weights[pos])) * expand(bf16(input[token * stride + col]));
             }
+            if (int8) sum *= scales[row];
             check(actual[token * 4096 + row], sum);
             check(actual[token * 4096 + 2048 + row], actual[token * 4096 + row] + r[token * 2048 + row]);
           }

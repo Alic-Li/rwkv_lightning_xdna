@@ -35,6 +35,9 @@ def main():
     if args.int8_ffn or args.int8_ffn_output:
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_channel_mix_int8.py")],
                        cwd=ROOT, env=env, check=True)
+    if args.prefill_batch2 and args.int8_ffn_output:
+        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_output.py"), "--int8"],
+                       cwd=ROOT, env=env, check=True)
     if args.int8_ffn_output:
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_projection_residual_int8.py")],
                        cwd=ROOT, env=env, check=True)

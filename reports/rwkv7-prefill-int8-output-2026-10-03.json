@@ -1,0 +1,162 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "255e445",
+  "decision": "Accept eight-worker joined-input variant; reject sixteen-worker variant whose whole-model gain was negligible.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "design": [
+    "Unpack each 4160-byte INT8 tile once to exact BF16 integer values; reuse for two tokens. Per-row FP16-expanded scales apply only after all eight K tiles. This is W8A16 with BF16 MAC, not native INT8 MAC.",
+    "Join strided two-token projection input and separate residual BOs on a MemTile. Each compute worker receives joined activation and weight streams, satisfying its two input DMA channel limit.",
+    "Fuse residual addition into each projection worker. Process token 1 first during in-place output expansion so token 0 residual stores cannot overwrite token 1 projection.",
+    "Use existing paired activation/output allocations. Host payload, resident BO bytes and root BO count unchanged."
+  ],
+  "capacity_evidence": "Direct four-input-stream fused worker failed placement: core has only two input DMA channels. MemTile staging resolves this without host copies.",
+  "stage": {
+    "strides": [
+      2048,
+      55296,
+      61440
+    ],
+    "oracle": "FP64 dot on BF16-rounded inputs, then row scale; tolerance 2e-5 + 2e-5*abs(reference).",
+    "max_abs": [
+      1.04904e-05,
+      8.10623e-06,
+      8.82149e-06
+    ],
+    "bitwise": "Each token projection and residual equals the original INT8 output kernel. All allocation guards passed.",
+    "samples_per_run": 200,
+    "order": "A/B/B/A",
+    "single_pair_us": {
+      "55296": [
+        355.26,
+        359.719
+      ],
+      "61440": [
+        348.424,
+        353.694
+      ]
+    },
+    "batch_us": {
+      "55296": [
+        190.812,
+        186.804
+      ],
+      "61440": [
+        188.777,
+        184.12
+      ]
+    }
+  },
+  "protocol": {
+    "order": "A/B/B/A per design, serial NPU dispatch",
+    "prompt_tokens": 32,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "precision": "int8_ffn_output_bf16_others_fp32_state"
+  },
+  "performance": {
+    "separate_residual_workers": {
+      "baseline": {
+        "prefill_seconds": 3.57680820125,
+        "decode_ms": 185.97735519791664,
+        "process_prefill_seconds": [
+          3.5708065565,
+          3.582809846
+        ],
+        "prefill_runs": 3106,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2055499776,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.57349487275,
+        "decode_ms": 186.28557030208333,
+        "process_prefill_seconds": [
+          3.5744635195,
+          3.572526226
+        ],
+        "prefill_runs": 2722,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2055499776,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 0.0926336642496528,
+      "decode_change_percent": 0.16572722191832145
+    },
+    "joined_input_fused_residual": {
+      "baseline": {
+        "prefill_seconds": 3.57474117,
+        "decode_ms": 185.71586856250002,
+        "process_prefill_seconds": [
+          3.5778621025,
+          3.5716202375
+        ],
+        "prefill_runs": 3106,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2055499776,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.4621046509999998,
+        "decode_ms": 185.96974669791666,
+        "process_prefill_seconds": [
+          3.4715146404999997,
+          3.4526946615
+        ],
+        "prefill_runs": 2722,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2055499776,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 3.150899985298794,
+      "decode_change_percent": 0.13670244625929584
+    }
+  },
+  "correctness": {
+    "int8_ffn_output": {
+      "mode": "verify",
+      "prefill_pair_runs": 172,
+      "prefill_runs": 6679,
+      "resident_bytes": 2055499776,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn_output"
+    },
+    "bf16": {
+      "mode": "verify",
+      "prefill_pair_runs": 172,
+      "prefill_runs": 6679,
+      "resident_bytes": 2947313664,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "bf16"
+    },
+    "int8_ffn": {
+      "mode": "verify",
+      "prefill_pair_runs": 172,
+      "prefill_runs": 6679,
+      "resident_bytes": 2154590208,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn"
+    }
+  },
+  "bf16_compiler_compatibility": "Final shared compiler BF16 stages pass oracle/bitwise/guards for all three strides. Resident-stride instruction binaries and extracted PDIs are byte-identical to production; xclbin container bytes differ.",
+  "host_tests": "Release/test builds; 3/3 CTest passed.",
+  "limitations": [
+    "Measured decode mean increases about 0.14%; decode still uses the original kernels and 123 submissions. Do not present this as a decode speedup.",
+    "Local compute utilization, internal DDR traffic and device bandwidth counters were not measured.",
+    "FP32 recurrence remains sequential across tokens; whole-model hardware limits remain unproven."
+  ],
+  "logs": "reports/runs/prefill-int8-output-2026-10-03"
+}
