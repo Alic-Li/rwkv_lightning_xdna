@@ -1,0 +1,312 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "532b6be",
+  "status": "completed_experiment_rejected",
+  "decision": "Reject both co-resident norm/mix + attention layouts; production source, runtime and artifact root unchanged. Shared-program microbenchmark benefit does not transfer to the whole model.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth; C2048, 24 layers",
+  "design": {
+    "workers": 16,
+    "description": "Original two-worker norm/mix and fourteen-worker four-branch attention co-resident with independent five-BO runtime instruction streams and identical PDI/xclbin UUID. Three-branch layer-zero attention remains the existing program. Same device arithmetic/reduction order, state buffers and graph ABI.",
+    "grouped_all": "Pair all eight R/K/V weight inputs and outputs, combine two first-rank inputs and four second-rank inputs. Static FIFO groups reduce stream count enough for both stages.",
+    "independent_second": "Retain four separate second-rank weight streams to reduce multiplexing cost. Sixteen total shim inputs.",
+    "placement": "Pin R/K/V cores across row two; first-rank cores columns 0/1 row three; second-rank cores columns 4..7 row three; norm/mix columns 6/7 row four. Explicit memory-tile group placement.",
+    "dma": "Interleaved weights use innermost dimension 1024 and outer repeats <=64; R/K/V fill split into six tasks, first-rank into four, grouped second-rank into two. Existing packed weight BO contents unchanged.",
+    "invariants": "100 runs/token for fast BF16 decode, 960 logical nodes, existing persistent model buffers and transfers unchanged. No runtime or production compiler edits."
+  },
+  "compilation_history": [
+    "Automatic placement failed routing.",
+    "Pinned placement passed routing but initial interleaved transfers exceeded DMA dimension/repeat limits.",
+    "Chunked transfers compiled both variants; paired PDI bytes match exactly before copying xclbin."
+  ],
+  "validation": {
+    "stage": {
+      "grouped_all": {
+        "3": {
+          "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+          "branches": 3,
+          "oracle_max_abs": 1.9068829715251923e-07,
+          "passes": 3,
+          "status": "passed",
+          "timing_abba": [
+            {
+              "mean_us": 1739.9754999999998,
+              "p95_us": 1825.998,
+              "path": "two_decode",
+              "samples": 20
+            },
+            {
+              "mean_us": 942.1983500000002,
+              "p95_us": 961.887,
+              "path": "batched",
+              "samples": 20
+            },
+            {
+              "mean_us": 939.4840999999999,
+              "p95_us": 1019.025,
+              "path": "batched",
+              "samples": 20
+            },
+            {
+              "mean_us": 1734.9055,
+              "p95_us": 1852.709,
+              "path": "two_decode",
+              "samples": 20
+            }
+          ]
+        },
+        "4": {
+          "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+          "branches": 4,
+          "oracle_max_abs": 2.0085644791834056e-07,
+          "passes": 3,
+          "status": "passed",
+          "timing_abba": [
+            {
+              "mean_us": 2356.90965,
+              "p95_us": 2523.122,
+              "path": "two_decode",
+              "samples": 20
+            },
+            {
+              "mean_us": 1021.1416499999999,
+              "p95_us": 1037.039,
+              "path": "batched",
+              "samples": 20
+            },
+            {
+              "mean_us": 1047.0802,
+              "p95_us": 1073.259,
+              "path": "batched",
+              "samples": 20
+            },
+            {
+              "mean_us": 2307.685050000001,
+              "p95_us": 2443.24,
+              "path": "two_decode",
+              "samples": 20
+            }
+          ]
+        }
+      },
+      "independent_second": {
+        "3": {
+          "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+          "branches": 3,
+          "oracle_max_abs": 1.9068829715251923e-07,
+          "passes": 3,
+          "status": "passed",
+          "timing_abba": [
+            {
+              "mean_us": 1743.1655600000006,
+              "p95_us": 1848.438,
+              "path": "two_decode",
+              "samples": 100
+            },
+            {
+              "mean_us": 929.1864800000004,
+              "p95_us": 967.907,
+              "path": "batched",
+              "samples": 100
+            },
+            {
+              "mean_us": 930.5263400000003,
+              "p95_us": 967.526,
+              "path": "batched",
+              "samples": 100
+            },
+            {
+              "mean_us": 1729.0249099999994,
+              "p95_us": 1824.482,
+              "path": "two_decode",
+              "samples": 100
+            }
+          ]
+        },
+        "4": {
+          "bitwise_outputs_replay_guards_immutable_inputs": "passed",
+          "branches": 4,
+          "oracle_max_abs": 2.0085644791834056e-07,
+          "passes": 3,
+          "status": "passed",
+          "timing_abba": [
+            {
+              "mean_us": 2264.63662,
+              "p95_us": 2466.491,
+              "path": "two_decode",
+              "samples": 100
+            },
+            {
+              "mean_us": 1028.48259,
+              "p95_us": 1071.393,
+              "path": "batched",
+              "samples": 100
+            },
+            {
+              "mean_us": 1027.0963999999997,
+              "p95_us": 1073.407,
+              "path": "batched",
+              "samples": 100
+            },
+            {
+              "mean_us": 2249.6446200000005,
+              "p95_us": 2455.75,
+              "path": "two_decode",
+              "samples": 100
+            }
+          ]
+        }
+      }
+    },
+    "full_bf16_grouped": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 208.6169775748031,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 100,
+      "status": "passed",
+      "tokens_per_second": 4.793473722153957,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "independent_second_full_regression": "Not run: rejected after stage checks and whole-model performance screening.",
+    "int8_full_regression": "Not run: common attention path rejected on BF16 performance; production INT8 untouched.",
+    "prefill_batch2": "Not promoted or benchmarked; experiment changes only single-token norm/mix and four-branch attention artifacts."
+  },
+  "benchmark": {
+    "order": "A1/B1/B2/A2, serial NPU; same release binary, different artifact roots. No compiler or profiler during timed runs.",
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "samples_per_arm": 96,
+    "per_process": {
+      "A1": {
+        "max_ms": 201.090604,
+        "mean_ms": 199.95767350000006,
+        "min_ms": 198.45111100000003,
+        "p50_ms": 199.90313500000002,
+        "p95_ms": 200.943287,
+        "samples": 48,
+        "tokens_per_second": 5.001058386488977
+      },
+      "B1": {
+        "max_ms": 210.598209,
+        "mean_ms": 208.91768979166673,
+        "min_ms": 206.937636,
+        "p50_ms": 208.99620199999998,
+        "p95_ms": 209.997085,
+        "samples": 48,
+        "tokens_per_second": 4.786574085694718
+      },
+      "B2": {
+        "max_ms": 213.351559,
+        "mean_ms": 209.01263629166667,
+        "min_ms": 207.355217,
+        "p50_ms": 208.895316,
+        "p95_ms": 210.506659,
+        "samples": 48,
+        "tokens_per_second": 4.784399726935888
+      },
+      "A2": {
+        "max_ms": 208.294905,
+        "mean_ms": 200.3125803958333,
+        "min_ms": 198.133953,
+        "p50_ms": 200.237883,
+        "p95_ms": 201.677725,
+        "samples": 48,
+        "tokens_per_second": 4.992197684358725
+      }
+    },
+    "baseline_mean_decode_ms": 200.13512694791666,
+    "candidate_mean_decode_ms": 208.9651630416667,
+    "regression_percent": 4.41203712132352,
+    "independent_second_screen": {
+      "max_ms": 209.49971,
+      "mean_ms": 207.74037139583334,
+      "min_ms": 205.93825199999998,
+      "p50_ms": 207.784876,
+      "p95_ms": 208.62913999999998,
+      "samples": 48,
+      "tokens_per_second": 4.813700838603859
+    },
+    "screen_scope": "48 samples; not a full ABBA acceptance experiment, and still slower than baseline."
+  },
+  "profiles": {
+    "scope": "Separate instrumented runs: mean over four sequential input tokens [1,18,35,52] from zero state, including cold first token. Host execute/wait spans; not pure compute, configuration, firmware or DDR counters.",
+    "mean_ms_per_token": {
+      "baseline": {
+        "attention_projections": 45.12045,
+        "channel_mix": 64.631025,
+        "head": 7.5885925,
+        "norm": 0.44330400000000003,
+        "norm_mix": 8.189645,
+        "projection_residual": 0.98027475,
+        "recurrence_stage": 2.0513325,
+        "value_recurrence_projection": 70.836375
+      },
+      "shared": {
+        "attention_projections": 28.664,
+        "channel_mix": 65.42115,
+        "head": 7.3142175,
+        "norm": 0.47069825,
+        "norm_mix": 34.3315,
+        "projection_residual": 0.98481725,
+        "recurrence_stage": 2.06134,
+        "value_recurrence_projection": 70.86355
+      },
+      "wide": {
+        "attention_projections": 27.337575,
+        "channel_mix": 65.4464,
+        "head": 7.43519,
+        "norm": 0.46778225,
+        "norm_mix": 33.80005,
+        "projection_residual": 0.98412175,
+        "recurrence_stage": 2.1246075,
+        "value_recurrence_projection": 71.01339999999999
+      }
+    }
+  },
+  "artifacts": {
+    "grouped_all": {
+      "root": "build/kernels/shared-attention",
+      "pdi_bytes": 76304,
+      "pdi_sha256": "d501af185b8a1a1429df7096f80f8870b9ba702cfac6bcfdf3047a5abaaff311"
+    },
+    "independent_second": {
+      "root": "build/kernels/shared-attention-wide",
+      "pdi_bytes": 75920,
+      "pdi_sha256": "4a219305a07c9668d47d1394c8f328e2989af5f286770421ea016cb752e7eb20"
+    }
+  },
+  "interpretation": [
+    "Grouping layouts introduce throughput costs; widening the second-rank input helps slightly but does not restore baseline performance.",
+    "Attention span decreases by roughly 16-18 ms/token, while norm/mix span increases by roughly 26 ms/token. Isolated shared-program alternation removes overhead only when the program is already resident; the model still enters it after other programs.",
+    "These data do not prove that PDI byte size alone causes the regression, or that program switching cannot be optimized.",
+    "Independent co-resident worker graphs do not establish a hardware-bound model. Reusing cores and transfer routes across operation modes is the next program-sharing direction to test."
+  ],
+  "next_action": "Prototype operation selection within shared compute workers and common DMA endpoints, first with a controlled norm/projection program, before attempting a persistent program for the dominant attention/channel/recurrent stages. Measure entry after a third program as well as already-resident execution.",
+  "reproduction": {
+    "offline_scripts": [
+      "reports/runs/shared-attention-2026-10-03/probe-chunks.py",
+      "reports/runs/shared-attention-2026-10-03/probe-wide-second.py"
+    ],
+    "environment": {
+      "PYTHONPATH": "tools/compile",
+      "MLIR_AIE_KERNEL_SOURCES": "third_party/mlir-aie",
+      "RWKV_XDNA_KERNEL_DIR": "build/kernels/shared-attention or build/kernels/shared-attention-wide"
+    },
+    "logs": "reports/runs/shared-attention-2026-10-03"
+  },
+  "host_validation": "Release/test builds and 3/3 CTest passed before report commit."
+}

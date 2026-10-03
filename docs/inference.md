@@ -318,8 +318,16 @@ MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie .venv/bin/python \
 W8A16 从882.0降到172.6 µs，接近连续执行投影的耗时。八个测试均通过128组权重的
 FP64 oracle、重复输出与缓冲区保护检查；独立运行时查询确认只有一个硬件上下文。
 这验证了共用程序在该对照中的效果，尚不能代表整模型收益或硬件极限。
-下一步在模型相邻阶段保持原有数据接口，验证共驻布局和整模型性能。
+模型相邻阶段的共驻布局对照见下文。
 详见[共用程序对照记录](../reports/rwkv7-shared-program-control-2026-10-03.json)。
+
+将 norm/mix 与四分支 attention 放入同一16核程序后，阶段数值/保护检查和 BF16
+128步整模型1,116个向量逐位回归通过，但整模型 A/B/B/A 从200.135变为208.965 ms/token
+（慢4.41%）。保留第二级低秩投影独立权重通道的版本仍为207.740 ms/token，均未采用。
+独立 profile 中，attention 每 token 减少约16–18 ms，norm/mix 增加约26 ms；
+微基准中程序已驻留时的收益不足以预测模型从其他程序切入时的成本。
+下一步研究在不同操作间复用计算核心和 DMA 通道，并同时测量从第三个程序切入的开销。
+详见[被拒绝的 attention 共驻实验](../reports/rwkv7-shared-attention-rejected-2026-10-03.json)。
 
 ## C++ 接口和状态
 
