@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "57093eb",
+  "decision": "Rejected; production sources and artifacts retain the baseline. Small prefill gains do not justify the consistent decode regression.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "kernel": "7.0.0-38-generic",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "experiment": "Compact recurrence intermediate to FP32 state plus y; multicast prepared auxiliary data to finish, double-buffer consumers and auxiliary input/final output, retain single-buffer prepared producer. Arithmetic unchanged.",
+  "capacity_evidence": [
+    "Original intermediate plus double-buffer prepared consumers fails local SRAM placement for a 6912-byte buffer.",
+    "Compact intermediate with double-buffer producer exceeds program memory by 112 bytes.",
+    "Single-buffer prepared producer with double-buffer consumers compiles for both recurrence variants."
+  ],
+  "local_buffer_bytes_per_head": {
+    "baseline": 23296,
+    "candidate": 16640
+  },
+  "traffic_note": "This changes internal buffering and stream layout, not host DDR payload. Prepared auxiliary data is multicast; no bandwidth or compute utilization claim follows from host timing.",
+  "stage": {
+    "samples_per_run": 500,
+    "order": "A/B/B/A",
+    "fused_baseline_us": [
+      946.873,
+      950.7
+    ],
+    "fused_candidate_us": [
+      826.189,
+      826.484
+    ],
+    "alternate_program_baseline_us": [
+      2202.32,
+      2190.03
+    ],
+    "alternate_program_candidate_us": [
+      2237.68,
+      2215.72
+    ],
+    "auxiliary_io_buffering_only_us": {
+      "baseline": [
+        947.2,
+        948.894
+      ],
+      "candidate": [
+        947.537,
+        946.399
+      ]
+    }
+  },
+  "whole_model_protocol": {
+    "order": "A/B/B/A for each precision, serial NPU dispatch",
+    "prompt_tokens": 32,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "prefill": "batch2",
+    "runs_per_decode_token": 123,
+    "runs_per_prompt": 3106
+  },
+  "whole_model": {
+    "bf16": {
+      "baseline": {
+        "prefill_seconds": 3.6873482697499997,
+        "decode_ms": 201.99496807291666
+      },
+      "candidate": {
+        "prefill_seconds": 3.63244966225,
+        "decode_ms": 202.88137763541664
+      },
+      "prefill_improvement_percent": 1.4888370580661725,
+      "decode_regression_percent": 0.4388275465258218
+    },
+    "int8-ffn-output": {
+      "baseline": {
+        "prefill_seconds": 3.5625000285,
+        "decode_ms": 184.86595097916666
+      },
+      "candidate": {
+        "prefill_seconds": 3.53102323875,
+        "decode_ms": 185.6919811354167
+      },
+      "prefill_improvement_percent": 0.8835590034578455,
+      "decode_regression_percent": 0.44682655290217976
+    }
+  },
+  "correctness": {
+    "stage": "Both variants passed numerical oracle, deterministic replay and guards. Fused max_abs 9.53674e-7; regular max_abs 1.19209e-6.",
+    "model": "BF16 and INT8 FFN+output each passed 128-token regression, 1116 exact vectors, zero differences.",
+    "limitation": "Candidate rejected before additional 1533-vector prefill equivalence validation.",
+    "host_tests": "Release/test builds and 3/3 CTest passed."
+  },
+  "logs": "reports/runs/recurrence-buffers-2026-10-03",
+  "next": "Reduce cross-program submissions or batch further work; isolated recurrence speed is not a reliable predictor of resident decode speed. Hardware limits for the whole model remain unproven."
+}
