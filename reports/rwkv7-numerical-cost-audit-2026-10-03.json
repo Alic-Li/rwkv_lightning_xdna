@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-03",
+  "status": "independent numerical cost audit; no arithmetic changed",
+  "source_findings": {
+    "layer_norm": "norm_fp32.cc calls pinned layer_norm_f32_impl: FP32 two-pass statistics and scalar_invsqrt; it is not an FP64 statistics path.",
+    "prepare_key_norm": "stages_fp32.cc accumulates 64 squared FP32 products into double and calls seven-iteration double root.",
+    "finish_group_norm": "stages_fp32.cc uses double mean/centered variance/root and FP32 affine/residual outputs.",
+    "sigmoid_decay": "vector_exp_fp32.hpp has FP32 range reduction and seventh-order polynomial; native scalar reciprocal per element and scalar fallback below -69.",
+    "recurrence_state": "FP32 update and persistent state; untouched.",
+    "compiler": "rwkv7_common.py explicitly sets -fno-fast-math, -ffp-contract=off and __AIE_API_FP32_EMULATION__=1. This is not evidence for native FP32 vector multiply throughput."
+  },
+  "object_evidence": {
+    "scope": "Undefined helper references in local production build objects; not dynamic cycle counts or a re-extraction of the currently loaded xclbin.",
+    "double_helpers": [
+      "__adddf3",
+      "__divdf3",
+      "__extendsfdf2",
+      "__ledf2",
+      "__ltdf2",
+      "__muldf3",
+      "__subdf3",
+      "__truncdfsf2"
+    ],
+    "update": "rwkv7_stage_recurrent.o has no undefined helper symbols in this inspection."
+  },
+  "cost_evidence": {
+    "current_stage_wall": "rwkv7-throughput-rebaseline-2026-10-03.json; cannot separate DMA/FIFO/compute.",
+    "prior_region_trace": "rwkv7-prepare-region-profile-2026-10-03.json and rwkv7-sigmoid-batch-progress-2026-10-03.json; independently instrumented windows must not be summed as total production cycles.",
+    "rejected_root": "rwkv7-root-fixed-point-rejected-2026-10-03.json; bitwise early exit did not prove model gain. Do not repeat unchanged."
+  },
+  "decision": "Keep all numerical contracts. FP64-to-FP32 statistics, reduction reordering, approximate math or activation quantization require an independent path with thresholds fixed before measurement. No numerical rewrite justified by these host wall times.",
+  "source_sha256": {
+    "kernels/rwkv/norm_fp32.cc": "d7fcf26bbb51020620539261bf47131eaa64b63e843b8b295009b856cf4dcf0d",
+    "kernels/rwkv/stages_fp32.cc": "75b6d62d980ea967d920ccb844b739827ddddc8c9c9d07d1f71d872872318ea0",
+    "kernels/rwkv/math_fp32.hpp": "3eaa1ef1c43b6f5ccd2566bd52bcb3921de9a94a853c1bf2a1445732d9fe0b73",
+    "kernels/rwkv/vector_exp_fp32.hpp": "3b5880277585857287a80181d5b1a37dcc63639fdb19a73950640e55d6e1224e",
+    "tools/compile/rwkv7_common.py": "34ada57cef57798ad2a1ec1dc646a6327cbf8cbe10c31993161b886a175fafc9"
+  },
+  "logs": "reports/runs/throughput-resume-2026-10-03"
+}
