@@ -33,10 +33,41 @@ cmake --preset release
 # 同时编译 C++ 主机程序和唯一生产 kernel 配置；编译不调用 NPU。
 cmake --build --preset release-full
 
+# BF16 推理
 ./build/release/rwkv-cli \
-  --model /home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth \
-  --prompt 'User: 我是一个男孩子,我喜欢上了一个可爱的男孩子,我该怎么办? Assistant: <think></think' \
-  --top-k 1 --max-tokens 32
+  --model "$MODEL" \
+  --backend npu \
+  --kernel-dir build/kernels/rwkv7-bf16 \
+  --weights bf16 \
+  --prompt $'English: ROCm is an open-source stack, composed primarily of open-so
+urce software, designed for graphics processing unit (GPU) computation. ROCm consists of a 
+collection of drivers, development tools, and APIs that enable GPU programming from low-lev
+el kernel to end-user applications.\nWith ROCm, you can customize your GPU software to meet
+ your specific needs.You can develop, collaborate, test, and deploy your applications in a 
+free, open source, integrated, and secure software ecosystem. ROCm supports programming mod
+els, such as OpenMP and OpenCL, and includes all necessary open source software compilers, 
+debuggers, and libraries. ROCm is fully integrated into machine learning (ML) frameworks, s
+uch as PyTorch and TensorFlow."\n\nChinese:' \
+  --top-k 1 \
+  --max-tokens 1024
+
+# INT8 推理（FFN + attention output 权重量化）
+./build/release/rwkv-cli \
+  --model "$MODEL" \
+  --backend npu \
+  --kernel-dir build/kernels/rwkv7-bf16 \
+  --weights int8-ffn-output \
+  --prompt $'English: ROCm is an open-source stack, composed primarily of open-so
+urce software, designed for graphics processing unit (GPU) computation. ROCm consists of a 
+collection of drivers, development tools, and APIs that enable GPU programming from low-lev
+el kernel to end-user applications.\nWith ROCm, you can customize your GPU software to meet
+ your specific needs.You can develop, collaborate, test, and deploy your applications in a 
+free, open source, integrated, and secure software ecosystem. ROCm supports programming mod
+els, such as OpenMP and OpenCL, and includes all necessary open source software compilers, 
+debuggers, and libraries. ROCm is fully integrated into machine learning (ML) frameworks, s
+uch as PyTorch and TensorFlow."\n\nChinese:' \
+  --top-k 1 \
+  --max-tokens 1024
 ```
 
 默认 `--backend npu --decode resident --prefill decode`，产物目录为
