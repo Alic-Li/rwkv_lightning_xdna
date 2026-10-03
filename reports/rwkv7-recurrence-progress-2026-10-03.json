@@ -1,0 +1,236 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "Measured recurrence compiler tuning, shared by BF16 and INT8 FFN. Overall FP16/INT8 hardware-limit goal remains active.",
+  "baseline_commit": "f319528d8be5ea763c67ee4a5a31b1d6cb366d6a",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Recurrent-stage kernel compilation -Oz to -Os, preserving -fno-fast-math and -ffp-contract=off; no model arithmetic or FP32 state changes",
+    "Optional one-lane prepare/state-update/finish trace, guarded C++ capture and isolated stage timing",
+    "Exact same-precision INT8 FFN snapshot regression mode; distinct snapshot precision tag"
+  ],
+  "profiling_evidence": {
+    "prior_int8_recurrent_host_stage_ms_per_token": 59.2563,
+    "baseline_trace": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile2,0",
+          "invocations": 32,
+          "marked_cycles": 13484990,
+          "event_cycles": {
+            "PORT_RUNNING_0": 246,
+            "LOCK_STALL": 2146303,
+            "INSTR_VECTOR": 1579008
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 1.824250518539502e-05,
+            "LOCK_STALL": 0.1591623723858898,
+            "INSTR_VECTOR": 0.11709374645439115
+          }
+        },
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 32,
+          "marked_cycles": 2242920,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 24,
+            "INSTR_VECTOR": 430336,
+            "PORT_RUNNING_1": 0
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 1.0700337060617409e-05,
+            "INSTR_VECTOR": 0.19186417705491057,
+            "PORT_RUNNING_1": 0.0
+          }
+        },
+        {
+          "core": "core_trace for tile4,0",
+          "invocations": 32,
+          "marked_cycles": 6400162,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 32,
+            "INSTR_VECTOR": 6144,
+            "PORT_RUNNING_1": 0
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 4.999873440703532e-06,
+            "INSTR_VECTOR": 0.0009599757006150782,
+            "PORT_RUNNING_1": 0.0
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "kernel_order": [
+      "tile2,0: prepare",
+      "tile3,0: recurrent update",
+      "tile4,0: finish"
+    ],
+    "mean_marked_cycles_per_head": [
+      421405.9375,
+      70091.25,
+      200005.0625
+    ],
+    "scope": "-Oz diagnostic graph with one lane processing 32 heads; all 16 production shim S2MM channels are occupied, so full eight-lane graph has no trace egress capacity. Markers surround kernel calls and exclude FIFO acquire/release. Not full-array utilization or production DMA/latency measurement."
+  },
+  "experiments": {
+    "O2": "Rejected: uninstrumented core program memory overflow by 816 bytes",
+    "Os_trace": "Unsupported: trace-enabled program memory overflow by 848 bytes. No post-optimization trace claimed. Reproduce baseline trace by explicitly selecting RWKV_XDNA_RECURRENCE_OPT=-Oz. No automatic fallback.",
+    "Os_production": "Retained: fits, faster, passes independent oracle and exact BF16/INT8 regression"
+  },
+  "isolated_stage": {
+    "order": "A/B/B/A",
+    "samples_per_process": 300,
+    "warmup_runs": 4,
+    "reset_outside_timer": true,
+    "process_mean_us": [
+      1142.15,
+      991.525,
+      996.775,
+      1143.28
+    ],
+    "baseline_mean_us": 1142.7150000000001,
+    "candidate_mean_us": 994.15,
+    "oracle_max_abs": 1.19209e-06,
+    "guard_and_replay": "passed"
+  },
+  "whole_model_benchmark": {
+    "order": "A/B/B/A per precision",
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "conditions": "Serial hardware runs, profiling disabled, no concurrent compilation; same executable, only recurrence artifact differs",
+    "bf16": {
+      "process_mean_ms": [
+        233.4253365208333,
+        230.06705460416674,
+        229.6103656875001,
+        232.69704822916665
+      ],
+      "baseline_mean_ms": 233.06119237499996,
+      "candidate_mean_ms": 229.83871014583343,
+      "latency_reduction_percent": 1.3826764534790037,
+      "baseline_tokens_per_second": 4.290718629770763,
+      "candidate_tokens_per_second": 4.3508771841153155,
+      "sequential_prefill_tokens_per_second": [
+        4.300897730764882,
+        4.355657587112812
+      ]
+    },
+    "int8": {
+      "process_mean_ms": [
+        218.1394077708333,
+        215.02208758333336,
+        214.84261314583333,
+        218.64625591666672
+      ],
+      "baseline_mean_ms": 218.39283184375,
+      "candidate_mean_ms": 214.93235036458333,
+      "latency_reduction_percent": 1.5845215476863683,
+      "baseline_tokens_per_second": 4.578904864036261,
+      "candidate_tokens_per_second": 4.6526267372209436,
+      "sequential_prefill_tokens_per_second": [
+        4.571074102263227,
+        4.6524678701484845
+      ]
+    }
+  },
+  "validation": {
+    "candidate_bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 230.1732069527559,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 146,
+      "status": "passed",
+      "tokens_per_second": 4.344554317328752,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116
+    },
+    "candidate_int8": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 214.97225296850394,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 146,
+      "status": "passed",
+      "tokens_per_second": 4.651763128455988,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    },
+    "default_bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 229.72785674015742,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 146,
+      "status": "passed",
+      "tokens_per_second": 4.35297666634782,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "default_int8": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 215.3655794724408,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 146,
+      "status": "passed",
+      "tokens_per_second": 4.643267519580419,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    },
+    "stage": "recurrence oracle/replay/guards passed max_abs=1.19209e-06\nrecurrence_timing samples=50 mean_us=993.105 p50_us=994.439 p95_us=1007.93",
+    "cpu": "CTest 3/3 passed; no tolerances loosened",
+    "baseline_trace": "Independent FP64 oracle/replay/guards passed; 32 complete kernel-call marker windows on each of three cores"
+  },
+  "resources": {
+    "runs_per_token": 146,
+    "root_bos": 314,
+    "host_upload_bytes_per_token": 8192,
+    "host_download_bytes_per_token": 262144,
+    "bf16_resident_bytes": 2917120000,
+    "int8_ffn_resident_bytes": 2124396544,
+    "internal_dma_bandwidth": null,
+    "full_array_compute_utilization": null
+  },
+  "limitations_and_next_work": [
+    "Existing half precision is BF16, not IEEE FP16; strict IEEE FP16 requirement remains unresolved",
+    "INT8 remains experimental FFN-only W8A16; representative corpus and long-context quality checks pending",
+    "Prefill remains sequential resident replay, not batched",
+    "Prepare and finish dominate baseline kernel-call cycles; investigate vectorization while retaining stable FP32 state",
+    "Measure current device cycles without trace overflow and separate DMA/submission/PDI overhead; consider value-residual fusion",
+    "No hardware roofline or negligible-further-improvement claim; four process runs per precision do not establish confidence intervals"
+  ],
+  "detailed_logs": "reports/runs/recurrence-2026-10-03",
+  "int8_baseline_snapshot_sha256": "b6953d17d5d190c3811dbf235df725eed51173030240f35c9f4c326004a20993",
+  "final_artifact_sha256": {
+    "config.json": "c75662b4da1a47eba5fa13250ad8443b471041fc65b769690ce21d02ee693052",
+    "design.xclbin": "ca6c7fb727b9b0e5a0fced0d3556b0d33e9a243f8465869fa2a9aaffac390366",
+    "instructions.bin": "79ffef6ed180c2bbe295bd38290b6122a09d169c2dab9cadf63ee0248a2024f8"
+  },
+  "source_sha256": {
+    "tools/compile/rwkv7_recurrence_stage.py": "533be6a504c525ee2b4c5d7d72e1df832f8957f27ab4ba6e8bb06b3629ad5bea",
+    "tests/inference/recurrence_stage_test.cpp": "91ae2e5d05d281a61a8e2b941ef5adf9fde361e4a23a826a79215a047a646bcf",
+    "tests/inference/cleanup_regression.cpp": "3ac0fa11010d0e194aeb29e40fa92e3f7d544d1ef70e42996c6f9e8bc6169f7f"
+  }
+}

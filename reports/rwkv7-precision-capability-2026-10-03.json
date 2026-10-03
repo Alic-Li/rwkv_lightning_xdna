@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "Precision capability audit; no change to production inference arithmetic or measured performance. Overall optimization goal remains active.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "compiler_probe": {
+    "scope": "Installed compiler/API support for vector multiply; no NPU dispatch or native throughput claim",
+    "target": "aie2p-none-unknown-elf",
+    "compiler": "clang version 22.0.0 (https://github.com/Xilinx/llvm-aie 773413fb18d048abfe539feacf25069201df16b8)\nTarget: x86_64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /home/alic-li/work_space/rwkv_lightning_xdna/.venv/lib/python3.12/site-packages/llvm-aie/bin\nBuild config: +assertions",
+    "architecture_macros": [
+      "#define __AIE_ARCH_MODEL_VERSION__ 21011500",
+      "#define __AIE_ARCH_MODEL_VERSION__LABEL __AIE_ARCH_MODEL_VERSION__##__AIE_ARCH_MODEL_VERSION__",
+      "#define __AIE_ARCH_NAME_STR__ \"AIE2P\"",
+      "#define __AIE_ARCH_NAME__ AIE2P",
+      "#define __AIE_ARCH__ 21",
+      "#define __AIE_MODEL_VERSION_NAME_STR__ \"aie2p_arch_r1p15\"",
+      "#define __AIE_MODEL_VERSION__ 11500"
+    ],
+    "positive_controls_passed": true,
+    "probes": {
+      "bf16": {
+        "compiled": true,
+        "exit_code": 0,
+        "command": [
+          "/home/alic-li/work_space/rwkv_lightning_xdna/.venv/lib/python3.12/site-packages/llvm-aie/bin/clang++",
+          "--target=aie2p-none-unknown-elf",
+          "-std=c++20",
+          "-O2",
+          "-D__AIE_API_AIE_ADF_HPP__",
+          "-I/home/alic-li/work_space/rwkv_lightning_xdna/.venv/lib/python3.12/site-packages/mlir_aie/include",
+          "-c",
+          "build/precision-capability-verified/bf16.cc",
+          "-o",
+          "build/precision-capability-verified/bf16.o"
+        ],
+        "source_sha256": "8d96077f407b0a4963145ac7b8ed8cc7214fbbbbfaf6d33ca62ab16599ca2ebf",
+        "object_sha256": "26763995315c107dce38a7e839b9d43f9e689b814d3b4049957d68d918b0162e",
+        "errors": []
+      },
+      "int8": {
+        "compiled": true,
+        "exit_code": 0,
+        "command": [
+          "/home/alic-li/work_space/rwkv_lightning_xdna/.venv/lib/python3.12/site-packages/llvm-aie/bin/clang++",
+          "--target=aie2p-none-unknown-elf",
+          "-std=c++20",
+          "-O2",
+          "-D__AIE_API_AIE_ADF_HPP__",
+          "-I/home/alic-li/work_space/rwkv_lightning_xdna/.venv/lib/python3.12/site-packages/mlir_aie/include",
+          "-c",
+          "build/precision-capability-verified/int8.cc",
+          "-o",
+          "build/precision-capability-verified/int8.o"
+        ],
+        "source_sha256": "8688ec54f8ec70f2b91ffc7cec114389f21804bbaf82d55a5c638fa36264ce50",
+        "object_sha256": "7c20c87f0b1b87515990d774ca5569f78094235ee280c42f0c178f7ad324b1e1",
+        "errors": []
+      },
+      "fp16": {
+        "compiled": false,
+        "exit_code": 1,
+        "command": [
+          "/home/alic-li/work_space/rwkv_lightning_xdna/.venv/lib/python3.12/site-packages/llvm-aie/bin/clang++",
+          "--target=aie2p-none-unknown-elf",
+          "-std=c++20",
+          "-O2",
+          "-D__AIE_API_AIE_ADF_HPP__",
+          "-I/home/alic-li/work_space/rwkv_lightning_xdna/.venv/lib/python3.12/site-packages/mlir_aie/include",
+          "-c",
+          "build/precision-capability-verified/fp16.cc",
+          "-o",
+          "build/precision-capability-verified/fp16.o"
+        ],
+        "source_sha256": "5d76a5208ccf7d2c25c8762f8d35526ce20dd323388b8641a9b0893ac418fe1e",
+        "object_sha256": null,
+        "errors": [
+          "build/precision-capability-verified/fp16.cc:2:29: error: _Float16 is not supported on this target",
+          "build/precision-capability-verified/fp16.cc:2:48: error: _Float16 is not supported on this target",
+          "build/precision-capability-verified/fp16.cc:3:28: error: no matching function for call to 'load_v'",
+          "build/precision-capability-verified/fp16.cc:3:48: error: no matching function for call to 'load_v'"
+        ]
+      }
+    }
+  },
+  "local_api_evidence": {
+    "file": ".venv/lib/python3.12/site-packages/mlir_aie/include/aie_api/detail/aie2p/mul_acc32_fp.hpp",
+    "sha256": "8c5536faa13ea406c27fa8e9576a763cec544cc57b7c33346b24175ae4ba65ae",
+    "finding": "16-bit floating-point vector multiply specialization permits only bfloat16 for __AIE_ARCH__==21; float16 is additionally permitted for __AIE_ARCH__==22."
+  },
+  "vendor_reference": {
+    "url": "https://download.amd.com/docnav/aiengine/xilinx2025_1/aiengine_api/aie_api/doc/group__group__mmul.html",
+    "section": "Matrix multiplication modes for real types",
+    "finding": "XDNA2 row provides BF16 and integer modes but no f16 x f16 modes; AIE-MLv2 row separately provides f16 modes. BF16 and IEEE binary16 must not be conflated."
+  },
+  "interpretation": [
+    "Installed AIE2P target rejects _Float16; positive BF16 and INT8 controls compile, excluding a general missing-header/toolchain failure.",
+    "Do not expose an FP16 mode that silently uses BF16 inputs and weights.",
+    "Strict IEEE FP16 semantics require explicit emulation or a different supported execution target. No emulated FP16 implementation or performance claim is made by this probe.",
+    "Compilation success for BF16/INT8 does not prove hardware correctness, native instruction rate, DMA bandwidth, or full-model throughput.",
+    "No runtime fallback, model change, toolchain upgrade or hardware change was made."
+  ],
+  "next_work": [
+    "Continue recurrence/runtime and INT8 profiling independently of the precision clarification.",
+    "Determine FP16 semantic emulation cost if strict IEEE FP16 remains required.",
+    "Benchmark native integer matrix operations against the current W8A16 conversion path before selecting activation quantization."
+  ],
+  "reproduction": ".venv/bin/python tools/validation/precision_capabilities.py --output build/precision-capability-verified",
+  "probe_sha256": "ab2e85351a57fc2ae9cc43adb8c7423eb498771aaceb53bea3ce03aa1fafa5ac",
+  "raw_logs": "reports/runs/precision-capability-2026-10-03"
+}

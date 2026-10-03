@@ -1,0 +1,223 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "Experimental INT8 FFN W8A16 implementation and measurement. Overall FP16/INT8 hardware-limit goal remains active.",
+  "baseline_commit": "f319528d8be5ea763c67ee4a5a31b1d6cb366d6a",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "precision": {
+    "baseline": "BF16 matrix weights/inputs; FP32 accumulation and recurrent state; some normalization statistics double",
+    "candidate": "Only FFN key/value weights INT8; on-core conversion to BF16 and BF16 MAC; scale after FP32 dot product. Other matrices remain BF16. Not native W8A8 compute or IEEE FP16."
+  },
+  "changes": [
+    "C++ per-output symmetric INT8 quantization matching CUDA FP16 scale rounding, nearest-even codes and post-dot scaling",
+    "Packed 16x256 signed codes plus 16 expanded FP32 scales; on-core dequantization without full DDR dequantized weights",
+    "Explicit experimental WeightMode::Int8FFN / --weights int8-ffn; strict artifact ABI, no silent fallback",
+    "Shared offline BF16/INT8 ChannelMix graph and common device helpers",
+    "Independent stage oracle/guards, CPU quantization tests, whole-model teacher-forced accuracy tool and offline weight-error audit"
+  ],
+  "decode_abba": {
+    "order": "BF16/INT8/INT8/BF16",
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "samples_per_variant": 96,
+    "process_mean_ms": [
+      232.7027082500001,
+      218.28690941666662,
+      218.1971598125,
+      232.6713477083334
+    ],
+    "baseline_mean_ms": 232.68702797916674,
+    "candidate_mean_ms": 218.2420346145833,
+    "latency_reduction_percent": 6.207906598848623,
+    "baseline_tokens_per_second": 4.29761817272226,
+    "candidate_tokens_per_second": 4.582068719098984,
+    "prefill_tokens_per_second": [
+      4.2974507890023155,
+      4.5839376448154
+    ],
+    "prefill_scope": "Sequential resident replay, not batched prefill",
+    "conditions": "Same executable and artifact root; no concurrent compilation/NPU workload; RWKV_XDNA_PROFILE disabled"
+  },
+  "isolated_stage": {
+    "status": "passed",
+    "oracle_max_abs": 2.384185791015625e-07,
+    "timing_abba": [
+      {
+        "latency": {
+          "mean_ms": 1.9986013399999978,
+          "p50_ms": 1.966016,
+          "p95_ms": 2.217875,
+          "samples": 200
+        },
+        "weights": "bf16"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.3769281649999996,
+          "p50_ms": 1.37251,
+          "p95_ms": 1.407599,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.3725304599999995,
+          "p50_ms": 1.369645,
+          "p95_ms": 1.395825,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 2.0351343649999993,
+          "p50_ms": 1.998398,
+          "p95_ms": 2.219398,
+          "samples": 200
+        },
+        "weights": "bf16"
+      }
+    ],
+    "bf16_weight_bytes": 67108864,
+    "int8_weight_bytes": 34078720,
+    "accuracy_scope": "Synthetic ChannelMix; not whole-model accuracy"
+  },
+  "whole_model_accuracy": {
+    "text_512": {
+      "baseline_perplexity": 3.6260626127528526,
+      "baseline_precision": "bf16_fp32_state",
+      "baseline_resident_bytes": 2917120000,
+      "candidate_perplexity": 3.634336796879438,
+      "candidate_resident_bytes": 2124396544,
+      "first_token_nodes_compared": 960,
+      "max_abs_logits": 2.562135696411133,
+      "max_kl": 0.03180275021430237,
+      "mean_kl": 0.0010428022785350015,
+      "mean_nll_increase": 0.0022792651593448454,
+      "nll_tokens": 512,
+      "perplexity_ratio": 1.0022818646587859,
+      "precision": "int8_ffn_bf16_others_fp32_state",
+      "quality_gate": "No language-quality acceptance threshold is implied by this measurement.",
+      "reset_and_branch": "passed",
+      "status": "measured",
+      "steps": 512,
+      "top1_agreement": 0.98828125,
+      "type": "summary",
+      "workload": "supplied UTF-8 text"
+    },
+    "control_128": {
+      "baseline_precision": "bf16_fp32_state",
+      "baseline_resident_bytes": 2917120000,
+      "candidate_resident_bytes": 2124396544,
+      "first_token_nodes_compared": 960,
+      "max_abs_logits": 1.3785514831542969,
+      "max_kl": 0.005822421100109067,
+      "mean_kl": 0.00024574528660728626,
+      "precision": "int8_ffn_bf16_others_fp32_state",
+      "quality_gate": "No language-quality acceptance threshold is implied by this measurement.",
+      "reset_and_branch": "passed",
+      "status": "measured",
+      "steps": 128,
+      "top1_agreement": 1.0,
+      "type": "summary",
+      "workload": "IDs 1,2,7,9 followed by baseline greedy tokens"
+    },
+    "fixture": "tests/data/precision_smoke.txt",
+    "fixture_sha256": "012617366c731ff4a2adbca903fdecc572a90c1681eead52f04e04637642e73e",
+    "warning": "Original mixed English/Chinese smoke sample; no representative corpus or long-context production quality acceptance claimed."
+  },
+  "error_attribution": {
+    "first_token_first_divergence": "Layer 0 FFN key, node 34, relative L2 0.0071559071; preceding normalization/mixing and attention/recurrent path unchanged",
+    "propagation": "Squared ReLU and value projection propagate FFN weight error; later attention/recurrent computations receive perturbed inputs despite unchanged FP32 state arithmetic",
+    "first_token_largest_relative_l2": "Layer 21 squared ReLU, node 875, 0.0823824",
+    "state_relative_l2_at_steps": {
+      "1": 0.0202580605557,
+      "8": 0.0102747131455,
+      "32": 0.00971910282265,
+      "512": 0.0107396349771
+    },
+    "stage_device_vs_quantized_oracle_max_abs": 1.1920928955078125e-07,
+    "audit_matrices": 48,
+    "audit_codes": 805306368,
+    "fp16_scale_changed_codes": 4014230,
+    "minimum_scale_rows": 391,
+    "actual_quantization_relative_l2_range": [
+      0.008510958244390443,
+      0.011560881658691128
+    ],
+    "fp16_scale_effect_relative_l2_range": [
+      0.0019429506563058104,
+      0.002325584215344912
+    ],
+    "baseline_storage_max_abs": 0.0,
+    "note": "Scale and code errors are not orthogonal/additive; scale-effect metric includes code changes."
+  },
+  "validation": {
+    "cpu": "CTest 3/3 passed",
+    "bf16": "128-token exact regression: 1116 vectors including all 960 first-token nodes and state/logits checkpoints; zero differences",
+    "int8": "Independent FP64 stage oracle at existing tolerances, three inputs, zero rows, immutable input/weight and BO guards passed; full-model reset/branch exact checks passed",
+    "fresh_default_artifacts": "Full release-int8-ffn-kernels preset succeeded, then both-mode stage tests, BF16 128-token exact regression and INT8 CLI generation passed"
+  },
+  "resident_resources": {
+    "bf16_bytes": 2917120000,
+    "int8_bytes": 2124396544,
+    "saved_bytes": 792723456,
+    "runs_per_token": 146,
+    "root_bos": 314,
+    "upload_bytes_per_token": 8192,
+    "download_bytes_per_token": 262144,
+    "internal_dma_bandwidth": null,
+    "full_array_compute_utilization": null
+  },
+  "int8_stage_profile_median_ms_excluding_first_token": {
+    "attention_projections": 44.9716,
+    "channel_mix": 53.7423,
+    "element": 19.9525,
+    "head": 7.17682,
+    "norm": 0.450704,
+    "norm_mix": 8.13709,
+    "projection_residual": 23.8831,
+    "recurrence_stage": 59.2563
+  },
+  "profile_scope": "Host-observed stage wall time including DMA, scheduling and PDI, not device compute cycles.",
+  "references": {
+    "FastFlowLM_commit": "b0d41a03411470373f849b25e3ce9356d716a483",
+    "FastFlowLM_access": "Public npu_sequence/Gemm/dequant and Q4NX headers inspected. Core implementation distributed in binary libraries; no readable INT8 device implementation found in checkout.",
+    "rwkv_lightning_cuda_commit": "ec32ae411bb439f7c1894507b9b470b6d3a00f4d",
+    "quantization": "quant/modeling/rwkv_quantize.cpp and quant/gemmv/rwkv_w8a16.cu; preserved existing checkpoint helper FP16 half-tie-up scale conversion, min 2^-24, nearest-even integer codes"
+  },
+  "limitations_and_next_work": [
+    "Current baseline and W8A16 activation precision are BF16, not requested IEEE FP16; precision clarification remains unanswered",
+    "Production INT8 requires representative held-out corpus and long-context accuracy gates; FFN-only smoke measurements are insufficient",
+    "Profile prepare/recurrent/finish device cycles: recurrence is now largest measured INT8 stage and shared with BF16",
+    "Investigate measured value-residual submission overhead and fusion",
+    "Quantize other matrix-heavy operations where accuracy allows; evaluate native INT8 compute independently",
+    "Implement batched prefill and quantify real DDR/DMA bandwidth, submission overhead and full-array utilization",
+    "No architectural roofline or negligible-further-improvement claim; four benchmark processes do not establish confidence intervals"
+  ],
+  "detailed_logs": "reports/runs/int8-channel-2026-10-03",
+  "final_default_channel_artifact_sha256": {
+    "bf16-channel-mix": {
+      "config.json": "e44081b3b4e5d2e335964d1495f34d8157b12f8ce4f09813d949a45b2f373be1",
+      "design.xclbin": "1eb286c105cb840f6f1aa3b6abb8b4d7ea00bff82a04763341aca3d3128a2643",
+      "instructions.bin": "677ec4aacbd62e5348c8777ec79ba8ac027675175f26cd636ca42484ae89fe0b"
+    },
+    "int8-channel-mix": {
+      "config.json": "40732f89360365b384a94508bf94eea2ea4cc182e23ae4cc6ce2c340eb429638",
+      "design.xclbin": "ab4f7abb8e36045c333ef4c6ae33578597883a10b17078102087d2df4e64f4f0",
+      "instructions.bin": "c09b36ae2ee1dafc58cfcc7160ce30c3b2c65a79bb742602265676f3f8a519b7"
+    }
+  },
+  "source_sha256": {
+    "src/inference/quantization.cpp": "e103c5a7e233488f6e46902817664af3ccad1935268d7218cf795e402c10b119",
+    "kernels/rwkv/channel_mix_int8.cc": "a40d55a14becc464f597c9b35626bd510556151e00609936946403910b83b5e8",
+    "tools/compile/rwkv7_channel_mix.py": "f8cd2d5ae6a97801fee7d2265855a89a487f2455cf569224b244b65a3ab930f4",
+    "apps/rwkv_accuracy.cpp": "92024fd4dc9b10a49c0fc7058a965c81ac1444cf9a42a341310a0ddf44e784e6",
+    "apps/rwkv_bench.cpp": "48413e478780694a70c38b6d8d427eec96088a8f12fa52326c67fecf07c5abd9",
+    "apps/rwkv_quantization_audit.cpp": "8b76fec606a5e2491f975885105725b3c2968e217803ad132f3e56c088fc92b7"
+  }
+}

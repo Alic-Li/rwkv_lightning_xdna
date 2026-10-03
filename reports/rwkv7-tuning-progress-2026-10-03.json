@@ -1,0 +1,183 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "baseline_commit": "f319528d8be5ea763c67ee4a5a31b1d6cb366d6a",
+  "scope": "First profiling and BF16 ChannelMix DMA-buffering iteration. Overall FP16/INT8 hardware-limit goal is not achieved.",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / locked MLIR-AIE and Peano environment",
+  "precision": "Existing BF16 matrix weights and inputs; FP32 accumulation and recurrent state. No IEEE FP16 or INT8 path added in this iteration.",
+  "changes": [
+    "rwkv-bench: fixed-token prefill/decode workload with warmup, reset between trials, latency distributions and host BO traffic counts",
+    "ChannelMix value-weight ObjectFifo depth 1 -> 2; same arithmetic and weight layout",
+    "Optional diagnostic ChannelMix hardware trace with trailing guarded BO; production graph rejects trace ABI",
+    "Offline trace event-cycle summary with strict complete-marker checks",
+    "Removed unreferenced rwkv7_relu_squared device entry point"
+  ],
+  "stage_profile_median_ms_excluding_first_token": {
+    "attention_projections": 45.1356,
+    "channel_mix": 70.6508,
+    "element": 20.1415,
+    "head": 7.50158,
+    "norm": 0.438904,
+    "norm_mix": 8.07956,
+    "projection_residual": 23.6033,
+    "recurrence_stage": 59.3874
+  },
+  "stage_profile_scope": "Host-observed run wall time includes DMA, scheduling and PDI; not pure kernel cycles",
+  "double_buffer": {
+    "order": "A/B/B/A",
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "decode_samples_per_variant": 96,
+    "baseline_run_means_ms": [
+      237.91568518750003,
+      243.14918125
+    ],
+    "candidate_run_means_ms": [
+      234.9175262916667,
+      232.44026377083335
+    ],
+    "baseline_mean_ms": 240.53243321875001,
+    "candidate_mean_ms": 233.67889503125002,
+    "baseline_tokens_per_second": 4.1574434957407975,
+    "candidate_tokens_per_second": 4.279376620067762,
+    "latency_reduction_percent": 2.849319776043302
+  },
+  "column_placement": {
+    "order": "A/B/B/A",
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "decode_samples_per_variant": 96,
+    "baseline_run_means_ms": [
+      232.53190289583335,
+      233.6711514791667
+    ],
+    "candidate_run_means_ms": [
+      231.37615464583334,
+      231.1268032708334
+    ],
+    "baseline_mean_ms": 233.10152718750004,
+    "candidate_mean_ms": 231.25147895833337,
+    "baseline_tokens_per_second": 4.28997618362075,
+    "candidate_tokens_per_second": 4.32429666830446,
+    "latency_reduction_percent": 0.7936662841674776,
+    "decision": "Not retained: less than 1 percent aggregate improvement, insufficient evidence to justify fixed eight-column placement from four process runs"
+  },
+  "hardware_trace": {
+    "schema_version": 1,
+    "cores": [
+      {
+        "core": "core_trace for tile3,0",
+        "invocations": 1,
+        "marked_cycles": 1869606,
+        "event_cycles": {
+          "PORT_RUNNING_0": 0,
+          "LOCK_STALL": 989590,
+          "INSTR_VECTOR": 110592,
+          "MEMORY_STALL": 450,
+          "PORT_RUNNING_1": 11
+        },
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.5293040351817442,
+          "INSTR_VECTOR": 0.059152570113703104,
+          "MEMORY_STALL": 0.00024069242396526327,
+          "PORT_RUNNING_1": 5.8835925858175464e-06
+        }
+      },
+      {
+        "core": "core_trace for tile5,0",
+        "invocations": 1,
+        "marked_cycles": 1589379,
+        "event_cycles": {
+          "PORT_RUNNING_0": 0,
+          "LOCK_STALL": 942532,
+          "INSTR_VECTOR": 110592,
+          "MEMORY_STALL": 18490,
+          "PORT_RUNNING_1": 10
+        },
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.5930190344782459,
+          "INSTR_VECTOR": 0.06958189330549856,
+          "MEMORY_STALL": 0.011633474457634083,
+          "PORT_RUNNING_1": 6.291765526032495e-06
+        }
+      }
+    ],
+    "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+  },
+  "numerical_validation": {
+    "stage": "Independent FP64 oracle, shift/replay and immutable-input/BO guards passed; max_abs=2.42144e-7",
+    "whole_model": "128-token bitwise regression passed; 1116 vectors, all 960 first-token nodes, logits and states at 1/8/32/128; reset/branch/invalid inputs/host-state interface passed",
+    "max_abs_logits_and_state": 0,
+    "baseline_snapshot_sha256": "9d9872b1048c19843837adc49dba6809b6f3ae9e476df6384738fce1590fb62e"
+  },
+  "traffic": {
+    "runs_per_token": 146,
+    "resident_bytes": 2917120000,
+    "root_bos": 314,
+    "host_upload_bytes_per_token": 8192,
+    "host_download_bytes_per_token": 262144,
+    "internal_dma_bandwidth": null,
+    "full_array_compute_utilization": null
+  },
+  "references": {
+    "FastFlowLM_commit": "b0d41a03411470373f849b25e3ce9356d716a483",
+    "rwkv_lightning_cuda_commit": "ec32ae411bb439f7c1894507b9b470b6d3a00f4d",
+    "cuda_quantization": "quant/modeling/rwkv_quantize.cpp: per-output symmetric [-127,127], FP16-rounded scales, nearest-even codes. quant/gemmv/rwkv_w8a16.cu: scale after dot-product.",
+    "FastFlowLM_access": "Public npu_sequence/Gemm/dequant interfaces and Q4NX header inspected; main implementations are supplied as binary libraries in this checkout. No readable INT8 device implementation found yet."
+  },
+  "limitations": [
+    "Four benchmark processes per comparison do not establish a confidence interval; earlier runs overlapped compilation and are excluded from claimed improvement",
+    "Trace samples two cores of the double-buffer candidate and can perturb execution; issue/stall fractions are not full-array peak-compute utilization",
+    "DMA port defaults sample channel 0, not every weight DMA channel; bandwidth remains unmeasured",
+    "Current prefill is sequential resident replay, not a batched NPU prefill",
+    "Baseline is BF16, not IEEE FP16; precision clarification was requested and remains unanswered",
+    "No INT8 accuracy, long-context language-quality or hardware-roofline claim is made"
+  ],
+  "next_work": [
+    "Trace/measure weight DMA and submission/PDI separately across the largest stages",
+    "Investigate FIFO transaction granularity and ChannelMix parallelism; core-column spreading alone was marginal",
+    "Implement and validate CUDA-compatible W8A16 quantization/scaling and fused XDNA dequantization, using accessible FastFlowLM scheduling references",
+    "Resolve IEEE FP16 versus BF16 requirement; add accuracy attribution for changed precision",
+    "Implement measured prefill fast path and continue bottleneck-driven iteration"
+  ],
+  "detailed_logs": "reports/runs/tuning-2026-10-03",
+  "final_default_artifact_validation": {
+    "regression": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 232.64423240157475,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 146,
+      "status": "passed",
+      "tokens_per_second": 4.298408731981231,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116
+    },
+    "stage": "ChannelMix oracle/shift/replay/guards passed max_abs=2.42144e-07",
+    "host_tests": "CTest 2/2 passed; Python compiler/trace script syntax passed; trace summary interval/rejection checks passed; diagnostic trace ABI rejected by CLI",
+    "trace_guard_check": "ChannelMix oracle/shift/replay/guards passed max_abs=2.42144e-07"
+  },
+  "final_channel_artifact_sha256": {
+    "config.json": "e44081b3b4e5d2e335964d1495f34d8157b12f8ce4f09813d949a45b2f373be1",
+    "design.xclbin": "15cfbeeb948fb88dfb0f352d4515f6fd13bda6e128b2f24ef0bd96ec4148f367",
+    "instructions.bin": "677ec4aacbd62e5348c8777ec79ba8ac027675175f26cd636ca42484ae89fe0b"
+  },
+  "source_sha256": {
+    "apps/rwkv_bench.cpp": "d9b64d5eb8d8a01fa17c232e29085dcd20014b595aa0df196a0b884e245c49f3",
+    "tools/compile/rwkv7_channel_mix.py": "a172b1c369a86e59f36a418b48059bc504fa0ca29997ccfeebeeed991c3708e5",
+    "tools/validation/trace_summary.py": "0f1b1b0f26f038212edc9723ff851ab2909ff0fdbd499ff33e53bfe8c53f52f4",
+    "kernels/rwkv/gemv_bf16.cc": "c4aeb7389ef264ff3bd68c6be39b36ad525de4dc2094ba04c0408397080200d2",
+    "src/inference/artifacts.cpp": "d71d98fbf90cdf58269a8f948b920d1e9616947a02a91aed0501d454c63ddf78",
+    "tests/inference/channel_mix_test.cpp": "f86e47f743155cfb76fec21a595bb122f4ea8af21979a5d2053671f04bf3dbf1"
+  },
+  "local_baseline_artifacts": "build/kernels/tuning-baseline (preserved before replacing the default ChannelMix artifact)"
+}

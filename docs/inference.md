@@ -5,13 +5,21 @@ WKV recurrence/state、归一化、非线性输出和残差使用 FP32。保留�
 部分归一化辅助仍用 double；本次整理没有改变算术。这里的 BF16 不是 IEEE FP16。
 PTH/safetensors 支持 FP32、FP16、BF16 存储，加载为主机 FP32 后一次性排布为设备 BF16。
 
+2026-10-03 已对本机编译器做精度能力核查：`aie2p` 对应 `__AIE_ARCH__=21`，
+BF16/INT8 vector multiply 正向对照均编译成功，而 `_Float16` 被目标明确拒绝。
+[AMD 矩阵模式表](https://download.amd.com/docnav/aiengine/xilinx2025_1/aiengine_api/aie_api/doc/group__group__mmul.html)
+也未在 XDNA2 行列出 FP16 模式。因此 IEEE FP16 不能作为该目标的原生矩阵模式直接
+替换 BF16；若要求严格 FP16 语义，需要单独实现并测量仿真路径，不能把 BF16 改名为
+FP16。该能力核查不代表整个性能目标已完成，见
+[精度能力证据](../reports/rwkv7-precision-capability-2026-10-03.json)。
+
 embedding 查表、tokenizer、sampler、权重加载和调度在 CPU；模型算术全部在 NPU。
 没有 CPU 算子回退。NPU 纯 FP32、hybrid、逐节点 NPU eager 和独立 sequence prefill
 已删除。CPU FP32 后端仅作为显式参考实现，继续支持 eager/graph 和分层 prefill。
 NPU prefill 与 decode 复用同一个逐 token 状态转移。
 
 当前支持 C=2048、32×64 heads、FFN=8192、词表65536、低秩维度不超过256的模型。
-已验证 checkpoint 为 `rwkv7-g1k-1.5b-20260930-ctx25600.pth`，24层、146 runs/token。
+已验证 checkpoint 为 `rwkv7-g1k-1.5b-20260930-ctx25600.pth`，24层、123 runs/token。
 其他形状会报错，不会选择旧实现。先前性能实验和跨精度漂移记录保留在 `reports/`；
 其中的历史命令不再代表当前接口。
 
@@ -85,7 +93,7 @@ LayerNorm，由 `rwkv7_norm.py` 生成，包含在 `release-kernels` 的编译�
 | `model.cpp`、`ops.cpp`、`backend.cpp` | CPU 参考数学流程、基础算子和 WKV |
 | `graph.cpp` | 记录 RWKV 数学节点与依赖，公共图接口 |
 | `graph_internal.hpp` | 图记录及持久设备资源的私有数据结构 |
-| `artifacts.cpp` | 唯一生产配置的 ABI/形状检查，先检查再分配设备资源 |
+| `artifacts.cpp` | 显式精度方案的 ABI/形状检查，先检查再分配设备资源 |
 | `weight_layout.cpp` | 逻辑矩阵到设备 tile 排布、BF16 nearest-even 转换，无 XRT 依赖 |
 | `resident_plan.cpp` | 分配/别名绑定 arena，再将逻辑节点绑定为固定设备 run |
 | `graph_execution.cpp` | 状态导入导出、replay、错误状态、诊断与计时 |
@@ -95,10 +103,20 @@ LayerNorm，由 `rwkv7_norm.py` 生成，包含在 `release-kernels` 的编译�
 | `tools/compile/rwkv7_optimized.py` | 按固定清单编译生产程序 |
 
 默认设备计划为：输入 LayerNorm；每层 attention norm/mix → BF16 attention
-projections → value residual（首层省略）→ FP32 recurrence stage → BF16 output
+projections → fused value residual / FP32 recurrence stage（首层仅 recurrence）→ BF16 output
 projection/residual → BF16 ChannelMix；最后 LayerNorm → BF16 vocabulary head。
 每次 replay 复用全部 BO 和 run，不重新排布权重或构造 command。
-960个逻辑节点仍用于依赖与逐节点诊断，实际提交146个 run；没有原生 runlist。
+960个逻辑节点仍用于依赖与逐节点诊断，实际提交123个 run；没有原生 runlist。
+非首层将 value residual 融入 recurrence prepare，使用7条 lane 分配32个 head，
+first-layer value 只从 DDR 读取一次并广播。三组 value 输入位于30-vector arena 的尾部，
+保留原始 projection 诊断值；下游只传递/写回原有27个 recurrent vector，避免重复写入
+不变的输入。删除独立 value run 和23个独立 value BO，不改变 FP32 state 或运算顺序。
+新的 `fused-value-recurrence-stage` 产物是必需项；旧产物需通过生产 kernel preset 重编译。
+
+已测试进一步合并 attention norm/mix 与 projections 的17核图：虽然提交数从123降到99、
+BO 数从291降到242，且128步逐位回归通过，整模型 A/B/B/A 仍比原图慢约0.7%。
+因此未采用该融合，生产计划保持123次提交；孤立 warm-stage 加速不能代替整模型测量。
+布局、调度失败和对比数据见 [被拒绝的 attention 融合](../reports/rwkv7-attention-fusion-rejected-2026-10-03.json)。
 
 ## C++ 接口和状态
 
@@ -130,7 +148,155 @@ FP32 state 使用 `[head,key,value]` 固定布局。`HOST_ONLY` BO 是 NPU 可�
 `RWKV_XDNA_PROFILE=1` 输出阶段/层计时、主机 submit/wait 和传输时间。
 这些时间包含调度、DMA 和 PDI 开销，不是纯 kernel cycles。
 
+### 可重复性能测量
+
+`rwkv-bench` 使用固定 token ID，先预热4步，再对每轮重新加载零状态。
+计时不含权重加载、建图、reset、采样和状态导出；这些阶段单独报告或在计时区外。
+当前 prefill 仍为逐 token resident replay，不能将其吞吐称为批量 GEMM prefill。
+
+```bash
+cmake --build --preset release
+# 每轮16步 prefill、32步 decode，共3轮；输出 JSON。
+./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 16 32 3
+```
+
+输出包含每轮 prefill tokens/s、decode mean/p50/p95、runs/token、常驻字节和
+host BO 传输字节。禁止同时开启 `RWKV_XDNA_PROFILE`；阶段 profiling 使用 CLI
+单独执行。基准期间避免并行编译或其他 NPU 任务；比较优化前后采用 A/B/B/A 顺序，
+保留每轮分布。固定合成 token 是性能负载，不是语言质量验收。
+
+`host_*_bytes_per_token` 不含共享 DDR 到 AIE 的内部 DMA。未测得的设备带宽和
+全阵列计算利用率在 JSON 中为 `null`，不能用 host wait 时间冒充利用率。
+
+2026-10-03 首轮调优将 ChannelMix value 权重 FIFO 改为双缓冲，A/B/B/A 整模型
+对比为240.53→233.68 ms/token（约2.85%），128步 logits/state 逐位回归通过。
+这不是整体优化任务完成或已达到硬件上限的声明；实验范围、未采用方案及待完成的
+INT8/prefill 工作见 [调优进度](../reports/rwkv7-tuning-progress-2026-10-03.json)。
+
+### ChannelMix 硬件 trace
+
+可在独立目录编译带 trace BO 的诊断产物。生产图会拒绝此 ABI，避免将额外 trace
+参数遗漏后提交。阶段测试仍执行独立数值 oracle 和 BO guard 检查。
+
+```bash
+export PATH="$PWD/.venv/bin:$PATH"
+RWKV_XDNA_TRACE_BYTES=16777216 \
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/channel-trace" \
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
+  .venv/bin/python tools/compile/rwkv7_channel_mix.py
+cmake --build --preset test
+mkdir -p reports/runs/channel-trace
+./build/test/rwkv-channel-mix-test build/kernels/channel-trace 1 \
+  reports/runs/channel-trace/trace.txt
+.venv/bin/python -m aie.utils.trace.parse \
+  --input reports/runs/channel-trace/trace.txt \
+  --mlir build/kernels/channel-trace/bf16-channel-mix/design.prj/input_with_addresses.mlir \
+  --output reports/runs/channel-trace/trace.json
+.venv/bin/python tools/validation/trace_summary.py reports/runs/channel-trace/trace.json
+```
+
+采样一个 key core 和一个 value core，记录 vector issue、memory/stream/lock stall
+及 DMA port 活动。事件时间单位为设备 cycles；统计窗口从收到初始 activation 后开始，
+包含权重等待和运算。各事件比例可能重叠，vector issue 占比不是峰值 FLOPS 利用率，
+也不能代表整个阵列。带 trace 的墙钟计时不用于性能对比。普通阶段微基准可用
+`rwkv-channel-mix-test KERNEL_ROOT 200`，完成 oracle 后单独预热并测量200次。
+
+INT8 trace 将编译入口换为 `tools/compile/rwkv7_channel_mix_int8.py`，并运行
+`rwkv-channel-mix-int8-test TRACE_ROOT BF16_ROOT 1 TRACE_FILE`。第二个目录须为
+不带 trace 的 BF16 基准产物；解析器的 MLIR 路径使用 `int8-channel-mix`。
+该模式仍检查独立 FP64 oracle、输入/权重不可变性和 BO guards，但不输出性能计时。
+设置 `RWKV_XDNA_TRACE_ACTIVATION=1`（须同时设置 trace bytes）可将 key core 的
+计时窗口缩小到 ReLU²及 FIFO release；value core 仍记录原有矩阵窗口。
+`config.json` 中的 `trace_key_region` 标明该差异，不能混用两种窗口比较周期数。
+
+2026-10-03 定向 trace 显示 scalar ReLU²占257,879 cycles；改为24位 significand
+的精确整数向量平方并仅舍入一次后，降到5,780 cycles（该 key core 窗口减少97.76%）。
+直接使用 AIE FP32 vector multiply 曾产生1 ULP差异，已拒绝；保留实现通过917.5万
+scalar/vector/FP64逐位比较及两种精度128步整模型逐位回归。
+整模型 A/B/B/A：BF16 206.953→204.137 ms/token，INT8 191.899→188.931 ms/token，
+分别降低1.36%和1.55%；见 [ReLU²调优证据](../reports/rwkv7-ffn-activation-progress-2026-10-03.json)。
+
 ## 验证与数值边界
+
+Recurrent stage 可用 `rwkv-recurrence-stage-test KERNEL_ROOT 300` 测量孤立提交延迟，
+每次计时外重置 state/auxiliary；原有 FP64 oracle、连续 replay 和 BO guard 检查仍执行。
+诊断编译同样支持 `RWKV_XDNA_TRACE_BYTES`：将上面 trace 命令的编译入口换为
+`tools/compile/rwkv7_recurrence_stage.py`，测试换为 `rwkv-recurrence-stage-test`，
+产物子目录换为 `fused-recurrence-stage`。其生产图占满16个 shim S2MM channel，
+因此诊断图使用单 lane 依次处理32个 head，为 trace 留出通道；分别采样 prepare、
+recurrent、finish 三个 core。marker 仅包围 kernel 调用，不含 FIFO acquire/release。
+这些 cycles 用于比较核内开销，不能视为生产图的并行吞吐或完整 DMA 延迟。
+早期全 `-Os` 标量核加 trace 后超出 tile program memory，历史报告中的该阶段 trace
+使用 `-Oz`。当前向量化 prepare 固定用 `-Oz`，update/finish 默认 `-Os`，后两者可通过
+`RWKV_XDNA_RECURRENCE_OPT` 调整；编译配置分别记录所用选项。不同版本/选项的 trace
+不能互作性能证据。
+2026-10-03 将 recurrent stage 从 `-Oz` 改为 `-Os` 后，孤立阶段从1.143降至0.994 ms。
+整模型 A/B/B/A 中 BF16 为233.06→229.84 ms/token，INT8 FFN 为218.39→214.93 ms/token；
+两种配置均保持128步逐位回归。设备 cycles、编译内存限制和验证范围见
+[Recurrent stage 调优进度](../reports/rwkv7-recurrence-progress-2026-10-03.json)。
+
+融合阶段 oracle 可运行
+`rwkv-recurrence-stage-test KERNEL_ROOT 300 --fused-value`，检查连续状态更新、原始 value
+输入保留和 BO guards。诊断程序切换成本时，先单独编译 `tools/compile/rwkv7_value.py`，
+再用 `--alternate-value` 或 `--fused-value-alternate` 让独立 value 程序在每次计时前运行。
+`mean_us` 仅含被测 recurrence 提交，`mean_pair_us` 包括用于切换的 value 提交；
+`mean_wait_us` 包含调度、程序切换、DMA 和计算，不能称为纯 PDI 加载或纯计算时间。
+独立 value 产物仅用于这项诊断，不再是生产图依赖。
+
+融合后的7-lane 图有空余 trace 输出通道，可以保留生产并行布局采样：
+
+```bash
+RWKV_XDNA_TRACE_BYTES=16777216 \
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/value-recurrence-trace" \
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
+  .venv/bin/python tools/compile/rwkv7_value_recurrence.py
+./build/test/rwkv-recurrence-stage-test build/kernels/value-recurrence-trace \
+  1 --fused-value reports/runs/value-recurrence-trace.txt
+```
+
+解析时使用 `fused-value-recurrence-stage/design.prj/input_with_addresses.mlir`。
+只采样第一条 lane 的 prepare/value、state update、finish 三个 core，各有5个 head 调用。
+2026-10-03 的 A/B/B/A 测量中，融合使 BF16 decode 从229.37降至216.85 ms/token，
+INT8 FFN 从215.12降至202.41 ms/token。两种模式均通过128步同精度逐位回归；
+数据搬运契约、trace、实验方案和限制见
+[Value/recurrence 融合进度](../reports/rwkv7-value-recurrence-progress-2026-10-03.json)。
+
+当前 prepare/value sigmoid 将相同的 FP32 range reduction 和七阶指数多项式按32 lane
+执行。低于 `-69` 的指数输入保留原来的核内标量处理，维持 small-normal/subnormal 行为；
+归一化统计、标量 reciprocal、FP32 recurrent state 更新及多项式系数保持不变。
+prepare/update/finish 分别编译，避免将无关代码带入每个 core，并删除了无调用者的旧 DMA
+入口。独立检查直接比较原标量实现与向量实现的输出 bits，另用 FP64 oracle 和 BO guards：
+
+```bash
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/vector-math-test" \
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
+  .venv/bin/python tools/compile/rwkv7_vector_exp_test.py
+cmake --build --preset test
+./build/test/rwkv-vector-exp-test build/kernels/vector-math-test
+```
+
+2026-10-03 的 A/B/B/A 对比中，BF16 decode 为216.91→207.68 ms/token，INT8 FFN 为
+202.52→192.78 ms/token。两种模式保持128步同精度逐位回归；采样范围、代码内存取舍
+和 device trace 见 [向量 prepare 进度](../reports/rwkv7-vector-prepare-progress-2026-10-03.json)。
+
+后续分区 trace 显示 sigmoid/decay 是 prepare 中最大的已标记算术区段。
+`RWKV_XDNA_PREPARE_TRACE_REGION=1|2|3|4` 分别只标记 key norm、sigmoid/decay、
+prepare 输出运算、value sigmoid/blend；必须同时启用 `RWKV_XDNA_TRACE_BYTES`，
+区域4仅支持 fused-value 图。默认0仍标记完整的 prepare/update/finish。
+这些独立 trace build 的时间不能直接相加作为完整阶段时间，且不包含 FIFO acquire 和
+未标记的 arena copy。命令和测量见 [prepare 分区 profile](../reports/rwkv7-prepare-region-profile-2026-10-03.json)。
+
+根据该 profile，将 sigmoid 最后的单 lane vector multiply 合并成32 lane multiply，
+保留每个元素的原始 native scalar reciprocal。区域2从72,349降至63,923 cycles/head，
+区域4从34,979降至30,766；孤立阶段约3.6%加速，整模型 A/B/B/A 的 BF16 为
+202.743→201.874 ms/token（0.43%），INT8 FFN+output 为185.481→184.825（0.35%）。
+9,216个 scalar/vector 数值比较和三种精度模式的128步逐位回归均通过，BO、提交与
+host 流量不变。详见 [sigmoid batching 进度](../reports/rwkv7-sigmoid-batch-progress-2026-10-03.json)。
+
+另测 FP64 sqrt 在相邻 iterate bits 相同时提前终止：81,920个设备逐位比较和
+INT8 FFN+output 的128步回归均通过，但孤立 recurrence 仅约0.44%改善，整模型
+A/B/B/A 未证明稳定加速（进程间波动大于平均差异）。该方案已撤回，保留原七次迭代。
+证据见 [sqrt fixed-point 实验](../reports/rwkv7-root-fixed-point-rejected-2026-10-03.json)。
 
 测试程序、阶段 oracle 和回归命令见 [验证说明](validation.md)，编译入口见
 [构建与测试](build.md)。
@@ -139,6 +305,100 @@ BF16 整模型与旧纯 FP32 轨迹不是逐值等价；旧跨精度逐元素验
 [历史性能报告](../reports/rwkv7-optimization-summary-2026-10-03.json)。本次要求并检验的
 是同 BF16 配置整理前后的正确性和性能，不放宽误差阈值，不以 argmax 一致代替数值检查。
 128步回归也不代表已经验证完整25600上下文。
+
+## 实验性 INT8 ChannelMix
+
+`--weights int8-ffn` 将每层 ChannelMix 的 key/value 矩阵量化为 W8A16；attention、
+低秩分支和 vocabulary head 暂时保持 BF16。这里的 A16 为 BF16，不是 IEEE FP16。
+其余数值路径保持原实现：FP32 输出、矩阵累加和 WKV state，部分归一化统计使用 double。
+本模式尚未完成完整语料和
+长上下文质量验收，不能将阶段 oracle 通过或短序列 top-1 一致视为生产质量通过。
+
+```bash
+cmake --preset release
+cmake --build --preset release
+cmake --build --preset release-int8-ffn-kernels
+./build/release/rwkv-cli --model "$MODEL" --weights int8-ffn \
+  --prompt 'Question: What is the largest planet in the Solar System? Answer:' \
+  --top-k 1 --max-tokens 32
+./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 16 32 3 --int8-ffn
+```
+
+INT8 模式显式要求 `int8-channel-mix` 产物；缺失或 ABI 不一致会报错，不会回退到 BF16。
+默认目录沿用历史名称 `rwkv7-bf16`，可同时保存两种 ChannelMix 产物。C++ 接口第三个参数
+使用 `WeightMode::Int8FFN`；默认仍为 `WeightMode::BFloat16`。
+
+量化遵循 CUDA RWKV 的逐输出通道对称 `[-127,127]` 算法：先将 `max_abs/127` 经原有
+checkpoint I/O FP16 转换取整，最小 scale 为 `2^-24`，再 nearest-even 取整数代码并
+饱和。原有 FP16 scale 转换的半值向上舍入行为也保留；它不等同于 scale 的 nearest-even。
+scale 以精确展开的 FP32 存入每个 tile 尾部。权重仅在构图时量化一次，设备端只在核内
+展开当前 INT8 tile，完成整行点积后融合乘 scale；不产生 DDR 中的完整反量化矩阵，
+不量化 activation 或 recurrent state。每个 ChannelMix 权重 BO 为34,078,720字节，
+BF16 为67,108,864字节；每 token 的 host 上传/下载字节和提交次数不变。
+
+2026-10-03 INT8 专用图将 activation 的 FP32→BF16 nearest-even 转换移到两个
+producer core，各转换一次，再经 memory tile 广播给矩阵核；保留 FP32 累加和原有
+reduction tree。每阶段转换元素数从2,097,152降到10,240。孤立 INT8 阶段约
+1.388→1.298 ms，整模型 A/B/B/A 为193.091→192.173 ms/token（约0.48%）；
+这是小幅端到端改善，尚未达到硬件极限。同样改动使 BF16 变慢，因此 BF16 保留原图。
+两种模式128步 logits/state及1,116个检查向量均逐位一致。
+实验、被拒绝方案和 trace 见 [activation 转换进度](../reports/rwkv7-channel-activation-progress-2026-10-03.json)。
+
+独立阶段测试及整模型误差工具：
+
+```bash
+cmake --build --preset test
+./build/test/rwkv-channel-mix-int8-test build/kernels/rwkv7-bf16 build/kernels/rwkv7-bf16
+./build/release/rwkv-accuracy "$MODEL" build/kernels/rwkv7-bf16 \
+  build/kernels/rwkv7-bf16 512 tests/data/precision_smoke.txt --text > accuracy.jsonl
+./build/release/rwkv-quantization-audit "$MODEL" > weight-errors.jsonl
+```
+
+`rwkv-accuracy` 先运行并释放 BF16 图，再运行 INT8 图，避免同时持有两套图触发驱动的
+context 数量限制。两种模式使用同一 token 流；输出首 token 全节点误差、每步 logits
+误差、KL、top-1、状态检查点和 reset/branch 检查。提供文本或 token ID 文件时还报告
+next-token NLL/perplexity 差异。追加 `--checkpoint-nodes` 可在第1、8、32和最后一个
+token 输出全节点误差，帮助观察量化误差随 recurrent context 的传播；重合检查点只记录一次。
+状态检查点同时分别报告每层 attention shift、FFN shift 和 FP32 matrix 的误差。
+诊断 trace 会增加设备读取和同步，因此这些运行不能用于性能测量。节点误差包含上游传播，
+不能单独解释为该节点的局部量化误差。
+512-token 实测覆盖3,840个节点比较和288个分层状态比较；已有每步输出误差指标完全一致。
+末步整体 state relative L2 为1.074%，最差单层 attention shift 为2.552%，
+matrix 为1.338%；整体指标不能替代分层检查。详见
+[INT8 检查点误差报告](../reports/rwkv7-int8-checkpoint-accuracy-2026-10-03.json)。
+`precision_smoke.txt` 是原创中英混合测试样本，仅用于
+smoke 检查，不代表完整质量语料。未指定文件时使用固定控制 token 后接 BF16 贪心序列，
+这种负载不能作为语言质量验收。工具使用当前目录的 `assets/rwkv_vocab_v20230424.txt`。
+`rwkv-quantization-audit` 不调用 NPU，逐矩阵分离 BF16 checkpoint 存储舍入、理想
+FP32 scale 下的 INT8 重建误差，以及 FP16 scale 舍入造成的权重/代码变化。
+
+2026-10-03 的 A/B/B/A 测量中，INT8 FFN 将整模型 decode 从232.69降至218.24 ms/token
+（约6.21%），常驻 BO 减少792,723,456字节。512 token smoke 文本 perplexity 从3.6261
+变为3.6343（增加约0.23%）；BF16 的128步逐位回归保持通过。完整测量范围、误差归因、
+产物校验值和未完成工作见 [INT8 FFN 进度](../reports/rwkv7-int8-ffn-progress-2026-10-03.json)。
+当前设备核使用反量化后的 BF16 MAC，不应将其性能称为原生 INT8 MAC 吞吐。
+
+另一个显式实验模式 `--weights int8-ffn-output` 在 FFN INT8 的基础上，将24层
+attention output projection 也改为相同 per-output W8A16 量化。每个权重 tile
+在核内展开，8个 K tile 完成 FP32 累加后乘行 scale，再执行 FP32 residual；不增加
+提交、BO 或 activation 量化边界。编译和验证命令：
+
+```bash
+cmake --build --preset release --target kernels-release-int8-ffn-output
+./build/test/rwkv-projection-residual-int8-test build/kernels/rwkv7-bf16 build/kernels/rwkv7-bf16
+./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 8 24 2 --int8-ffn-output
+./build/release/rwkv-accuracy "$MODEL" build/kernels/rwkv7-bf16 build/kernels/rwkv7-bf16 \
+  512 tests/data/precision_smoke.txt --text --checkpoint-nodes --int8-ffn-output
+./build/release/rwkv-quantization-audit "$MODEL" --attention-output
+```
+
+2026-10-03 A/B/B/A 实测相对 FFN-only INT8 从189.101降至186.747 ms/token
+（1.24%，5.355 tokens/s）；resident BO 从2,124,396,544降至2,025,306,112字节。
+仍为123 runs/token、291 root BO，每步 host 上传/下载8192/262144字节。
+512-token smoke 的 top-1 agreement 为98.83%，mean KL 从 FFN-only 的0.001043
+升至0.001201。该小语料 perplexity 略低不证明质量改善；仍未完成生产质量验收。
+阶段 FP64 oracle、guard、原有两种模式的128步逐位回归均通过。详见
+[INT8 output projection 进度](../reports/rwkv7-int8-output-progress-2026-10-03.json)。
 
 本次整理的同精度回归、阶段 oracle、性能和限制见
 [清理验证摘要](../reports/rwkv7-cleanup-summary-2026-10-03.json)。

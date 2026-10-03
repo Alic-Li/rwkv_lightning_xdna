@@ -1,0 +1,278 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "Batched FP32 transcendental arithmetic in recurrence preparation/value gate. Overall FP16/INT8 hardware-limit goal remains active.",
+  "baseline_commit": "f319528d8be5ea763c67ee4a5a31b1d6cb366d6a",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Batch the existing FP32 exponential range reduction and seventh-order polynomial across 32 lanes; no polynomial approximation change",
+    "Preserve scalar reciprocal and small-normal/subnormal exponent handling below input -69 on the NPU",
+    "Preserve FP64 normalization statistics, scalar key normalization/division, FP32 recurrent state accumulation and update order",
+    "Split prepare/update/finish translation units and remove unreferenced rwkv7_prepare_dma/rwkv7_finish_dma exports",
+    "Compile preparation explicitly at -Oz to fit tile code memory; update and finish retain -Os",
+    "Add C++ device scalar/vector bit comparison with independent FP64 oracle, input immutability and BO guards"
+  ],
+  "profiling_basis": {
+    "previous_prepare_cycles_per_head": 427334.4,
+    "previous_update_cycles_per_head": 51281.0,
+    "interpretation": "Prior traced preparation/value cost was 8.3 times state update; vector polynomial replaces repeated one-lane execution, leaving sensitive state arithmetic untouched.",
+    "local_reference": "third_party/mlir-aie/aie_kernels/common/scalar_f32.h describes AIE2P scalar float multiply/divide lowering to software helpers and native vector-lane/scalar reciprocal primitives."
+  },
+  "code_memory_experiments": {
+    "all_Os": "Rejected: vector preparation overflowed program memory by 1440 bytes initially; removing old DMA exports and splitting phases alone did not resolve overflow",
+    "noinline": "No measured code-size benefit; annotation removed",
+    "retained": "Preparation -Oz, update/finish -Os; explicit choices, no automatic fallback"
+  },
+  "whole_model_benchmark": {
+    "order": "A/B/B/A per precision",
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "conditions": "Same executable; preserved pre-vector artifact root versus candidate. Serial NPU, profiling disabled, no concurrent compilation.",
+    "executable_sha256": "5fd83ea5a4c2b0494bc1602dbdb02c3ba8f729af3906aa7d0adec70ac00cf465",
+    "bf16": {
+      "process_mean_ms": [
+        217.07106689583335,
+        207.84812656250003,
+        207.5053887291667,
+        216.74578308333335
+      ],
+      "baseline_mean_ms": 216.90842498958335,
+      "candidate_mean_ms": 207.67675764583336,
+      "latency_reduction_percent": 4.25602064290187,
+      "baseline_tokens_per_second": 4.6102404738221825,
+      "candidate_tokens_per_second": 4.815175329852628,
+      "sequential_prefill_tokens_per_second": [
+        4.60819380544285,
+        4.820347560983926
+      ]
+    },
+    "int8": {
+      "process_mean_ms": [
+        202.25349633333335,
+        192.67744587500002,
+        192.89169016666668,
+        202.78296581250004
+      ],
+      "baseline_mean_ms": 202.5182310729167,
+      "candidate_mean_ms": 192.78456802083335,
+      "latency_reduction_percent": 4.806314473771378,
+      "baseline_tokens_per_second": 4.937827052419542,
+      "candidate_tokens_per_second": 5.187137177348835,
+      "sequential_prefill_tokens_per_second": [
+        4.938782025011926,
+        5.190173451157517
+      ]
+    }
+  },
+  "isolated_stage": {
+    "fused": "recurrence oracle/replay/guards passed max_abs=9.53674e-07\nrecurrence_timing samples=300 fused_value=1 alternate_value=0 mean_submit_us=2.95536 mean_wait_us=978.941 mean_pair_us=982.048 mean_us=981.969 p50_us=980.705 p95_us=1002.94",
+    "regular": "recurrence oracle/replay/guards passed max_abs=1.19209e-06\nrecurrence_timing samples=300 fused_value=0 alternate_value=0 mean_submit_us=2.46457 mean_wait_us=745.521 mean_pair_us=748.112 mean_us=748.042 p50_us=747.542 p95_us=758.803",
+    "scope": "300 timed runs after oracle and four warmups, fixed state/aux reset outside timing; not whole-model latency"
+  },
+  "validation": {
+    "transcendentals_Os": "vector exponential/sigmoid scalar bits/oracle/guards passed values=9216 max_abs=9.44104e-08",
+    "transcendentals_Oz": "vector exponential/sigmoid scalar bits/oracle/guards passed values=9216 max_abs=9.44104e-08",
+    "transcendental_scope": "9216 padded test values; nearest float neighbors at range-reduction/underflow boundaries, signed zero, tiny inputs, extreme gates to +/-1e30 and 8192 seeded random gates. Scalar/vector output bits must match; FP64 oracle uses original stage tolerance 2e-5 + 2e-5*abs(reference).",
+    "candidate_bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 207.76599027559053,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.813107278402752,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "candidate_int8": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 193.2179672755907,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 5.175502123845863,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    },
+    "default_bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 207.87972340157492,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.810473978110094,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "default_int8": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 193.1723690393701,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 5.176723798403031,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    },
+    "default_stage": [
+      "recurrence oracle/replay/guards passed max_abs=9.53674e-07",
+      "recurrence oracle/replay/guards passed max_abs=1.19209e-06"
+    ],
+    "trace_stage": "recurrence oracle/replay/guards passed max_abs=9.53674e-07",
+    "cpu": "CTest 3/3 passed",
+    "build": "Full release-int8-ffn-kernels preset succeeded; fresh default artifacts dispatched and checked",
+    "scope": "Exact same-precision 128-token snapshots, 1116 vectors including all 960 first-token nodes, logits/state checkpoints, reset/branch, rejected invalid inputs and host state API. No numerical tolerances loosened."
+  },
+  "current_device_trace": {
+    "data": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile2,0",
+          "invocations": 5,
+          "marked_cycles": 1383336,
+          "event_cycles": {
+            "PORT_RUNNING_0": 32,
+            "LOCK_STALL": 200382,
+            "INSTR_VECTOR": 33680,
+            "MEMORY_STALL": 40
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 2.3132485527738743e-05,
+            "LOCK_STALL": 0.1448541785943545,
+            "INSTR_VECTOR": 0.024346941017945024,
+            "MEMORY_STALL": 2.8915606909673427e-05
+          }
+        },
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 5,
+          "marked_cycles": 256405,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 5,
+            "INSTR_VECTOR": 67240,
+            "PORT_RUNNING_1": 0
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 1.9500399758195042e-05,
+            "INSTR_VECTOR": 0.26224137594820696,
+            "PORT_RUNNING_1": 0.0
+          }
+        },
+        {
+          "core": "core_trace for tile4,0",
+          "invocations": 5,
+          "marked_cycles": 909431,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 5,
+            "INSTR_VECTOR": 960,
+            "PORT_RUNNING_1": 0
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 5.497943219441607e-06,
+            "INSTR_VECTOR": 0.0010556050981327886,
+            "PORT_RUNNING_1": 0.0
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "phases": [
+      "prepare plus value residual",
+      "FP32 state update",
+      "finish"
+    ],
+    "mean_marked_cycles_per_head": [
+      276667.2,
+      51281.0,
+      181886.2
+    ],
+    "prior_mean_marked_cycles_per_head": [
+      427334.4,
+      51281.0,
+      181812.2
+    ],
+    "prepare_cycle_reduction_percent": 35.25744709529586,
+    "scope": "Same seven-lane topology with trace egress; first lane only, five complete head calls on each of three cores. Markers exclude FIFO acquire/release. Tracing can perturb execution. Lower vector-issue fraction reflects fewer issued instructions and is not a regression or a peak-FLOPS utilization measure."
+  },
+  "current_int8_profile_median_ms_excluding_first_token": {
+    "attention_projections": 45.0912,
+    "channel_mix": 53.7794,
+    "head": 7.39555,
+    "norm": 0.450302,
+    "norm_mix": 7.92152,
+    "projection_residual": 24.0003,
+    "recurrence_stage": 2.10825,
+    "value_recurrence_stage": 51.6098
+  },
+  "profile_scope": "Host-observed stage wall time includes scheduling, switching, DMA and compute; not pure kernel latency.",
+  "resources": {
+    "runs_per_token": 123,
+    "root_bos": 291,
+    "bf16_resident_bytes": 2917120000,
+    "int8_ffn_resident_bytes": 2124396544,
+    "host_upload_bytes_per_token": 8192,
+    "host_download_bytes_per_token": 262144,
+    "traffic_change": "No model BO, DMA layout or host traffic change in this iteration",
+    "internal_dma_bandwidth": null,
+    "full_array_compute_utilization": null
+  },
+  "limitations_and_next_work": [
+    "Existing half precision is BF16, not IEEE FP16; that requirement remains unresolved",
+    "INT8 remains experimental FFN-only W8A16; held-out corpus and long-context production quality gates remain",
+    "Prefill measurement is still sequential resident replay; batched NPU prefill remains required",
+    "INT8 ChannelMix is now largest aggregate host-observed stage (~53.8 ms/token), followed by fused recurrence (~51.6 ms/token); profile data movement and conversion there before further tuning",
+    "Preparation still exceeds update cycles by about 5.4 times; retained FP64 statistics and scalar FP32 division need separate profiling before changes",
+    "Continue measuring actual DDR/DMA bandwidth, scheduling stalls and full-array utilization; architectural roofline not established",
+    "Four process runs per precision do not establish confidence intervals; sampled bit equality is not exhaustive proof over all FP32 inputs"
+  ],
+  "detailed_logs": "reports/runs/vector-prepare-2026-10-03",
+  "final_artifact_sha256": {
+    "fused-recurrence-stage": {
+      "config.json": "72ce93b35bab7fc4171b2361d26980567bb429e2ee49380ae45ad58e24d0bfa5",
+      "design.xclbin": "1e8dcc872db05ffae400906a1031876b89ba7fa424af692f51642fd53d372128",
+      "instructions.bin": "79ffef6ed180c2bbe295bd38290b6122a09d169c2dab9cadf63ee0248a2024f8"
+    },
+    "fused-value-recurrence-stage": {
+      "config.json": "8a6ba9c322228ab545f0ad72c2b10e1f17697122e22880f1d4c24442dafd1ef6",
+      "design.xclbin": "bf17c438c574e0c48c2e7bdf45b085a015e7b3ada7646c6c080260c398dc235b",
+      "instructions.bin": "24694fda8f35fd7ea0c1d6fcb6b5fd7dfdbc6fdc733becd6d587bc06fff580ee"
+    }
+  },
+  "baseline_artifacts": "build/kernels/before-vector-prepare",
+  "source_sha256": {
+    "kernels/rwkv/vector_exp_fp32.hpp": "a339341063835450c3a982b4b8079231d73b27e02dbe52bfa1b005b4d417db52",
+    "kernels/rwkv/stages_fp32.cc": "658bc2b1f5488447ae77721c62a6a024db07a6e93fa399242e49a8554bd8b811",
+    "kernels/rwkv/recurrence_prepare_fp32.cc": "36b79e1dcbde1ec78781836b52d419bc532084e3a9f1edf5fba134632d1bc530",
+    "kernels/rwkv/recurrence_update_fp32.cc": "c6da25787367b317e4132e8abf2ea0bfc50fe50c8c44d322eefece99289b946c",
+    "kernels/rwkv/recurrence_finish_fp32.cc": "870c13761f14dc3473a1c08b29dbc8d0ddaec5918934b936f09c19ac8390d1bd",
+    "kernels/rwkv/value_recurrence_fp32.cc": "f24c563d7e903dc287b33b4813549e77cb0ae89981243f6a02188fed2d416613",
+    "kernels/rwkv/vector_exp_test.cc": "9a6dfed9bc420450c1b7e1fcdf28d6ac3c6370f2f43eb3929afffacfd69e7921",
+    "tools/compile/rwkv7_recurrence_stage.py": "a358aab70ce8b731bd0a3c26fed7b752c8bd6eebca2afe757b9edc887495e1f9",
+    "tools/compile/rwkv7_vector_exp_test.py": "3f8ec5c97ed70f8b1db3dbec20574b8cf0c7b2f2307b8fce3c04f8efa2b8634d",
+    "tests/inference/vector_exp_test.cpp": "e2c48da5de2b7385538190a51c208bdbb6c566b55cf70e6911e280993deac9ee"
+  }
+}

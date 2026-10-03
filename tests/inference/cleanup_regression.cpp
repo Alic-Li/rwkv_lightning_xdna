@@ -46,12 +46,13 @@ struct Snapshot {
     if (!file)
       throw std::runtime_error("Truncated snapshot vector");
     double max_abs = 0, sum = 0, dot = 0, aa = 0, bb = 0;
+    size_t worst_index = 0;
     for (size_t i = 0; i < size; ++i) {
       double a = actual[i], b = record ? a : expected[i];
       if (!std::isfinite(a) || !std::isfinite(b))
         throw std::runtime_error("Nonfinite snapshot");
       double e = std::abs(a - b);
-      max_abs = std::max(max_abs, e);
+      if (e > max_abs) { max_abs = e; worst_index = i; }
       sum += e;
       dot += a * b;
       aa += a * a;
@@ -63,7 +64,10 @@ struct Snapshot {
     if (max_abs != 0)
       throw std::runtime_error("Cleanup changed output vector " +
                                std::to_string(checked) +
-                               " max_abs=" + std::to_string(max_abs));
+                               " " + nlohmann::json({{"max_abs", max_abs},
+                                   {"index", worst_index},
+                                   {"actual", actual[worst_index]},
+                                   {"expected", expected[worst_index]}}).dump());
     return {
         {"max_abs", max_abs},
         {"mean_abs", size ? sum / size : 0},
@@ -72,23 +76,30 @@ struct Snapshot {
 };
 int main(int argc, char **argv) {
   try {
-    if (argc != 5)
+    if (argc < 5 || argc > 6 ||
+        (argc == 6 && std::string(argv[5]) != "--int8-ffn" &&
+         std::string(argv[5]) != "--int8-ffn-output"))
       throw std::runtime_error("Usage: rwkv-cleanup-regression MODEL KERNELS "
-                               "record|verify SNAPSHOT");
+                               "record|verify SNAPSHOT [--int8-ffn|--int8-ffn-output]");
+    const bool int8 = argc == 6;
+    const bool output_int8 = int8 && std::string(argv[5]) == "--int8-ffn-output";
     const std::string mode = argv[3];
     if (mode != "record" && mode != "verify")
       throw std::runtime_error("Invalid mode");
     Snapshot snapshot(argv[4], mode == "record");
-    if (snapshot.number(0x31564b5752474443ULL) != 0x31564b5752474443ULL)
-      throw std::runtime_error("Snapshot version mismatch");
+    const uint64_t format = output_int8 ? 0x33564b5752474443ULL :
+        int8 ? 0x32564b5752474443ULL : 0x31564b5752474443ULL;
+    if (snapshot.number(format) != format)
+      throw std::runtime_error("Snapshot version/precision mismatch");
     Weights weights(argv[1]);
     auto backend = cpu_backend();
     Model model(weights, *backend);
-    DecodeGraph graph(weights, argv[2]);
+    DecodeGraph graph(weights, argv[2], output_int8 ? WeightMode::Int8FFNOutput :
+        int8 ? WeightMode::Int8FFN : WeightMode::BFloat16);
     graph.load_state(model.initial_state());
     auto stats = graph.stats();
-    if (stats.persistent_runs != 146)
-      throw std::runtime_error("Expected 146 resident runs");
+    if (stats.persistent_runs != 123)
+      throw std::runtime_error("Expected 123 resident runs");
     size_t traced = 0;
     graph.set_trace(
         [&](size_t node, const Vector &output, const Vector *state) {
@@ -186,6 +197,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error("Reset mismatch");
     std::cout << nlohmann::json(
                      {{"mode", mode},
+                      {"weights", output_int8 ? "int8-ffn-output" : int8 ? "int8-ffn" : "bf16"},
                       {"status", "passed"},
                       {"first_token_nodes", traced},
                       {"vectors_checked", snapshot.checked},

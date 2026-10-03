@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "Recheck -O2 after recurrence translation-unit split; no production change.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "profiling_basis": "Latest INT8 profile shows value_recurrence_stage as largest host-observed stage at 51.9035 ms/token; includes DMA/context switches, not pure compute.",
+  "candidate": "Preparation stays -Oz; recurrence update and finish use -O2 instead of -Os. No source arithmetic, state precision, fast-math or ffp-contract change.",
+  "compile": "passed; former monolithic -O2 code-memory rejection no longer applies after translation-unit split",
+  "validation": "Independent stage oracle, replay and guards passed. No full-model accuracy or speedup claim; candidate rejected after stage screening.",
+  "abba": {
+    "A1": {
+      "samples": 500.0,
+      "fused_value": 1.0,
+      "alternate_value": 0.0,
+      "mean_submit_us": 4.85922,
+      "mean_wait_us": 979.565,
+      "mean_pair_us": 984.597,
+      "mean_us": 984.516,
+      "p50_us": 983.433,
+      "p95_us": 1003.08
+    },
+    "B1": {
+      "samples": 500.0,
+      "fused_value": 1.0,
+      "alternate_value": 0.0,
+      "mean_submit_us": 5.06938,
+      "mean_wait_us": 978.267,
+      "mean_pair_us": 983.55,
+      "mean_us": 983.463,
+      "p50_us": 983.102,
+      "p95_us": 1002.45
+    },
+    "B2": {
+      "samples": 500.0,
+      "fused_value": 1.0,
+      "alternate_value": 0.0,
+      "mean_submit_us": 3.84241,
+      "mean_wait_us": 977.239,
+      "mean_pair_us": 981.243,
+      "mean_us": 981.161,
+      "p50_us": 980.087,
+      "p95_us": 1001.81
+    },
+    "A2": {
+      "samples": 500.0,
+      "fused_value": 1.0,
+      "alternate_value": 0.0,
+      "mean_submit_us": 4.06434,
+      "mean_wait_us": 979.041,
+      "mean_pair_us": 983.276,
+      "mean_us": 983.192,
+      "p50_us": 983.112,
+      "p95_us": 998.491
+    }
+  },
+  "baseline_mean_us": 983.854,
+  "candidate_mean_us": 982.3119999999999,
+  "improvement_percent": 0.15673057181250227,
+  "decision": "Negligible isolated gain (~0.16%), smaller than within-order timing variation; retain production -Os. No runtime fallback added.",
+  "raw_logs": "reports/runs/recurrence-o2-split-2026-10-03",
+  "candidate_instructions_sha256": "24694fda8f35fd7ea0c1d6fcb6b5fd7dfdbc6fdc733becd6d587bc06fff580ee"
+}

@@ -31,6 +31,7 @@ struct DecodeGraph::Impl {
   };
   const Weights &weights;
   RecurrentBackend *backend;
+  WeightMode weight_mode;
   std::vector<Buffer> buffers;
   std::vector<Node> nodes;
   int recording_layer = -1;
@@ -67,7 +68,7 @@ struct DecodeGraph::Impl {
   Id linear(Id x, const Tensor &w, bool transpose = false);
   Id recurrent(Id state, Id r, Id d, Id k, Id v, Id a, Id b);
   Impl(const Weights &w, RecurrentBackend *b,
-       const std::filesystem::path &resident);
+       const std::filesystem::path &resident, WeightMode = WeightMode::BFloat16);
   void validate_state(const State &state) const;
   void load_state(const State &state);
   State export_state() const;

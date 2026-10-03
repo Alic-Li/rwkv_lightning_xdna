@@ -1,0 +1,328 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "Value residual fused into FP32 recurrence; shared decode optimization for BF16 and experimental INT8 FFN. Overall FP16/INT8 hardware-limit goal remains active.",
+  "baseline_commit": "f319528d8be5ea763c67ee4a5a31b1d6cb366d6a",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Fuse noninitial-layer value residual into recurrence preparation, preserving the scalar arithmetic order and FP32 recurrent state",
+    "Seven lanes distribute heads as 5/5/5/5/4/4/4; 14 state/aux input streams plus one first-value broadcast fit the 16 shim MM2S channels",
+    "Store raw value, projected value gate and bias in three tail vectors of the recurrence arena; preserve their diagnostic aliases",
+    "Only the original 27 recurrence vectors flow downstream and return to DDR; no redundant raw value writeback",
+    "Remove standalone production value dispatch and its 23 separate BOs; standalone value compiler retained only for diagnostic switching experiment",
+    "Add switching-aware stage timing, fused oracle/guards, hardware CTest entry, and trace for the production seven-lane topology"
+  ],
+  "profiling_before_change": {
+    "experiment": "A/B/B/A, 300 samples per process, four warmup executions; fixed synthetic recurrent state reset outside timer",
+    "repeated_a": {
+      "samples": 300.0,
+      "alternate_value": 0.0,
+      "mean_submit_us": 3.29099,
+      "mean_wait_us": 994.582,
+      "mean_us": 997.951,
+      "p50_us": 994.775,
+      "p95_us": 1021.14
+    },
+    "alternating_b": {
+      "samples": 300.0,
+      "alternate_value": 1.0,
+      "mean_submit_us": 3.48341,
+      "mean_wait_us": 2321.22,
+      "mean_us": 2324.86,
+      "p50_us": 2303.31,
+      "p95_us": 2457.56
+    },
+    "alternating_c": {
+      "samples": 300.0,
+      "alternate_value": 1.0,
+      "mean_submit_us": 4.07646,
+      "mean_wait_us": 2322.98,
+      "mean_us": 2327.25,
+      "p50_us": 2310.59,
+      "p95_us": 2452.98
+    },
+    "repeated_d": {
+      "samples": 300.0,
+      "alternate_value": 0.0,
+      "mean_submit_us": 3.97906,
+      "mean_wait_us": 995.967,
+      "mean_us": 1000.04,
+      "p50_us": 994.915,
+      "p95_us": 1022.52
+    },
+    "interpretation": "Alternating with the value program raises recurrence wall time from about 1.00 to 2.33 ms, while host submit is about 4 us. Difference includes context/PDI scheduling and possible cache/DMA effects; it is not an isolated PDI counter."
+  },
+  "experiments": {
+    "four_lane": "Passed oracle/guards; a first three-input-per-core attempt exceeded DMA placement capacity and was replaced by memory-tile joining. Four-lane fused isolated mean 2.138 ms and switched mean 2.985 ms; superseded by seven lanes.",
+    "seven_lane": "Passed oracle/guards; isolated mean 1.412 ms and switched mean 2.648 ms before removing unused tail writeback.",
+    "compact_final": {
+      "samples": 300.0,
+      "fused_value": 1.0,
+      "alternate_value": 0.0,
+      "mean_submit_us": 2.89601,
+      "mean_wait_us": 1394.18,
+      "mean_pair_us": 1397.23,
+      "mean_us": 1397.15,
+      "p50_us": 1395.37,
+      "p95_us": 1418.77
+    },
+    "separate_value_plus_recurrence": {
+      "samples": 300.0,
+      "fused_value": 0.0,
+      "alternate_value": 1.0,
+      "mean_submit_us": 4.56212,
+      "mean_wait_us": 2324.73,
+      "mean_pair_us": 3214.02,
+      "mean_us": 2329.5,
+      "p50_us": 2312.71,
+      "p95_us": 2457.47
+    },
+    "note": "Pair timing includes the priming value dispatch. For fused variants, mean_us excludes that unrelated priming dispatch. Synthetic stage timings are not whole-model performance."
+  },
+  "whole_model_benchmark": {
+    "order": "A/B/B/A per precision",
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "conditions": "Serial hardware runs, profiling disabled, no concurrent compilation. Preserved pre-fusion executable versus new executable; shared matrix artifacts.",
+    "baseline_executable_sha256": "a66735c222136efce2aff5b3a175faad5f716efb1430b95bfdf0804ec1d88899",
+    "candidate_executable_sha256": "5fd83ea5a4c2b0494bc1602dbdb02c3ba8f729af3906aa7d0adec70ac00cf465",
+    "bf16": {
+      "process_mean_ms": [
+        229.32827166666675,
+        216.75368714583337,
+        216.946972125,
+        229.40215918749996
+      ],
+      "baseline_mean_ms": 229.36521542708334,
+      "candidate_mean_ms": 216.8503296354167,
+      "latency_reduction_percent": 5.456313752006226,
+      "baseline_tokens_per_second": 4.359859005376978,
+      "candidate_tokens_per_second": 4.611475581712359,
+      "sequential_prefill_tokens_per_second": [
+        4.35937792670924,
+        4.618401387810797
+      ]
+    },
+    "int8": {
+      "process_mean_ms": [
+        215.1291057916666,
+        202.28981262499997,
+        202.53234625000002,
+        215.11334360416663
+      ],
+      "baseline_mean_ms": 215.1212246979166,
+      "candidate_mean_ms": 202.4110794375,
+      "latency_reduction_percent": 5.908364122724185,
+      "baseline_tokens_per_second": 4.648541776406523,
+      "candidate_tokens_per_second": 4.940441021207921,
+      "sequential_prefill_tokens_per_second": [
+        4.644383395730873,
+        4.941619771198208
+      ]
+    }
+  },
+  "validation": {
+    "compact_bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 216.8030815118111,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.61248056543662,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "compact_int8": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 202.58250701574812,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.936260364880681,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    },
+    "default_bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 216.9148162913385,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.610104635069736,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "default_int8": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 202.34567618897643,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.9420378969011,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    },
+    "fused_stage": "recurrence oracle/replay/guards passed max_abs=9.53674e-07",
+    "regular_stage": "recurrence oracle/replay/guards passed max_abs=1.19209e-06",
+    "trace_stage": "recurrence oracle/replay/guards passed max_abs=9.53674e-07",
+    "cpu": "CTest 3/3 passed",
+    "build": "Full release-int8-ffn-kernels preset succeeded; fresh default artifacts dispatched and checked",
+    "scope": "Exact 128-token same-precision snapshots check 1116 vectors including 960 first-token nodes, logits/state checkpoints, reset/branch, invalid inputs and host state API. Independent FP64 stage oracle retains original tolerances and checks BO guards, preserved value inputs, immutable first-value input."
+  },
+  "resources": {
+    "runs_per_token_before": 146,
+    "runs_per_token_after": 123,
+    "root_bos_before": 314,
+    "root_bos_after": 291,
+    "bf16_resident_bytes": 2917120000,
+    "int8_ffn_resident_bytes": 2124396544,
+    "host_upload_bytes_per_token": 8192,
+    "host_download_bytes_per_token": 262144,
+    "derived_recurrence_plus_value_ddr_bytes_per_noninitial_layer_before": 1531904,
+    "derived_recurrence_plus_value_ddr_bytes_per_noninitial_layer_after": 1523712,
+    "derived_ddr_bytes_saved_per_token": 188416,
+    "traffic_note": "Derived from compiled DMA element counts, not measured bandwidth or total model traffic. BO bytes and host traffic are unchanged; input packing eliminates root allocations rather than storage.",
+    "internal_dma_bandwidth": null,
+    "full_array_compute_utilization": null
+  },
+  "current_int8_profile": {
+    "stage_median_ms_excluding_first_token": {
+      "attention_projections": 45.0501,
+      "channel_mix": 54.1143,
+      "head": 7.36463,
+      "norm": 0.446168,
+      "norm_mix": 7.87579,
+      "projection_residual": 24.1318,
+      "recurrence_stage": 2.39458,
+      "value_recurrence_stage": 60.8123
+    },
+    "host_median_us_excluding_first_token": {
+      "submit_us": 623.247,
+      "wait_us": 201421.0,
+      "upload_us": 2.054
+    },
+    "logits_download_median_us": 24.225,
+    "scope": "Host-observed wall time including scheduling, switching, DMA and compute; not pure device compute latency."
+  },
+  "current_device_trace": {
+    "data": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile2,0",
+          "invocations": 5,
+          "marked_cycles": 2136672,
+          "event_cycles": {
+            "PORT_RUNNING_0": 32,
+            "LOCK_STALL": 201365,
+            "INSTR_VECTOR": 313920
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 1.4976561680969283e-05,
+            "LOCK_STALL": 0.09424235446526187,
+            "INSTR_VECTOR": 0.14692007009030866
+          }
+        },
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 5,
+          "marked_cycles": 256405,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 5,
+            "INSTR_VECTOR": 67240,
+            "PORT_RUNNING_1": 0
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 1.9500399758195042e-05,
+            "INSTR_VECTOR": 0.26224137594820696,
+            "PORT_RUNNING_1": 0.0
+          }
+        },
+        {
+          "core": "core_trace for tile4,0",
+          "invocations": 5,
+          "marked_cycles": 909061,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 5,
+            "INSTR_VECTOR": 960,
+            "PORT_RUNNING_1": 0
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 5.500180955953451e-06,
+            "INSTR_VECTOR": 0.0010560347435430626,
+            "PORT_RUNNING_1": 0.0
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "phases": [
+      "prepare plus value residual",
+      "FP32 state update",
+      "finish"
+    ],
+    "mean_marked_cycles_per_head": [
+      427334.4,
+      51281.0,
+      181812.2
+    ],
+    "scope": "Production seven-lane topology at -Os, with diagnostic trace egress. First lane only: five complete head calls on each of three cores. Markers exclude FIFO acquire/release. Trace can perturb execution; vector issue is not peak FLOPS utilization and these cores do not represent the full array."
+  },
+  "limitations_and_next_work": [
+    "IEEE FP16 remains unresolved: current half precision is BF16; no claim that the IEEE FP16 requirement is met",
+    "INT8 remains experimental FFN-only W8A16, with representative held-out corpus and long-context quality gates pending",
+    "Prefill benchmark still measures sequential resident replay; batched NPU prefill remains required",
+    "Trace identifies prepare/value scalar math as about 8.3 times the state-update cycles; profile and vectorize this arithmetic while preserving numerical stability",
+    "Continue reducing program switches and measure actual DMA bandwidth, scheduling stalls and full-array utilization",
+    "No architectural roofline or negligible-further-improvement claim; four process runs per precision do not establish confidence intervals"
+  ],
+  "detailed_logs": [
+    "reports/runs/dispatch-2026-10-03",
+    "reports/runs/value-recurrence-2026-10-03"
+  ],
+  "final_artifact_sha256": {
+    "fused-recurrence-stage": {
+      "config.json": "c75662b4da1a47eba5fa13250ad8443b471041fc65b769690ce21d02ee693052",
+      "design.xclbin": "278ca975e490545a887489cd829b98180aae553abe51652ba45fb0481dcdf5c8",
+      "instructions.bin": "79ffef6ed180c2bbe295bd38290b6122a09d169c2dab9cadf63ee0248a2024f8"
+    },
+    "fused-value-recurrence-stage": {
+      "config.json": "9ebc6d4972750242456c6b91f9653c9aa6fd37db5166283517d2c831242d0cf6",
+      "design.xclbin": "c434242e10b86674f70734848a23cc518a349a3492816fceaa71be21b86ec1f2",
+      "instructions.bin": "24694fda8f35fd7ea0c1d6fcb6b5fd7dfdbc6fdc733becd6d587bc06fff580ee"
+    }
+  },
+  "source_sha256": {
+    "src/inference/resident_plan.cpp": "30b0f610125fe676eed68e8e452b29e8d8ffd03b694988994f0aa4ba508cebf7",
+    "src/inference/artifacts.cpp": "d7f5c966c2fb689364fae0073c3b9fe252e354cad58dc016cb8aa47f1dd378c4",
+    "src/inference/graph_execution.cpp": "e0cd07a79815b5ddb81f4bb73ffa12edd7d8cfb7990eccd64c0f1c575fae5fed",
+    "kernels/rwkv/value_recurrence_fp32.cc": "4b77a25e21e474fc9653c7ef30dca779149930e5f32e1ccafeac3c788419e985",
+    "tools/compile/rwkv7_recurrence_stage.py": "66b26bcbc9c700af5cf849f27f51f4d96efa6c54c958001fa41213968c108405",
+    "tools/compile/rwkv7_value_recurrence.py": "84feb7a9d95708c15c2a027fbcf72fdb4eccfbcf79c5a5ceb4561cdb072f5ba3",
+    "tests/inference/recurrence_stage_test.cpp": "eddd1e4a581945682b79926be671329885dd264c206e796fdb4968955d270a4f"
+  }
+}

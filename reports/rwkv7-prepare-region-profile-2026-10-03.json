@@ -1,0 +1,149 @@
+{
+  "date": "2026-10-03",
+  "status": "measured",
+  "scope": "First preparation lane of production seven-lane fused value/recurrence topology; five heads per region in separate trace builds. No arithmetic change in this instrumentation.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "regions": [
+    {
+      "id": 1,
+      "label": "FP64 key norm and denominator",
+      "mean_marked_cycles_per_head": 50375.8,
+      "trace": {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile2,0",
+            "invocations": 5,
+            "marked_cycles": 251879,
+            "event_cycles": {
+              "LOCK_STALL": 0,
+              "PORT_RUNNING_0": 0,
+              "INSTR_VECTOR": 0,
+              "MEMORY_STALL": 0
+            },
+            "event_fraction": {
+              "LOCK_STALL": 0.0,
+              "PORT_RUNNING_0": 0.0,
+              "INSTR_VECTOR": 0.0,
+              "MEMORY_STALL": 0.0
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      },
+      "validation": "recurrence oracle/replay/guards passed max_abs=9.53674e-07"
+    },
+    {
+      "id": 2,
+      "label": "Two sigmoid vectors and decay exponential",
+      "mean_marked_cycles_per_head": 72349.0,
+      "trace": {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile2,0",
+            "invocations": 5,
+            "marked_cycles": 361745,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 0,
+              "INSTR_VECTOR": 22460,
+              "MEMORY_STALL": 30
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.0,
+              "INSTR_VECTOR": 0.062087934871249084,
+              "MEMORY_STALL": 8.293134666685096e-05
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      },
+      "validation": "recurrence oracle/replay/guards passed max_abs=9.53674e-07"
+    },
+    {
+      "id": 3,
+      "label": "Normalized-key/output arithmetic",
+      "mean_marked_cycles_per_head": 47949.0,
+      "trace": {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile2,0",
+            "invocations": 5,
+            "marked_cycles": 239745,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 0,
+              "INSTR_VECTOR": 640,
+              "MEMORY_STALL": 0
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.0,
+              "INSTR_VECTOR": 0.0026695030136186363,
+              "MEMORY_STALL": 0.0
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      },
+      "validation": "recurrence oracle/replay/guards passed max_abs=9.53674e-07"
+    },
+    {
+      "id": 4,
+      "label": "Value sigmoid and blend",
+      "mean_marked_cycles_per_head": 34979.0,
+      "trace": {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile2,0",
+            "invocations": 5,
+            "marked_cycles": 174895,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 0,
+              "INSTR_VECTOR": 10580,
+              "MEMORY_STALL": 10
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.0,
+              "INSTR_VECTOR": 0.060493438920495156,
+              "MEMORY_STALL": 5.71771634409217e-05
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      },
+      "validation": "recurrence oracle/replay/guards passed max_abs=9.53674e-07"
+    }
+  ],
+  "reproduction": {
+    "compile": "MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie RWKV_XDNA_KERNEL_DIR=build/kernels/prepare-region-N RWKV_XDNA_TRACE_BYTES=1048576 RWKV_XDNA_PREPARE_TRACE_REGION=N .venv/bin/python tools/compile/rwkv7_value_recurrence.py",
+    "capture": "./build/test/rwkv-recurrence-stage-test build/kernels/prepare-region-N 1 --fused-value TRACE.txt",
+    "parse": ".venv/bin/python -m aie.utils.trace.parse --input TRACE.txt --mlir build/kernels/prepare-region-N/fused-value-recurrence-stage/design.prj/input_with_addresses.mlir --output TRACE.json",
+    "summarize": ".venv/bin/python tools/validation/trace_summary.py TRACE.json",
+    "source_note": "Region baseline uses saved pre-batching sigmoid source build/vector-exp-before-sigmoid-batch.hpp. Current vector_exp_fp32.hpp may include the separately measured optimization; hashes distinguish them."
+  },
+  "interpretation": "Sigmoid/decay is the largest separately marked arithmetic region, motivating batching its final scalar_mul calls while preserving native scalar reciprocal and exponential order. FP64 statistics and FP32 state stay unchanged.",
+  "limits": [
+    "Separate region builds may have different instruction scheduling; their sum is not an exact decomposition of whole-stage time.",
+    "FIFO acquisition, arena copies and other unmarked code are excluded.",
+    "Selected-core vector issue is not full-array peak-compute utilization. Trace timing is not an uninstrumented performance result."
+  ],
+  "raw_logs": "reports/runs/prepare-regions-2026-10-03",
+  "baseline_source_and_artifact_sha256": {
+    "build/vector-exp-before-sigmoid-batch.hpp": "a339341063835450c3a982b4b8079231d73b27e02dbe52bfa1b005b4d417db52",
+    "kernels/rwkv/stages_fp32.cc": "75b6d62d980ea967d920ccb844b739827ddddc8c9c9d07d1f71d872872318ea0",
+    "kernels/rwkv/value_recurrence_fp32.cc": "df4692016de784abc959de5c8f2ba568920f0dc8801dd178ebc99ceaa6a7b8bd",
+    "tools/compile/rwkv7_recurrence_stage.py": "a3453ab95297b95747e759133bc2788058bc5667c3299c5c4a291bc579b91aeb",
+    "tools/compile/rwkv7_common.py": "34ada57cef57798ad2a1ec1dc646a6327cbf8cbe10c31993161b886a175fafc9",
+    "build/kernels/prepare-region-1/fused-value-recurrence-stage/design.xclbin": "237f8453230cbdb814c4e669fcd0b43cb396493323066ebd6b487d6ee1792426",
+    "build/kernels/prepare-region-2/fused-value-recurrence-stage/design.xclbin": "a8ac085a598f3f4f12aa8d1c0693768b17cdefa3820e83d89e4bcc247582d77d",
+    "build/kernels/prepare-region-3/fused-value-recurrence-stage/design.xclbin": "f07e525a69c3c333359a78f7b0177bd7d5b20e05678096fe30c9d4e058cd1f2d",
+    "build/kernels/prepare-region-4/fused-value-recurrence-stage/design.xclbin": "ac13e2d36388e7809a41fb8e8dbd2a15c6123598a0fa133c0b57121e4416d37e"
+  }
+}

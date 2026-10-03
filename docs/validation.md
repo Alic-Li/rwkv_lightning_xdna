@@ -40,6 +40,12 @@
 
 ## 当前验证入口
 
+精度编译能力可用
+`.venv/bin/python tools/validation/precision_capabilities.py --output build/precision-capability`
+复现。它调用当前虚拟环境的 AIE2P 编译器，先检查 BF16/INT8 正向对照，再记录
+IEEE FP16 编译结果；不调度 NPU、不修改生产精度、不把编译成功当作硬件测试通过。
+完整命令、诊断、目标宏和源码/object hash 保存在输出目录的 `results.json`。
+
 主机与 kernel 的编译、通用算子 sweep 和硬件 CTest 见 [构建与测试](build.md)。
 上述 2026-10-02 数据是历史实机证据，不代表每次构建都已重新验证。
 
@@ -60,9 +66,27 @@ ctest --preset test
 参考脚本可用 `--cli FILE` 指定 CLI。阶段测试使用独立 CPU FP64 点积/递推参考，
 保留原数值阈值和 guard 检查。
 
-整模型工具 `rwkv-cleanup-regression MODEL KERNELS record|verify SNAPSHOT`
+整模型工具 `rwkv-cleanup-regression MODEL KERNELS record|verify SNAPSHOT [--int8-ffn|--int8-ffn-output]`
 记录首 token 全节点、128 步 logits、第 1/8/32/128 步状态，并检查分支、reset、
 非法输入与主机状态接口。`verify` 必须使用改动前独立基线生成的快照。
+`--int8-ffn` 用于相同 INT8 FFN 配置的逐位回归，快照带独立精度标识，拒绝跨模式使用；
+INT8 与 BF16 的量化质量比较应使用 `rwkv-accuracy`。
+`--int8-ffn-output` 使用第三种独立快照标识；首次 `record` 仅建立后续优化的回归基线，
+不能把它称为与独立改动前实现的逐位比较。该模式的数值验证依赖独立阶段 FP64 oracle
+和 BF16 teacher-forced 误差分析。
 同 BF16 精度回归证据见 [清理摘要](../reports/rwkv7-cleanup-summary-2026-10-03.json)；
 旧跨精度逐元素验收未通过的事实见 [历史性能报告](../reports/rwkv7-optimization-summary-2026-10-03.json)。
 128 步回归不代表完整 25600 上下文已经验证。
+
+ReLU² 向量化使用24位 significand 的精确整数乘积及一次 nearest-even 舍入，避免
+AIE 的 BF16 分解式 FP32 乘法产生1 ULP 差异。独立设备测试遍历指数为0时的全部
+8,388,608个 normal significand，并覆盖随机指数、边界、subnormal、溢出、零、
+无穷及 quiet NaN；同时比较原始设备 scalar 结果与独立主机 FP64 oracle。
+
+```bash
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/activation-test" \
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
+  .venv/bin/python tools/compile/rwkv7_activation_test.py
+cmake --build --preset test
+./build/test/rwkv-activation-test build/kernels/activation-test
+```

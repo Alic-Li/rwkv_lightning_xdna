@@ -18,7 +18,7 @@ def typ(n):
     return np.ndarray[(n,), np.dtype[np.float32]]
 
 
-def external(name, source, types, optimization="-Oz"):
+def external(name, source, types, optimization="-Oz", stack_size=8192, extra_compile_flags=()):
     return ExternalFunction(
         name,
         source_file=str(ROOT / "kernels/rwkv" / source),
@@ -28,6 +28,7 @@ def external(name, source, types, optimization="-Oz"):
             "-fno-fast-math",
             "-ffp-contract=off",
             "-D__AIE_API_FP32_EMULATION__=1",
+            *extra_compile_flags,
         ],
-        stack_size_override=8192,
+        stack_size_override=stack_size,
     )

@@ -1,0 +1,181 @@
+{
+  "date": "2026-10-03",
+  "status": "completed_experiment_rejected",
+  "decision": "Reject the fused attention candidate and restore the faster existing production plan. Overall hardware-limit goal remains active.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "candidate_design": [
+    "Fuse LayerNorm, six shift/mix branches and all attention matrix projections into one 17-core program per layer",
+    "Pair R/K/V weights and outputs across adjacent worker cores, reducing matrix DMA stream count to make room for normalization",
+    "Keep routing and intermediate reuse on-chip while retaining existing diagnostic outputs and FP32 state",
+    "Use five BO arguments, direct raw value/gate output into the existing recurrence arena, and a packed diagnostic/state/rank BO",
+    "No model or arithmetic change, no quantization change, same BF16 matrix reduction order"
+  ],
+  "validation": {
+    "stage": "Both three- and four-branch stages pass exact equivalence versus original two submissions over three replays, FP64 normalization oracle, immutable input/weight checks and BO guards",
+    "initial_integrated_candidate": "Both BF16/INT8 128-token golden regressions passed with 1116 vectors including 960 first-token nodes; 99 runs/token",
+    "retained_runtime_changes": "none"
+  },
+  "isolated_stage_log": "attention_block_timing branches=3 fused=0 samples=200 mean_us=2192.21\nattention_block_timing branches=3 fused=1 samples=200 mean_us=935.43\nattention_block_timing branches=3 fused=1 samples=200 mean_us=924.793\nattention_block_timing branches=3 fused=0 samples=200 mean_us=2196.19\nattention block equivalence/oracle/replay/guards passed branches=3\nattention_block_timing branches=4 fused=0 samples=200 mean_us=2236.8\nattention_block_timing branches=4 fused=1 samples=200 mean_us=976.759\nattention_block_timing branches=4 fused=1 samples=200 mean_us=982.232\nattention_block_timing branches=4 fused=0 samples=200 mean_us=2226.94\nattention block equivalence/oracle/replay/guards passed branches=4",
+  "whole_model_benchmark": {
+    "order": "A/B/B/A per precision",
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "conditions": "Serial NPU, no profiling or compilation during timed runs. Saved pre-change executable/artifacts versus integrated candidate executable/artifacts; a different ABI prevents using one executable for both.",
+    "baseline_executable_sha256": "5fd83ea5a4c2b0494bc1602dbdb02c3ba8f729af3906aa7d0adec70ac00cf465",
+    "candidate_executable_sha256": "36fa85886ce8849c4a388994f9ed99bc51323f0897a8a80f488496ad38f5499a",
+    "results": {
+      "bf16": {
+        "baseline": {
+          "mean_decode_ms": 206.85619916666667,
+          "tokens_per_second": 4.834276197805836,
+          "sequential_prefill_tokens_per_second": 4.838900219603037,
+          "process_decode_means_ms": [
+            206.14149864583328,
+            207.57089968750003
+          ],
+          "runs_per_token": 123,
+          "root_bos": 291,
+          "resident_bytes": 2917120000,
+          "host_upload_bytes_per_token": 8192,
+          "host_download_bytes_per_token": 262144
+        },
+        "rejected_candidate": {
+          "mean_decode_ms": 208.2056871041667,
+          "tokens_per_second": 4.802942772162094,
+          "sequential_prefill_tokens_per_second": 4.801248425656951,
+          "process_decode_means_ms": [
+            208.50628570833337,
+            207.90508850000006
+          ],
+          "runs_per_token": 99,
+          "root_bos": 242,
+          "resident_bytes": 2917292032,
+          "host_upload_bytes_per_token": 8192,
+          "host_download_bytes_per_token": 262144
+        },
+        "latency_change_percent": 0.6523797415482591
+      },
+      "int8": {
+        "baseline": {
+          "mean_decode_ms": 189.12705215625,
+          "tokens_per_second": 5.287450888695901,
+          "sequential_prefill_tokens_per_second": 5.291649803977076,
+          "process_decode_means_ms": [
+            189.81942518749997,
+            188.43467912499997
+          ],
+          "runs_per_token": 123,
+          "root_bos": 291,
+          "resident_bytes": 2124396544,
+          "host_upload_bytes_per_token": 8192,
+          "host_download_bytes_per_token": 262144
+        },
+        "rejected_candidate": {
+          "mean_decode_ms": 190.46917042708333,
+          "tokens_per_second": 5.250193497234906,
+          "sequential_prefill_tokens_per_second": 5.255060934015438,
+          "process_decode_means_ms": [
+            190.39661443749995,
+            190.5417264166667
+          ],
+          "runs_per_token": 99,
+          "root_bos": 242,
+          "resident_bytes": 2124568576,
+          "host_upload_bytes_per_token": 8192,
+          "host_download_bytes_per_token": 262144
+        },
+        "latency_change_percent": 0.7096384443852743
+      }
+    }
+  },
+  "updated_profiles": {
+    "tokens": 17,
+    "excluded_initial_tokens": 1,
+    "stage_host_elapsed_medians_ms_per_token": {
+      "baseline-profile": {
+        "attention_projections": 45.08410000000001,
+        "channel_mix": 50.0967,
+        "head": 7.329715,
+        "norm": 0.447704,
+        "norm_mix": 8.13927,
+        "projection_residual": 23.92275,
+        "recurrence_stage": 2.08636,
+        "value_recurrence_stage": 51.452650000000006
+      },
+      "profile": {
+        "attention_block": 54.944599999999994,
+        "channel_mix": 50.02435,
+        "head": 7.30917,
+        "norm": 0.46048849999999997,
+        "projection_residual": 23.8717,
+        "recurrence_stage": 2.08939,
+        "value_recurrence_stage": 51.33385
+      }
+    },
+    "limits": "Instrumented host elapsed stage time includes context switching, scheduling, DMA and arithmetic. This does not isolate PDI loading or prove a particular hardware stall cause."
+  },
+  "failed_variants": [
+    "Strided paired-weight DMA exceeded a hardware dimension limit; contiguous offline packing compiled",
+    "Nine- and eight-BO fused variants failed in XRT wait; a five-BO packed variant dispatched. No universal argument-count limit is inferred from these experiments.",
+    "Sharing old-state storage with normalized diagnostic output changed a diagnostic vector; retained distinct slots for this candidate"
+  ],
+  "interpretation": "A large isolated gain (~2.2 ms for two submissions to ~1.0 ms for one warm submission) did not translate to end-to-end throughput. Fewer runs and BOs alone are insufficient evidence to retain a fusion.",
+  "candidate_source_archive": "build/attention-block-candidate-source (ignored experimental archive, removed from production build)",
+  "candidate_source_sha256": {
+    "tools/compile/rwkv7_attention_projections.py": "ee7c5601f047999b960f1ba2919944f68fee8c3e458dc2f328da321bbfc94f3c",
+    "tools/compile/rwkv7_attention_block.py": "a56c62591b746496e76417010eb45f81e6f3265ae68917d219a3b4c86e80564a",
+    "tools/compile/rwkv7_optimized.py": "98d2d19d85e71f900afe0a623ef31341b04fed2d7664bbb2015e6bdf9033cd33",
+    "kernels/rwkv/copy2048.cc": "d0c1344c8226d91ee62973597cbc150371b8bfbaba759fab7816fe872d5050e8",
+    "tests/inference/attention_block_test.cpp": "9df9e0d9b6d3ee8e825735f96a69e0cfd1541c572c5e67ae0e8fd19d99c90340",
+    "tests/inference/cleanup_regression.cpp": "980252b7c2144f00c65c3470081df16838c2e711962c17f21bde8f7670b38988",
+    "tests/CMakeLists.txt": "1dfbba286ae4f84fa7d734699dc43cfa88dd79449daa5ef33a2d502ee8af2448",
+    "src/inference/resident_plan.cpp": "51e7f92d537bafd9b356b94d484c35bd67dd6557c92a75ee039f93d33c9b5a52",
+    "src/inference/artifacts.cpp": "fe840a559f25c1a91b3f617e3209c301e4ade0c53bc3cbb6c76136bf7b7675c5",
+    "src/inference/graph_execution.cpp": "a157dc5ac9242da7927b07eece00286a98f64caa2fc022d0a1211ccc872b736d",
+    "src/inference/graph_internal.hpp": "0f398aaec257cd56c81de2dc7198b5f02e9d26f4e3f66fa6cf714be46f7db68a",
+    "src/inference/weight_layout.cpp": "53e480bcf9c2551a8f761e4dbd7a126725ab52d0d02655b1fbff3bb86e3b307c",
+    "src/inference/weight_layout.hpp": "ded1067df4f8494800f960686566738cca1c3b5963cf2c6a469e508e1e51ddbe"
+  },
+  "restoration": {
+    "production_artifact_files_checked": 33,
+    "production_artifact_differences": [],
+    "release_and_test_rebuild": "passed",
+    "cpu_ctest": "3/3 passed",
+    "restored_hardware_regressions": {
+      "bf16": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 203.87994193700789,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2917120000,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 4.904847384687635,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "bf16"
+      },
+      "int8": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 188.65595973228343,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2124396544,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 5.300654171853744,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "int8-ffn"
+      }
+    },
+    "restored_binary_identity": "Release benchmark and test regression executables match pre-experiment SHA256 exactly; see raw restored-binaries.sha256."
+  },
+  "raw_logs": "reports/runs/attention-block-2026-10-03"
+}

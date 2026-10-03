@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-03",
+  "status": "rejected_no_reliable_end_to_end_improvement",
+  "decision": "Restore the simple seven-iteration FP64 root. The small isolated gain does not establish a useful whole-model benefit. Preserve the experiment rather than retaining extra hot-path control flow. Overall goal remains active.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "candidate": "Stop Newton iteration only when consecutive double values have identical bits; otherwise retain all seven iterations, including two-cycle cases. No tolerance or FP32-state changes.",
+  "validation": {
+    "root_device_test": "root legacy bits/oracle/guards passed values=81920 positive_normal_oracles=40908 worst_relative=2.22039e-16",
+    "independent_root_oracle_scope": "Positive normal FP64 inputs, covering the whole range of sums of finite FP32 squared values. Signed zero, negatives, subnormals and nonfinite cases compare legacy/candidate device bits; no claim that the legacy seven-step routine is accurate for all subnormal doubles.",
+    "regular_stage": "recurrence oracle/replay/guards passed max_abs=1.19209e-06",
+    "fused_stage": "Independent FP64 oracle/replay/guards passed; max_abs=9.53674e-7",
+    "whole_model_candidate": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 188.27939959055115,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2025306112,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 5.311255517994467,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn-output"
+    }
+  },
+  "key_norm_region_trace": {
+    "baseline": {
+      "mean_marked_cycles_per_head": 50375.8,
+      "core": {
+        "core": "core_trace for tile2,0",
+        "invocations": 5,
+        "marked_cycles": 251879,
+        "event_cycles": {
+          "LOCK_STALL": 0,
+          "PORT_RUNNING_0": 0,
+          "INSTR_VECTOR": 0,
+          "MEMORY_STALL": 0
+        },
+        "event_fraction": {
+          "LOCK_STALL": 0.0,
+          "PORT_RUNNING_0": 0.0,
+          "INSTR_VECTOR": 0.0,
+          "MEMORY_STALL": 0.0
+        }
+      },
+      "oracle": "recurrence oracle/replay/guards passed max_abs=9.53674e-07"
+    },
+    "candidate": {
+      "mean_marked_cycles_per_head": 48092.2,
+      "core": {
+        "core": "core_trace for tile2,0",
+        "invocations": 5,
+        "marked_cycles": 240461,
+        "event_cycles": {
+          "PORT_RUNNING_0": 0,
+          "LOCK_STALL": 0,
+          "INSTR_VECTOR": 0,
+          "MEMORY_STALL": 0
+        },
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.0,
+          "INSTR_VECTOR": 0.0,
+          "MEMORY_STALL": 0.0
+        }
+      },
+      "oracle": "recurrence oracle/replay/guards passed max_abs=9.53674e-07"
+    }
+  },
+  "isolated_fused_stage": {
+    "order": "A/B/B/A",
+    "samples_per_process": 300,
+    "warmup_runs": 4,
+    "process_mean_us": {
+      "A1": 946.093,
+      "B1": 941.444,
+      "B2": 939.72,
+      "A2": 943.314
+    },
+    "baseline_mean_us": 944.7035,
+    "candidate_mean_us": 940.582,
+    "latency_reduction_percent": 0.43627445013170474
+  },
+  "whole_model": {
+    "mode": "int8-ffn-output",
+    "order": "A/B/B/A",
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "same_executable_serial_unprofiled": true,
+    "process_decode_means_ms": {
+      "A1": 187.2706367708333,
+      "B1": 185.77683997916662,
+      "B2": 187.65195427083336,
+      "A2": 184.5787345208333
+    },
+    "baseline_mean_ms": 185.9246856458333,
+    "candidate_mean_ms": 186.714397125,
+    "candidate_latency_increase_percent": 0.4247480513001991,
+    "baseline_process_mean_spread_ms": 2.6919022499999983,
+    "candidate_process_mean_spread_ms": 1.8751142916667334,
+    "interpretation": "Variation between processes exceeds the observed variant mean difference. No stable speedup or statistically established slowdown is claimed; the candidate was not promoted."
+  },
+  "restoration": {
+    "math_header_matches_pre_experiment": true,
+    "default_artifact_files_compared": 36,
+    "artifact_differences": [],
+    "benchmark_and_regression_binaries_match_previous_retained_report": true,
+    "test_preset_build": "passed",
+    "active_experimental_source_and_build_target": "removed; retained only in ignored build archive"
+  },
+  "next_direction": "The convergence shortcut saves little of the measured normalization cost. Investigate the remaining statistics/arithmetic or larger runtime overheads rather than further tuning the square-root iteration count.",
+  "candidate_source_archive": "build/root-fixed-point-candidate-source",
+  "candidate_source_sha256": {
+    "tests/CMakeLists.txt": "12d47a24c58d5ab4b9cc91ad3d61e4e014f1cf3e9fd0fe8da64c32c0cf10c639",
+    "kernels/rwkv/math_fp32.hpp": "1e5bdac9f1a7d60af8f6f8c8bcb69fd9a3fb084d35eee3ce9b5a1662f83f31c4",
+    "kernels/rwkv/root_test.cc": "f7b64ed93c36bee09737be35c17a8dbf835c82c4e7f91e4ec7c3e0359b5251fe",
+    "tools/compile/rwkv7_root_test.py": "d27d30db2df1ef05919874924ca1c055d66266d2244c649c18a01caf8f587ef4",
+    "tests/inference/root_test.cpp": "39c80aacfa2b37aab00f5d9451630978295e4a5f54a530322f7e5679cec7ef86"
+  },
+  "candidate_device_artifact_sha256": {
+    "build/kernels/root-fixed-point/fused-recurrence-stage/design.xclbin": "fffe35a730b5d97ce90f9d6dd6edd38604794ce0452e92612f16bdab027c6b50",
+    "build/kernels/root-fixed-point/fused-recurrence-stage/instructions.bin": "79ffef6ed180c2bbe295bd38290b6122a09d169c2dab9cadf63ee0248a2024f8",
+    "build/kernels/root-fixed-point/fused-recurrence-stage/config.json": "b45ae6022c39063b2d5f916b5806503d99a527cd1a614a8752d5557c6032193e",
+    "build/kernels/root-fixed-point/fused-value-recurrence-stage/design.xclbin": "70b0ffb2176b88f9c06adac8a6e245f139d4240d85b5f127f82d0244dcf57580",
+    "build/kernels/root-fixed-point/fused-value-recurrence-stage/instructions.bin": "24694fda8f35fd7ea0c1d6fcb6b5fd7dfdbc6fdc733becd6d587bc06fff580ee",
+    "build/kernels/root-fixed-point/fused-value-recurrence-stage/config.json": "0f2daa065bddc001ff268ceacad2f73ef52929a07239df1d8a0b2ffefa4c143b"
+  },
+  "raw_logs": "reports/runs/root-fixed-point-2026-10-03"
+}

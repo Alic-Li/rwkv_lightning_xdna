@@ -10,6 +10,8 @@ void check_artifact(const std::filesystem::path &root, const std::string &name,
     throw std::runtime_error("Missing production artifact: " + name);
   nlohmann::json config;
   input >> config;
+  if (config.value("trace_buffer_bytes", size_t(0)) != 0)
+    throw std::runtime_error("Diagnostic trace artifact cannot be used for inference: " + name);
   for (auto it = expected.begin(); it != expected.end(); ++it)
     if (!config.contains(it.key()) || config.at(it.key()) != it.value())
       throw std::runtime_error("Incompatible production artifact: " + name +
@@ -20,7 +22,7 @@ void check_artifact(const std::filesystem::path &root, const std::string &name,
                                (root / name / file).string());
 }
 void validate_resident_artifacts(const std::filesystem::path &root,
-                                 const Weights &w) {
+                                 const Weights &w, WeightMode mode) {
   if (w.channels() != 2048 || w.heads() != 32 || w.vocabulary() != 65536)
     throw std::runtime_error(
         "BF16 NPU inference requires C=2048, heads=32, vocabulary=65536");
@@ -35,10 +37,12 @@ void validate_resident_artifacts(const std::filesystem::path &root,
                   {"channels", 2048},
                   {"mixes", 6},
                   {"exact_fp32", false}});
-  check_artifact(root, "fused-value",
+  check_artifact(root, "fused-value-recurrence-stage",
                  {{"schema_version", 1},
                   {"dtype", "float32"},
                   {"channels", 2048},
+                  {"head_size", 64}, {"arena_vectors", 30},
+                  {"lanes", 7}, {"fused_value", true},
                   {"exact_fp32", false}});
   check_artifact(root, "fused-recurrence-stage",
                  {{"schema_version", 1},
@@ -47,7 +51,16 @@ void validate_resident_artifacts(const std::filesystem::path &root,
                   {"head_size", 64},
                   {"arena_vectors", 27},
                   {"exact_fp32", false}});
-  check_artifact(root, "bf16-channel-mix",
+  if (mode != WeightMode::BFloat16)
+    check_artifact(root, "int8-channel-mix",
+                   {{"schema_version", 1}, {"dtype", "int8"},
+                    {"channels", 2048}, {"hidden", 8192},
+                    {"key_cores", 4}, {"value_cores", 4}, {"tile_bytes", 4160},
+                    {"quantization", "symmetric_per_output_127"},
+                    {"scale", "fp16_expanded_fp32"},
+                    {"activation_dtype", "bfloat16"}, {"accumulator_dtype", "float32"}});
+  else
+    check_artifact(root, "bf16-channel-mix",
                  {{"schema_version", 1},
                   {"dtype", "bfloat16"},
                   {"channels", 2048},
@@ -55,7 +68,15 @@ void validate_resident_artifacts(const std::filesystem::path &root,
                   {"key_cores", 4},
                   {"value_cores", 4},
                   {"exact_fp32", false}});
-  check_artifact(root, "bf16-projection-residual",
+  if (mode == WeightMode::Int8FFNOutput)
+    check_artifact(root, "int8-projection-residual",
+                 {{"schema_version", 1}, {"dtype", "int8"},
+                  {"channels", 2048}, {"cores", 11}, {"tile_bytes", 4160},
+                  {"quantization", "symmetric_per_output_127"},
+                  {"scale", "fp16_expanded_fp32"},
+                  {"activation_dtype", "bfloat16"}, {"accumulator_dtype", "float32"}});
+  else
+    check_artifact(root, "bf16-projection-residual",
                  {{"schema_version", 1},
                   {"dtype", "bfloat16"},
                   {"channels", 2048},

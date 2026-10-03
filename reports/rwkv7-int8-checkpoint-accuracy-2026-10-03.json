@@ -1,0 +1,502 @@
+{
+  "date": "2026-10-03",
+  "status": "measured_not_quality_accepted",
+  "scope": "Checkpoint error propagation for experimental INT8 FFN versus BF16, not strict IEEE FP16 or native INT8 MAC. Hardware-limit goal remains active.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "command": "./build/release/rwkv-accuracy MODEL build/kernels/rwkv7-bf16 build/kernels/rwkv7-bf16 512 tests/data/precision_smoke.txt --text --checkpoint-nodes",
+  "changes": [
+    "Optional complete node traces at distinct checkpoints 1, 8, 32 and final token",
+    "Per-layer attention shift, FFN shift and FP32 matrix errors at every state checkpoint",
+    "Baseline graph released before candidate construction, preserving device context limit behavior"
+  ],
+  "validation": {
+    "complete_node_traces": {
+      "1": 960,
+      "8": 960,
+      "32": 960,
+      "512": 960
+    },
+    "layer_state_components_checked": 288,
+    "token_metric_differences_versus_previous_512_run": [],
+    "previous_run": "reports/runs/int8-channel-2026-10-03/accuracy-text-512.jsonl",
+    "reset_and_branch": "passed",
+    "release_build": "passed",
+    "one-step": {
+      "steps": 1,
+      "traced_checkpoints": 1,
+      "nodes_compared": 960,
+      "state_checkpoints": [
+        1
+      ],
+      "reset_and_branch": "passed"
+    },
+    "default-eight": {
+      "steps": 8,
+      "traced_checkpoints": 1,
+      "nodes_compared": 960,
+      "state_checkpoints": [
+        1,
+        8
+      ],
+      "reset_and_branch": "passed"
+    }
+  },
+  "summary": {
+    "baseline_perplexity": 3.6260626127528526,
+    "baseline_precision": "bf16_fp32_state",
+    "baseline_resident_bytes": 2917120000,
+    "candidate_perplexity": 3.634336796879438,
+    "candidate_resident_bytes": 2124396544,
+    "checkpoint_nodes_compared": 3840,
+    "first_token_nodes_compared": 960,
+    "max_abs_logits": 2.562135696411133,
+    "max_kl": 0.03180275021430237,
+    "mean_kl": 0.0010428022785350015,
+    "mean_nll_increase": 0.0022792651593448454,
+    "nll_tokens": 512,
+    "perplexity_ratio": 1.0022818646587859,
+    "precision": "int8_ffn_bf16_others_fp32_state",
+    "quality_gate": "No language-quality acceptance threshold is implied by this measurement.",
+    "reset_and_branch": "passed",
+    "status": "measured",
+    "steps": 512,
+    "top1_agreement": 0.98828125,
+    "traced_checkpoints": 4,
+    "type": "summary",
+    "workload": "supplied UTF-8 text"
+  },
+  "checkpoints": [
+    {
+      "step": 1,
+      "aggregate_state": {
+        "cosine": 0.9997958912901492,
+        "max_abs": 2.504810333251953,
+        "relative_l2": 0.020258060555700612,
+        "rmse": 0.009314605111350988
+      },
+      "worst_three_layers_by_state_component": {
+        "attention_shift": [
+          {
+            "layer": 22,
+            "cosine": 0.9994770395873928,
+            "max_abs": 0.1745692491531372,
+            "relative_l2": 0.03239428630540761,
+            "rmse": 0.04773700325403258
+          },
+          {
+            "layer": 21,
+            "cosine": 0.9995933182587771,
+            "max_abs": 0.1854935884475708,
+            "relative_l2": 0.028707876922014087,
+            "rmse": 0.03996167473894101
+          },
+          {
+            "layer": 20,
+            "cosine": 0.9995892618628438,
+            "max_abs": 0.26154518127441406,
+            "relative_l2": 0.02867672596792226,
+            "rmse": 0.044584506697723035
+          }
+        ],
+        "ffn_shift": [
+          {
+            "layer": 18,
+            "cosine": 0.9989945493507496,
+            "max_abs": 0.22130978107452393,
+            "relative_l2": 0.04485506364499034,
+            "rmse": 0.05104100639239775
+          },
+          {
+            "layer": 17,
+            "cosine": 0.9990201049291652,
+            "max_abs": 0.16034984588623047,
+            "relative_l2": 0.04428643307135022,
+            "rmse": 0.04224289317253975
+          },
+          {
+            "layer": 16,
+            "cosine": 0.9991022583491546,
+            "max_abs": 0.13803339004516602,
+            "relative_l2": 0.04239882071023823,
+            "rmse": 0.031544565784835624
+          }
+        ],
+        "matrix": [
+          {
+            "layer": 17,
+            "cosine": 0.9994435172954548,
+            "max_abs": 0.27630358934402466,
+            "relative_l2": 0.03345147880730299,
+            "rmse": 0.008741542623838573
+          },
+          {
+            "layer": 18,
+            "cosine": 0.9995120461433474,
+            "max_abs": 0.38576388359069824,
+            "relative_l2": 0.03127116407468747,
+            "rmse": 0.009840219813012956
+          },
+          {
+            "layer": 8,
+            "cosine": 0.9995716998406666,
+            "max_abs": 0.2887348532676697,
+            "relative_l2": 0.029294127939741628,
+            "rmse": 0.0063994147614857355
+          }
+        ]
+      },
+      "worst_three_ffn_value_layers": [
+        {
+          "layer": 21,
+          "key": 0.04255771314517107,
+          "relu_squared": 0.08238241852157073,
+          "value": 0.07769528544519626,
+          "residual": 0.028430230262292872
+        },
+        {
+          "layer": 16,
+          "key": 0.03565785800536289,
+          "relu_squared": 0.06580748656534155,
+          "value": 0.05978175158005102,
+          "residual": 0.034182989404822055
+        },
+        {
+          "layer": 17,
+          "key": 0.03669008252143022,
+          "relu_squared": 0.06786304505352032,
+          "value": 0.057343654612162814,
+          "residual": 0.03747577054859865
+        }
+      ]
+    },
+    {
+      "step": 8,
+      "aggregate_state": {
+        "cosine": 0.9999475902632159,
+        "max_abs": 1.1215534210205078,
+        "relative_l2": 0.010274713145458816,
+        "rmse": 0.006420462895901532
+      },
+      "worst_three_layers_by_state_component": {
+        "attention_shift": [
+          {
+            "layer": 10,
+            "cosine": 0.999781485709293,
+            "max_abs": 0.05812475085258484,
+            "relative_l2": 0.0209133524403144,
+            "rmse": 0.016184908853578456
+          },
+          {
+            "layer": 11,
+            "cosine": 0.9997815774019344,
+            "max_abs": 0.07367032766342163,
+            "relative_l2": 0.020900955896725013,
+            "rmse": 0.016107958097283364
+          },
+          {
+            "layer": 12,
+            "cosine": 0.9997858838623063,
+            "max_abs": 0.08418941497802734,
+            "relative_l2": 0.020704635674848648,
+            "rmse": 0.016550606720876097
+          }
+        ],
+        "ffn_shift": [
+          {
+            "layer": 10,
+            "cosine": 0.9998098413557701,
+            "max_abs": 0.026967883110046387,
+            "relative_l2": 0.01950965241633553,
+            "rmse": 0.008330053390358309
+          },
+          {
+            "layer": 11,
+            "cosine": 0.9998128132701095,
+            "max_abs": 0.031075850129127502,
+            "relative_l2": 0.019373453221869556,
+            "rmse": 0.008754292110920223
+          },
+          {
+            "layer": 12,
+            "cosine": 0.9998166917551461,
+            "max_abs": 0.034644074738025665,
+            "relative_l2": 0.019158893239358727,
+            "rmse": 0.009082520123452478
+          }
+        ],
+        "matrix": [
+          {
+            "layer": 14,
+            "cosine": 0.9999007900194026,
+            "max_abs": 1.0033774375915527,
+            "relative_l2": 0.01409812138926645,
+            "rmse": 0.013198141585435058
+          },
+          {
+            "layer": 21,
+            "cosine": 0.9999414839743369,
+            "max_abs": 0.31958770751953125,
+            "relative_l2": 0.010834440339080022,
+            "rmse": 0.005955511432066721
+          },
+          {
+            "layer": 16,
+            "cosine": 0.999946205285799,
+            "max_abs": 0.24127578735351562,
+            "relative_l2": 0.01048753527826999,
+            "rmse": 0.005385812361422147
+          }
+        ]
+      },
+      "worst_three_ffn_value_layers": [
+        {
+          "layer": 0,
+          "key": 0.004843990427900964,
+          "relu_squared": 0.03536946319724353,
+          "value": 0.03354516361359115,
+          "residual": 0.002650107918845292
+        },
+        {
+          "layer": 21,
+          "key": 0.013978347080323809,
+          "relu_squared": 0.025859269219916717,
+          "value": 0.027556401869250492,
+          "residual": 0.017180495187952432
+        },
+        {
+          "layer": 10,
+          "key": 0.014013685953751165,
+          "relu_squared": 0.021526545902011664,
+          "value": 0.02574378085367548,
+          "residual": 0.015403358056883686
+        }
+      ]
+    },
+    {
+      "step": 32,
+      "aggregate_state": {
+        "cosine": 0.9999530820779521,
+        "max_abs": 1.4657487869262695,
+        "relative_l2": 0.009719102822647487,
+        "rmse": 0.006168981452511494
+      },
+      "worst_three_layers_by_state_component": {
+        "attention_shift": [
+          {
+            "layer": 12,
+            "cosine": 0.9997661036628894,
+            "max_abs": 0.07937902212142944,
+            "relative_l2": 0.021651492735349713,
+            "rmse": 0.01846332717416557
+          },
+          {
+            "layer": 11,
+            "cosine": 0.9997741040351034,
+            "max_abs": 0.07500165700912476,
+            "relative_l2": 0.02126102113473803,
+            "rmse": 0.018157766764962623
+          },
+          {
+            "layer": 13,
+            "cosine": 0.9998245234168817,
+            "max_abs": 0.11272501945495605,
+            "relative_l2": 0.01873353894187153,
+            "rmse": 0.01744116029866971
+          }
+        ],
+        "ffn_shift": [
+          {
+            "layer": 11,
+            "cosine": 0.9998164040785169,
+            "max_abs": 0.050225257873535156,
+            "relative_l2": 0.019168682741138424,
+            "rmse": 0.010270240962775509
+          },
+          {
+            "layer": 12,
+            "cosine": 0.9998285320334305,
+            "max_abs": 0.05804443359375,
+            "relative_l2": 0.01851783563470432,
+            "rmse": 0.010747388513009652
+          },
+          {
+            "layer": 13,
+            "cosine": 0.9998445398709446,
+            "max_abs": 0.06087207794189453,
+            "relative_l2": 0.017646942903371505,
+            "rmse": 0.011755452128083071
+          }
+        ],
+        "matrix": [
+          {
+            "layer": 14,
+            "cosine": 0.9999331397459058,
+            "max_abs": 0.5376186370849609,
+            "relative_l2": 0.01163193269286744,
+            "rmse": 0.010703652741952526
+          },
+          {
+            "layer": 11,
+            "cosine": 0.9999355596756413,
+            "max_abs": 0.1947798728942871,
+            "relative_l2": 0.011413019262755737,
+            "rmse": 0.006288513038668669
+          },
+          {
+            "layer": 21,
+            "cosine": 0.9999460328112303,
+            "max_abs": 0.27822256088256836,
+            "relative_l2": 0.010390576824580814,
+            "rmse": 0.005642808573029622
+          }
+        ]
+      },
+      "worst_three_ffn_value_layers": [
+        {
+          "layer": 9,
+          "key": 0.011934295250119322,
+          "relu_squared": 0.021353335113755523,
+          "value": 0.025527205376741406,
+          "residual": 0.015888558882140115
+        },
+        {
+          "layer": 10,
+          "key": 0.01271597832611928,
+          "relu_squared": 0.022994844802713518,
+          "value": 0.02515758566008445,
+          "residual": 0.0171225362732723
+        },
+        {
+          "layer": 11,
+          "key": 0.01339743345823163,
+          "relu_squared": 0.02214268422835125,
+          "value": 0.023851166295313652,
+          "residual": 0.017486241874336134
+        }
+      ]
+    },
+    {
+      "step": 512,
+      "aggregate_state": {
+        "cosine": 0.9999425768813481,
+        "max_abs": 1.0978412628173828,
+        "relative_l2": 0.010739634977063713,
+        "rmse": 0.0070306293590241525
+      },
+      "worst_three_layers_by_state_component": {
+        "attention_shift": [
+          {
+            "layer": 11,
+            "cosine": 0.9996766482551054,
+            "max_abs": 0.06978440284729004,
+            "relative_l2": 0.025517103904041907,
+            "rmse": 0.019301901541743858
+          },
+          {
+            "layer": 12,
+            "cosine": 0.9996876101973593,
+            "max_abs": 0.08235430717468262,
+            "relative_l2": 0.025359713287524198,
+            "rmse": 0.021454476144134167
+          },
+          {
+            "layer": 13,
+            "cosine": 0.999700007751556,
+            "max_abs": 0.09774589538574219,
+            "relative_l2": 0.024733892146194467,
+            "rmse": 0.022547174639438516
+          }
+        ],
+        "ffn_shift": [
+          {
+            "layer": 17,
+            "cosine": 0.9997279152652122,
+            "max_abs": 0.1845874786376953,
+            "relative_l2": 0.023328120301795666,
+            "rmse": 0.03156580318375467
+          },
+          {
+            "layer": 16,
+            "cosine": 0.9997338498782679,
+            "max_abs": 0.15510272979736328,
+            "relative_l2": 0.02307323392392672,
+            "rmse": 0.025833001778286086
+          },
+          {
+            "layer": 18,
+            "cosine": 0.9997431386475352,
+            "max_abs": 0.1483614444732666,
+            "relative_l2": 0.022693560186700296,
+            "rmse": 0.03464712952350779
+          }
+        ],
+        "matrix": [
+          {
+            "layer": 15,
+            "cosine": 0.9999104979085708,
+            "max_abs": 0.46967339515686035,
+            "relative_l2": 0.013384171064374529,
+            "rmse": 0.009606588281404973
+          },
+          {
+            "layer": 12,
+            "cosine": 0.9999190170090275,
+            "max_abs": 0.23308563232421875,
+            "relative_l2": 0.012741613270405546,
+            "rmse": 0.008736772056977335
+          },
+          {
+            "layer": 16,
+            "cosine": 0.9999241346246727,
+            "max_abs": 0.19126605987548828,
+            "relative_l2": 0.012329543101260896,
+            "rmse": 0.0064159164234388845
+          }
+        ]
+      },
+      "worst_three_ffn_value_layers": [
+        {
+          "layer": 1,
+          "key": 0.006016576664457044,
+          "relu_squared": 0.030822226080735173,
+          "value": 0.03023202120007004,
+          "residual": 0.004640256898697368
+        },
+        {
+          "layer": 10,
+          "key": 0.01572550390840895,
+          "relu_squared": 0.025245403801435324,
+          "value": 0.029333043334373882,
+          "residual": 0.018011239940430742
+        },
+        {
+          "layer": 12,
+          "key": 0.01641936042102053,
+          "relu_squared": 0.02400164485525865,
+          "value": 0.02704563546170724,
+          "residual": 0.0216169713709812
+        }
+      ]
+    }
+  ],
+  "node_mapping": "For this 24-layer graph only: layer FFN residual index=37+40*layer, value=index-1, ReLU squared=index-2, key=index-3; derived from src/inference/graph.cpp recording order. Complete 960-node coverage verified.",
+  "limitations": [
+    "The authored 512-token bilingual smoke corpus is not representative production quality validation or long-context validation.",
+    "Node differences include upstream propagated error and cannot isolate local quantization error.",
+    "Trace causes extra downloads/synchronization; no performance conclusions from this run.",
+    "Unchanged printed token metrics against the earlier run verify this workload at report precision, not an independent bitwise logits oracle."
+  ],
+  "sha256": {
+    "apps/rwkv_accuracy.cpp": "67270444d452a04c8c4f913e161d8783f67aa1545fb0844b7034bc390f4ce4fe",
+    "build/release/rwkv-accuracy": "3374a4ff3ec3e8829d90691baf414eb0cf55476336b15d679aee6d46fa399277",
+    "tests/data/precision_smoke.txt": "012617366c731ff4a2adbca903fdecc572a90c1681eead52f04e04637642e73e",
+    "reports/runs/int8-checkpoint-2026-10-03/accuracy.jsonl": "70cbfbfb10c7636f25fb318799119b1987f40478f84500cece227aabb73b0c42"
+  },
+  "raw_logs": "reports/runs/int8-checkpoint-2026-10-03",
+  "interpretation": [
+    "Aggregate state error masks larger individual shift-state errors; retain component/layer reporting when evaluating broader INT8 coverage.",
+    "At token 512, layer 1 FFN key output relative L2 error is 0.602%, ReLU squared output 3.082%, and FFN value output 3.023%. This observed amplification motivates activation range/error calibration before native W8A8 experiments; it does not establish local causality.",
+    "Perplexity and all previously recorded per-token metrics match the earlier smoke run exactly at JSON output precision. No new performance improvement or production-quality acceptance is claimed."
+  ]
+}

@@ -57,6 +57,11 @@
       ]
     },
     {
+      "name": "release-int8-ffn-kernels",
+      "configurePreset": "release",
+      "targets": ["kernels-release-int8-ffn"]
+    },
+    {
       "name": "release-full",
       "configurePreset": "release",
       "targets": [

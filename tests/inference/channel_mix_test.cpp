@@ -5,13 +5,25 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <fstream>
+#include <iomanip>
+#include <nlohmann/json.hpp>
 using namespace rwkv::xdna;
 using namespace rwkv::xdna::test;
 using V = std::vector<float>;
 int main(int argc, char **argv) {
   try {
-    if (argc != 2)
-      throw std::runtime_error("usage: channel-mix-test KERNEL_ROOT");
+    if (argc < 2 || argc > 4)
+      throw std::runtime_error("usage: channel-mix-test KERNEL_ROOT [TIMING_ITERATIONS [TRACE_FILE]]");
+    size_t iterations = 0;
+    if (argc >= 3) {
+      const std::string value(argv[2]);
+      if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos)
+        throw std::runtime_error("Invalid timing iterations");
+      iterations = std::stoull(value);
+      if (!iterations || iterations > 1000000)
+        throw std::runtime_error("Invalid timing iterations");
+    }
     auto session = [](std::filesystem::path root, std::string name) {
       return Session(root / name / "design.xclbin",
                      root / name / "instructions.bin");
@@ -20,8 +32,23 @@ int main(int argc, char **argv) {
     Guarded x(fused, 2048 * 4), params(fused, 6144 * 4),
         weights(fused, 33554432 * 2), diag(fused, 22528 * 4),
         out(fused, 4096 * 4);
-    auto run =
-        fused.prepare({x.data, params.data, weights.data, diag.data, out.data});
+    nlohmann::json config;
+    std::ifstream metadata(std::filesystem::path(argv[1]) / "bf16-channel-mix/config.json");
+    metadata >> config;
+    size_t trace_bytes = config.value("trace_buffer_bytes", size_t(0));
+    if (bool(trace_bytes) != (argc == 4))
+      throw std::runtime_error("Trace artifact and TRACE_FILE must be supplied together");
+    std::vector<DeviceBuffer> arguments{x.data, params.data, weights.data, diag.data, out.data};
+    std::unique_ptr<Guarded> trace;
+    if (trace_bytes) {
+      if (trace_bytes > 64 * 1024 * 1024 || trace_bytes % 4)
+        throw std::runtime_error("Invalid trace buffer size");
+      trace = std::make_unique<Guarded>(fused, trace_bytes);
+      std::vector<uint32_t> empty(trace_bytes / 4);
+      trace->data.upload(empty.data(), trace_bytes);
+      arguments.push_back(trace->data);
+    }
+    auto run = fused.prepare(arguments);
     std::mt19937 rng(730);
     std::uniform_real_distribution<float> d(-1, 1);
     std::vector<uint16_t> w(33554432);
@@ -104,6 +131,46 @@ int main(int argc, char **argv) {
       throw std::runtime_error("immutable input overwritten");
     std::cout << "ChannelMix oracle/shift/replay/guards passed max_abs="
               << worst << '\n';
+    if (iterations) {
+      std::vector<double> times;
+      // Keep a fixed recurrent shift and input across samples. Reset is outside
+      // the timer; all BOs, instructions and the XRT run are reused.
+      for (size_t i = 0; i < iterations + 4; ++i) {
+        diag.data.upload(previous.data(), previous.size() * 4);
+        auto start = std::chrono::steady_clock::now();
+        run.execute();
+        auto elapsed = std::chrono::duration<double, std::micro>(
+            std::chrono::steady_clock::now() - start).count();
+        if (i >= 4)
+          times.push_back(elapsed);
+      }
+      std::sort(times.begin(), times.end());
+      double total = 0;
+      for (double t : times) total += t;
+      std::cout << "channel_mix_timing samples=" << iterations
+                << " mean_us=" << total / iterations
+                << " p50_us=" << times[(iterations - 1) / 2]
+                << " p95_us=" << times[size_t(std::ceil(iterations * .95)) - 1]
+                << '\n';
+      for (auto *p : {&x, &params, &weights, &diag, &out}) p->guard();
+    }
+    if (trace) {
+      // Record exactly one dispatch, with a cleared buffer, after validation.
+      std::vector<uint32_t> words(trace_bytes / 4);
+      trace->data.upload(words.data(), trace_bytes);
+      run.execute();
+      trace->data.download(words.data(), trace_bytes);
+      trace->guard();
+      for (auto *p : {&x, &params, &weights, &diag, &out}) p->guard();
+      if (words.back())
+        throw std::runtime_error("Trace buffer filled; increase RWKV_XDNA_TRACE_BYTES");
+      while (!words.empty() && words.back() == 0) words.pop_back();
+      if (words.empty()) throw std::runtime_error("Empty hardware trace");
+      std::ofstream output(argv[3]);
+      for (auto word : words)
+        output << std::hex << std::setfill('0') << std::setw(8) << word << '\n';
+      if (!output) throw std::runtime_error("Cannot write hardware trace");
+    }
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
     return 1;

@@ -18,11 +18,12 @@
 namespace {
 void usage() {
   std::cout
-      << "RWKV-7 BF16 NPU / FP32 CPU reference CLI (C++ runtime)\n"
+      << "RWKV-7 BF16 / experimental W8A16 NPU / FP32 CPU reference CLI\n"
          "  rwkv-cli --model MODEL.pth --prompt TEXT [options]\n"
          "  --backend npu|cpu       default npu: all model arithmetic "
          "on NPU\n"
          "  --kernel-dir DIR        default build/kernels/rwkv7-bf16\n"
+         "  --weights bf16|int8-ffn|int8-ffn-output  default bf16; INT8 modes are experimental W8A16\n"
          "  --vocab FILE            default assets/rwkv_vocab_v20230424.txt\n"
          "  --prompt-file FILE      UTF-8 prompt file, exclusive with "
          "--prompt\n"
@@ -63,6 +64,7 @@ int main(int argc, char **argv) {
   try {
     std::map<std::string, std::string> opts{
         {"--backend", "npu"},
+        {"--weights", "bf16"},
         {"--kernel-dir", "build/kernels/rwkv7-bf16"},
         {"--vocab", "assets/rwkv_vocab_v20230424.txt"},
         {"--max-tokens", "128"},
@@ -118,6 +120,11 @@ int main(int argc, char **argv) {
       throw std::runtime_error("Sampling/generation option out of range");
     if (opts["--backend"] != "cpu" && opts["--backend"] != "npu")
       throw std::runtime_error("--backend must be cpu or npu");
+    if (opts["--weights"] != "bf16" && opts["--weights"] != "int8-ffn" &&
+        opts["--weights"] != "int8-ffn-output")
+      throw std::runtime_error("--weights must be bf16, int8-ffn or int8-ffn-output");
+    if (opts["--weights"] != "bf16" && opts["--backend"] != "npu")
+      throw std::runtime_error("INT8 weights require --backend npu");
 #ifdef _OPENMP
     omp_set_num_threads(int(threads));
 #endif
@@ -159,6 +166,7 @@ int main(int argc, char **argv) {
     std::cerr << "RWKV-7: " << weights.layers() << " layers, "
               << weights.channels() << " channels, " << weights.heads()
               << " heads; backend=" << opts["--backend"]
+              << "; weights=" << (opts["--backend"] == "npu" ? opts["--weights"] : "fp32_reference")
               << (opts["--backend"] == "npu"
                       ? " (all model arithmetic on NPU; CPU embedding/sampling)"
                       : " (all CPU)")
@@ -190,7 +198,11 @@ int main(int argc, char **argv) {
         throw std::runtime_error("resident decode requires --backend npu");
       if (opts["--backend"] == "npu")
         graph = std::make_unique<rwkv::inference::DecodeGraph>(
-            weights, opts["--kernel-dir"]);
+            weights, opts["--kernel-dir"], opts["--weights"] == "int8-ffn-output"
+                ? rwkv::inference::WeightMode::Int8FFNOutput
+                : opts["--weights"] == "int8-ffn"
+                ? rwkv::inference::WeightMode::Int8FFN
+                : rwkv::inference::WeightMode::BFloat16);
       else
         graph =
             std::make_unique<rwkv::inference::DecodeGraph>(weights, *backend);

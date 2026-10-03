@@ -1,0 +1,358 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "INT8 ChannelMix producer-side BF16 activation conversion and explicit placement; overall hardware-limit goal remains active.",
+  "baseline_commit": "f319528d8be5ea763c67ee4a5a31b1d6cb366d6a",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "INT8-only: convert FP32 activations once on producer cores, then broadcast BF16 to matrix workers through memory tiles",
+    "Preserve nearest-even activation rounding, four-row BF16 MAC/reduction tree, FP32 partial sums and post-dot per-output scales",
+    "Explicitly place converters and matrix workers to satisfy routing/peer-DMA limits; no host ABI, BO, run-count or external traffic change",
+    "Add guarded INT8 hardware-trace capture to C++ stage test; traced mode suppresses timing"
+  ],
+  "rounding_work": {
+    "baseline_elements_per_stage": 2097152,
+    "retained_elements_per_stage": 10240,
+    "basis": "4 key cores * 1024 tiles * 256 elements plus 4 value cores * 1024 tiles * 256; replaced by 2048+8192 producer conversions. Static operation count, not measured instruction count."
+  },
+  "experiments": {
+    "inline_weight_conversion_at_MAC_load": "Rejected: oracle passed, but INT8 isolated latency increased to approximately 1.71 ms. Source reverted; artifacts retained only under ignored build directory.",
+    "BF16_shared_conversion": "Rejected: full-model mean increased by 0.4624%; original BF16 graph and kernel restored.",
+    "automatic_placement": "Rejected: initial peer-DMA limit, then routing failure with memory fanout. Explicit placement passed.",
+    "converter_stack": "8192-byte worker stack rejected by compiler requirement of 8320; retained 12288."
+  },
+  "isolated_stage": {
+    "baseline": [
+      {
+        "latency": {
+          "mean_ms": 2.0203584033333324,
+          "p50_ms": 1.979594,
+          "p95_ms": 2.241542,
+          "samples": 300
+        },
+        "weights": "bf16"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.3857689266666666,
+          "p50_ms": 1.384305,
+          "p95_ms": 1.413391,
+          "samples": 300
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.3900508866666665,
+          "p50_ms": 1.388473,
+          "p95_ms": 1.418851,
+          "samples": 300
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 2.0007727299999996,
+          "p50_ms": 1.95621,
+          "p95_ms": 2.195935,
+          "samples": 300
+        },
+        "weights": "bf16"
+      }
+    ],
+    "candidate_both_modes": [
+      {
+        "latency": {
+          "mean_ms": 2.014873799999999,
+          "p50_ms": 1.97155,
+          "p95_ms": 2.22381,
+          "samples": 300
+        },
+        "weights": "bf16"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.2980958833333336,
+          "p50_ms": 1.291026,
+          "p95_ms": 1.335089,
+          "samples": 300
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.297871036666666,
+          "p50_ms": 1.289954,
+          "p95_ms": 1.337383,
+          "samples": 300
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 2.0124408933333333,
+          "p50_ms": 1.975598,
+          "p95_ms": 2.21832,
+          "samples": 300
+        },
+        "weights": "bf16"
+      }
+    ],
+    "oracle_max_abs": 2.384185791015625e-07,
+    "retained_default": [
+      {
+        "latency": {
+          "mean_ms": 2.027411216666665,
+          "p50_ms": 1.989723,
+          "p95_ms": 2.245467,
+          "samples": 300
+        },
+        "weights": "bf16"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.2983530766666662,
+          "p50_ms": 1.292144,
+          "p95_ms": 1.33813,
+          "samples": 300
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.3023159166666658,
+          "p50_ms": 1.296482,
+          "p95_ms": 1.342609,
+          "samples": 300
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 2.013543343333335,
+          "p50_ms": 1.957542,
+          "p95_ms": 2.232322,
+          "samples": 300
+        },
+        "weights": "bf16"
+      }
+    ]
+  },
+  "whole_model_benchmark": {
+    "order": "A/B/B/A per precision",
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "conditions": "Same executable, serial hardware, profiling disabled, no concurrent compilation. Candidate initially specialized both modes; retain INT8 only. Sub-percent end-to-end improvement should not be treated as a large or hardware-limit result.",
+    "executable_sha256": "5fd83ea5a4c2b0494bc1602dbdb02c3ba8f729af3906aa7d0adec70ac00cf465",
+    "results": {
+      "bf16": {
+        "baseline": {
+          "decode_mean_ms": 207.50437265624998,
+          "tokens_per_second": 4.819175553744073,
+          "sequential_prefill_tokens_per_second": 4.8215697009262035,
+          "process_decode_means_ms": [
+            207.5524451458333,
+            207.45630016666667
+          ]
+        },
+        "candidate": {
+          "decode_mean_ms": 208.46387408333334,
+          "tokens_per_second": 4.796994224525687,
+          "sequential_prefill_tokens_per_second": 4.7890160896509215,
+          "process_decode_means_ms": [
+            208.3867984375,
+            208.54094972916667
+          ]
+        },
+        "latency_improvement_percent": -0.46240058211826085,
+        "retained": false
+      },
+      "int8": {
+        "baseline": {
+          "decode_mean_ms": 193.0910839895833,
+          "tokens_per_second": 5.178903030312612,
+          "sequential_prefill_tokens_per_second": 5.179763425011486,
+          "process_decode_means_ms": [
+            193.62395854166664,
+            192.55820943749998
+          ]
+        },
+        "candidate": {
+          "decode_mean_ms": 192.17342651041662,
+          "tokens_per_second": 5.203633083712517,
+          "sequential_prefill_tokens_per_second": 5.202762498252032,
+          "process_decode_means_ms": [
+            192.0674678541667,
+            192.27938516666657
+          ]
+        },
+        "latency_improvement_percent": 0.47524590996453897,
+        "retained": true
+      }
+    }
+  },
+  "trace": {
+    "baseline": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 1,
+          "marked_cycles": 1276711,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 2224,
+            "INSTR_VECTOR": 244352,
+            "MEMORY_STALL": 18325,
+            "PORT_RUNNING_1": 11
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.0017419760619278757,
+            "INSTR_VECTOR": 0.1913917871781476,
+            "MEMORY_STALL": 0.014353287470696188,
+            "PORT_RUNNING_1": 8.615888795506578e-06
+          }
+        },
+        {
+          "core": "core_trace for tile5,0",
+          "invocations": 1,
+          "marked_cycles": 1019532,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 3305,
+            "INSTR_VECTOR": 242336,
+            "MEMORY_STALL": 18142,
+            "PORT_RUNNING_1": 11
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.0032416834390681212,
+            "INSTR_VECTOR": 0.2376933730378252,
+            "MEMORY_STALL": 0.017794439017117657,
+            "PORT_RUNNING_1": 1.0789264093721433e-05
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "retained": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 1,
+          "marked_cycles": 1198804,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 4327,
+            "INSTR_VECTOR": 244352,
+            "MEMORY_STALL": 779,
+            "PORT_RUNNING_1": 10
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.003609430732630188,
+            "INSTR_VECTOR": 0.20382981705099415,
+            "MEMORY_STALL": 0.0006498143149338841,
+            "PORT_RUNNING_1": 8.341647175017768e-06
+          }
+        },
+        {
+          "core": "core_trace for tile3,4",
+          "invocations": 1,
+          "marked_cycles": 941546,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 5891,
+            "INSTR_VECTOR": 242336,
+            "MEMORY_STALL": 34,
+            "PORT_RUNNING_1": 11
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.006256730951010359,
+            "INSTR_VECTOR": 0.25738094580615284,
+            "MEMORY_STALL": 3.611082198851676e-05,
+            "PORT_RUNNING_1": 1.1682912996284834e-05
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "interpretation": "Selected key/value marked cycles decreased; both versions have under 1% lock-stall fractions. Markers exclude initial activation/conversion wait and are not full-array utilization or measured DMA bandwidth."
+  },
+  "unchanged_contract": {
+    "runs_per_token": 123,
+    "root_bos": 291,
+    "int8_resident_bytes": 2124396544,
+    "host_upload_bytes_per_token": 8192,
+    "host_download_bytes_per_token": 262144,
+    "recurrent_state": "FP32"
+  },
+  "validation": {
+    "candidate_bf16_128_tokens": "passed bit-exact; 1116 vectors including 960 first-token nodes",
+    "candidate_int8_128_tokens": "passed bit-exact; 1116 vectors including 960 first-token nodes",
+    "default_rebuild": "passed",
+    "default_final_gates": {
+      "cpu_ctest": "3/3 passed",
+      "stage": "passed",
+      "bf16": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 207.59779151181095,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2917120000,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 4.817006928241366,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "bf16"
+      },
+      "int8": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 192.39901579527546,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2124396544,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 5.197531785006958,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "int8-ffn"
+      }
+    }
+  },
+  "remaining": [
+    "Strict IEEE FP16 path (baseline is BF16)",
+    "Production INT8 coverage and representative long-context accuracy",
+    "Batched prefill",
+    "Native INT8 arithmetic evaluation",
+    "Full-array utilization, DMA bandwidth and architectural roofline attribution"
+  ],
+  "source_sha256": {
+    "tools/compile/rwkv7_channel_mix.py": "64515cb7b71a439b7285b2ac76887cca7c8bbc01f3933d22827ab21cde4174fe",
+    "tools/compile/rwkv7_channel_mix_int8.py": "691332234c39574ba518974066fd79bb71c6279cc70fcf84eb3b13ac4f669db6",
+    "kernels/rwkv/channel_mix_int8.cc": "07e3c37e9b2ec5367b5074de9f2816f3115151e1b072a59854e3284d02f7fa57",
+    "kernels/rwkv/channel_mix_convert_bf16.cc": "00a9a2e0e2f841613378179e2174d5819d3e537f32b5d878f919d0b61d10d24d",
+    "kernels/rwkv/gemv_preconverted_bf16.hpp": "4d3c5d0ef8c700cd3dace8dd4a5b35739ca1e88adf800ccf10860d03a4454384",
+    "tests/inference/channel_mix_int8_test.cpp": "bd1020d30405fde4aca6595c18f984d8def30691570fa095a600416ba7956b9f"
+  },
+  "raw_logs": "reports/runs/channel-activation-2026-10-03",
+  "artifact_sha256": {
+    "bf16-channel-mix/config.json": "e44081b3b4e5d2e335964d1495f34d8157b12f8ce4f09813d949a45b2f373be1",
+    "bf16-channel-mix/design.xclbin": "1eb286c105cb840f6f1aa3b6abb8b4d7ea00bff82a04763341aca3d3128a2643",
+    "bf16-channel-mix/instructions.bin": "677ec4aacbd62e5348c8777ec79ba8ac027675175f26cd636ca42484ae89fe0b",
+    "int8-channel-mix/config.json": "41a11aa5b4547ed602cfc2b7c0af756b526da8669027af93c50bb0a71deb7588",
+    "int8-channel-mix/design.xclbin": "e593431727de235dd3389d906414708c04307973a69ca8ccde7d9dc45859725d",
+    "int8-channel-mix/instructions.bin": "112fa1db29067d50a271a0c09130b0f604088b2972bac1b543a9566ed6c9beb8"
+  }
+}

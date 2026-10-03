@@ -3,6 +3,10 @@
 #include "rwkv/inference/model.hpp"
 #include <functional>
 namespace rwkv::inference {
+// Int8FFN quantizes ChannelMix key/value weights only. Other matrices retain
+// BF16; accumulation, recurrent state and nonlinear operations remain FP32.
+// Int8FFNOutput also quantizes attention output weights; both modes are W8A16.
+enum class WeightMode { BFloat16, Int8FFN, Int8FFNOutput };
 struct GraphStats {
   size_t nodes = 0, buffers = 0, replays = 0;
   size_t device_runs = 0, resident_bytes = 0;
@@ -23,8 +27,10 @@ class DecodeGraph {
 public:
   // Explicit host reference graph.
   DecodeGraph(const Weights &, RecurrentBackend &);
-  // Production BF16 NPU graph; no host arithmetic backend or fallback.
-  DecodeGraph(const Weights &, const std::filesystem::path &resident_artifacts);
+  // Resident NPU graph; INT8 modes are experimental pending quality validation.
+  // No host arithmetic backend or fallback.
+  DecodeGraph(const Weights &, const std::filesystem::path &resident_artifacts,
+              WeightMode = WeightMode::BFloat16);
   ~DecodeGraph();
   DecodeGraph(const DecodeGraph &) = delete;
   DecodeGraph &operator=(const DecodeGraph &) = delete;

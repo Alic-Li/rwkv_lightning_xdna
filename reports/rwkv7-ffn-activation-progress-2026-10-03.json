@@ -1,0 +1,379 @@
+{
+  "date": "2026-10-03",
+  "status": "in_progress",
+  "scope": "Profile-driven exact vector FP32 ReLU-square for BF16 and INT8 ChannelMix. Overall hardware-limit goal remains active.",
+  "baseline_commit": "f319528d8be5ea763c67ee4a5a31b1d6cb366d6a",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "profiling_basis": {
+    "isolated_scalar_activation_cycles": 257879,
+    "vector_instructions_during_scalar_activation": 0,
+    "method": "RWKV_XDNA_TRACE_ACTIVATION=1 places key core event 0 immediately before activation and event 1 after FIFO release; value core keeps full matrix window."
+  },
+  "changes": [
+    "Vectorize ReLU-square with exact 24-bit significand integer multiplication and one nearest-even rounding; FP32 inputs and outputs preserved",
+    "Retain scalar IEEE square for positive inputs outside the normal-result exponent range, including underflow/overflow and infinity",
+    "No changes to WKV state, matrix quantization, graph topology, allocations or host/device traffic",
+    "Add independent C++ device test and targeted activation trace window metadata",
+    "Improve strict regression mismatch diagnostics to show full numeric difference, index and values without changing its acceptance rule"
+  ],
+  "rejected_experiments": {
+    "direct_int8_to_bf16": {
+      "reason": "No meaningful stage improvement; reverted to existing weight conversion.",
+      "candidate": [
+        {
+          "latency": {
+            "mean_ms": 2.010096465999998,
+            "p50_ms": 1.981906,
+            "p95_ms": 2.203785,
+            "samples": 500
+          },
+          "weights": "bf16"
+        },
+        {
+          "latency": {
+            "mean_ms": 1.3022245620000015,
+            "p50_ms": 1.297062,
+            "p95_ms": 1.342036,
+            "samples": 500
+          },
+          "weights": "int8"
+        },
+        {
+          "latency": {
+            "mean_ms": 1.296352084000001,
+            "p50_ms": 1.290029,
+            "p95_ms": 1.33332,
+            "samples": 500
+          },
+          "weights": "int8"
+        },
+        {
+          "latency": {
+            "mean_ms": 2.0022877039999987,
+            "p50_ms": 1.953923,
+            "p95_ms": 2.223062,
+            "samples": 500
+          },
+          "weights": "bf16"
+        }
+      ],
+      "baseline": [
+        {
+          "latency": {
+            "mean_ms": 1.993783316,
+            "p50_ms": 1.946609,
+            "p95_ms": 2.201591,
+            "samples": 500
+          },
+          "weights": "bf16"
+        },
+        {
+          "latency": {
+            "mean_ms": 1.2997200039999997,
+            "p50_ms": 1.294467,
+            "p95_ms": 1.335544,
+            "samples": 500
+          },
+          "weights": "int8"
+        },
+        {
+          "latency": {
+            "mean_ms": 1.2991533039999996,
+            "p50_ms": 1.292823,
+            "p95_ms": 1.33895,
+            "samples": 500
+          },
+          "weights": "int8"
+        },
+        {
+          "latency": {
+            "mean_ms": 2.000539278000002,
+            "p50_ms": 1.950436,
+            "p95_ms": 2.215538,
+            "samples": 500
+          },
+          "weights": "bf16"
+        }
+      ]
+    },
+    "aie_vector_float_square": {
+      "reason": "Stage oracle passed but strict full-model regression failed by one ULP. Explicit nearest-even rounding did not fix the mismatch; replaced, no tolerance relaxed.",
+      "first_difference": {
+        "node": 32,
+        "vector": 37,
+        "element": 6992,
+        "actual": 0.008000953122973442,
+        "expected": 0.008000954054296017,
+        "max_abs": 9.313225746154785e-10
+      },
+      "local_implementation_reference": ".venv/lib/python3.12/site-packages/llvm-aie/lib/clang/22/include/aie2p/aie2p_vmult.h: mul_elem_32_conf calls mul_elem_32_accuracy_safe, decomposing into BF16 terms"
+    }
+  },
+  "isolated_stage": [
+    {
+      "latency": {
+        "mean_ms": 1.9005956379999995,
+        "p50_ms": 1.856365,
+        "p95_ms": 2.113551,
+        "samples": 500
+      },
+      "weights": "bf16"
+    },
+    {
+      "latency": {
+        "mean_ms": 1.1603235780000016,
+        "p50_ms": 1.153508,
+        "p95_ms": 1.197852,
+        "samples": 500
+      },
+      "weights": "int8"
+    },
+    {
+      "latency": {
+        "mean_ms": 1.1585907300000005,
+        "p50_ms": 1.151894,
+        "p95_ms": 1.203172,
+        "samples": 500
+      },
+      "weights": "int8"
+    },
+    {
+      "latency": {
+        "mean_ms": 1.8745304380000005,
+        "p50_ms": 1.819655,
+        "p95_ms": 2.093081,
+        "samples": 500
+      },
+      "weights": "bf16"
+    }
+  ],
+  "accuracy": {
+    "unit_values": 9175040,
+    "unit_scope": "All 8388608 normal significands at exponent zero; 262144 random finite sign/exponent/mantissa patterns; 522240 exponent-edge values; 2048 signed-zero, infinities, quiet NaN and smallest subnormal cases. Compare device scalar/vector and independently rounded FP64 host oracle bit-for-bit, with input immutability and guards.",
+    "unit_result": "activation scalar/vector/FP64 bits and guards passed values=9175040",
+    "stage_oracle_max_abs": 2.384185791015625e-07,
+    "bf16_128_token_regression": "passed exact; 1116 vectors including 960 first-token nodes",
+    "int8_128_token_regression": "passed exact; 1116 vectors including 960 first-token nodes"
+  },
+  "trace": {
+    "scalar": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 1,
+          "marked_cycles": 257879,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 3,
+            "INSTR_VECTOR": 0,
+            "MEMORY_STALL": 0,
+            "PORT_RUNNING_1": 11
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 1.163336293377902e-05,
+            "INSTR_VECTOR": 0.0,
+            "MEMORY_STALL": 0.0,
+            "PORT_RUNNING_1": 4.2655664090523076e-05
+          }
+        },
+        {
+          "core": "core_trace for tile3,4",
+          "invocations": 1,
+          "marked_cycles": 941360,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 5687,
+            "INSTR_VECTOR": 242336,
+            "MEMORY_STALL": 52,
+            "PORT_RUNNING_1": 10
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.00604125945440639,
+            "INSTR_VECTOR": 0.2574318007988442,
+            "MEMORY_STALL": 5.523922835047166e-05,
+            "PORT_RUNNING_1": 1.0622928528936857e-05
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "exact_vector": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 1,
+          "marked_cycles": 5780,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 3,
+            "INSTR_VECTOR": 2560,
+            "MEMORY_STALL": 0,
+            "PORT_RUNNING_1": 11
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.0005190311418685121,
+            "INSTR_VECTOR": 0.4429065743944637,
+            "MEMORY_STALL": 0.0,
+            "PORT_RUNNING_1": 0.0019031141868512112
+          }
+        },
+        {
+          "core": "core_trace for tile3,4",
+          "invocations": 1,
+          "marked_cycles": 941518,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 5872,
+            "INSTR_VECTOR": 242336,
+            "MEMORY_STALL": 25,
+            "PORT_RUNNING_1": 11
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.006236736844117691,
+            "INSTR_VECTOR": 0.2573886001117345,
+            "MEMORY_STALL": 2.655286462924766e-05,
+            "PORT_RUNNING_1": 1.1683260436868972e-05
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "activation_cycle_reduction_percent": 97.75863874142524,
+    "limits": "One key core activation window plus FIFO release, not all-array utilization or DMA bandwidth. Special-value scalar handling is excluded by this representative stage input."
+  },
+  "whole_model_benchmark": {
+    "order": "A/B/B/A per precision",
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "conditions": "Same executable, serial hardware, no profiling or concurrent compilation. Baseline includes prior producer-side activation conversion optimization.",
+    "executable_sha256": "5fd83ea5a4c2b0494bc1602dbdb02c3ba8f729af3906aa7d0adec70ac00cf465",
+    "results": {
+      "bf16": {
+        "baseline": {
+          "decode_mean_ms": 206.95340459375,
+          "decode_tokens_per_second": 4.832005551988875,
+          "sequential_prefill_tokens_per_second": 4.834488586502908,
+          "process_decode_means_ms": [
+            206.91215564583328,
+            206.9946535416667
+          ]
+        },
+        "retained": {
+          "decode_mean_ms": 204.1365030104167,
+          "decode_tokens_per_second": 4.8986829168371315,
+          "sequential_prefill_tokens_per_second": 4.86924052256651,
+          "process_decode_means_ms": [
+            204.00868875000006,
+            204.26431727083335
+          ]
+        },
+        "latency_improvement_percent": 1.3611284090072728
+      },
+      "int8": {
+        "baseline": {
+          "decode_mean_ms": 191.89908790625003,
+          "decode_tokens_per_second": 5.21107218856891,
+          "sequential_prefill_tokens_per_second": 5.214271893392501,
+          "process_decode_means_ms": [
+            192.04613406250004,
+            191.75204175000002
+          ]
+        },
+        "retained": {
+          "decode_mean_ms": 188.9311276875,
+          "decode_tokens_per_second": 5.292934056128865,
+          "sequential_prefill_tokens_per_second": 5.28470921532112,
+          "process_decode_means_ms": [
+            188.96726016666665,
+            188.8949952083334
+          ]
+        },
+        "latency_improvement_percent": 1.5466254952707148
+      }
+    }
+  },
+  "default_artifact_validation": {
+    "release_int8_ffn_kernel_preset": "passed",
+    "cpu_ctest": "3/3 passed",
+    "stage_status": "passed",
+    "stage_oracle_max_abs": 2.384185791015625e-07,
+    "bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 204.86602114173226,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.881238940586302,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "int8": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 188.76926562992128,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 5.297472534329195,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    }
+  },
+  "remaining": [
+    "Strict IEEE FP16 path: current default matrices are BF16",
+    "Production INT8 coverage and representative long-context quality",
+    "Batched prefill",
+    "Native INT8 arithmetic evaluation",
+    "Measured DMA bandwidth, full-array utilization and architectural limit attribution"
+  ],
+  "raw_logs": "reports/runs/ffn-activation-2026-10-03",
+  "source_sha256": {
+    "kernels/rwkv/ffn_common.hpp": "76f03cc52a538893cf5867dafa70087a74c809ad752677bec89b4ed54950b0b2",
+    "kernels/rwkv/activation_test.cc": "0dad4268e2c0c9f5f9f26ed5f5643954a7bac6ec757780d5657534851de57752",
+    "tests/inference/activation_test.cpp": "15815d657cea9097101b36ea5e7c79b6dce7e48b1c5ef4b0623abc3167cedf42",
+    "tests/inference/cleanup_regression.cpp": "b1771eba3c753225117cdeb848fa7f3fed561d0e20184d3e27ac0c63b71d5ad6",
+    "tools/compile/rwkv7_activation_test.py": "787ae655e06c866d7fb0bd76937fe3713d5d8c122d4a11ad0a1197c9621ab256",
+    "tools/compile/rwkv7_channel_mix.py": "f535d60154d8d832ee41475a00f715e2fed73dba192cec5b5b405b5d3d663bf6",
+    "tools/compile/rwkv7_channel_mix_int8.py": "828f7377a9fdc212351e1b8d711066a6ce597a1e18e48528036b9bbb3ac0ba4d"
+  },
+  "artifact_sha256": {
+    "bf16-channel-mix/config.json": "1cc86be11476ebfea593cb43baa40594ee3bbd996659b71914ea56e946ac295d",
+    "bf16-channel-mix/design.xclbin": "9baac4ba8410464da06d9093a2f7baaad41b3fbb3959cb0c0e09b59c71571894",
+    "bf16-channel-mix/instructions.bin": "677ec4aacbd62e5348c8777ec79ba8ac027675175f26cd636ca42484ae89fe0b",
+    "int8-channel-mix/config.json": "6dccd3e1a57002f77cc86dd6d6113f5323857738728372a78367e0fdce57cc15",
+    "int8-channel-mix/design.xclbin": "8829cce87a97ddfd17730cecca3ef51083229b49158e107471398b9c1b99f524",
+    "int8-channel-mix/instructions.bin": "112fa1db29067d50a271a0c09130b0f604088b2972bac1b543a9566ed6c9beb8"
+  },
+  "updated_int8_profile": {
+    "token_count": 17,
+    "excluded_initial_tokens": 1,
+    "stage_host_elapsed_median_ms_per_token": {
+      "attention_projections": 45.397850000000005,
+      "channel_mix": 50.4124,
+      "head": 7.337065,
+      "norm": 0.445931,
+      "norm_mix": 8.179504999999999,
+      "projection_residual": 24.007350000000002,
+      "recurrence_stage": 2.114315,
+      "value_recurrence_stage": 51.9035
+    },
+    "scope": "Instrumented elapsed run times include submission, scheduling, context switching, DMA and compute. Not isolated arithmetic latency or hardware utilization."
+  }
+}

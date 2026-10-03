@@ -1,0 +1,469 @@
+{
+  "date": "2026-10-03",
+  "status": "retained_experimental_pending_broader_quality_validation",
+  "scope": "Add W8A16 attention output projection to existing W8A16 FFN mode. No architecture change. Not native integer MAC or IEEE FP16. Overall goal remains active.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Explicit WeightMode::Int8FFNOutput / CLI --weights int8-ffn-output; original BF16 and INT8 FFN modes preserved",
+    "Stream signed INT8 output weights in 4160-byte tiles; convert current tile on-core, accumulate eight K tiles in FP32, then fuse per-output scale before FP32 residual",
+    "No extra submission, BO, full DDR dequantized matrix, or activation quantization boundary",
+    "Shared offline graph with existing BF16 projection, explicit artifact ABI checks and optional compilation target",
+    "Output-weight quantization audit and independent FP64 stage oracle/guard/replay tests"
+  ],
+  "references": {
+    "FastFlowLM": {
+      "commit": "b0d41a03411470373f849b25e3ce9356d716a483",
+      "paths": [
+        "src/include/modules/gemm.hpp",
+        "src/include/modules/dequant.hpp",
+        "src/include/tensor_utils/q4_npu_eXpress.hpp"
+      ],
+      "scope": "Primary XDNA scheduling/packing reference; public q80 dequant API is exposed, implementation kernels are opaque. This candidate uses local tested tiled streaming rather than claiming reuse of unavailable native INT8 source."
+    },
+    "rwkv_lightning_cuda": {
+      "commit": "ec32ae411bb439f7c1894507b9b470b6d3a00f4d",
+      "path": "quant/modeling/rwkv_quantize.cpp",
+      "algorithm": "Per-output symmetric [-127,127], maxabs/127 scale rounded through CUDA helper FP16 with min 2^-24; nearest-even codes; FP32 scale after dot."
+    }
+  },
+  "isolated_stage": {
+    "abba": [
+      {
+        "timing": {
+          "mean_us": 277.42864500000013,
+          "p50_us": 274.75,
+          "p95_us": 297.192,
+          "samples": 200
+        },
+        "weights": "bf16"
+      },
+      {
+        "timing": {
+          "mean_us": 172.33000500000014,
+          "p50_us": 170.673,
+          "p95_us": 183.698,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "timing": {
+          "mean_us": 173.264875,
+          "p50_us": 172.516,
+          "p95_us": 181.093,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "timing": {
+          "mean_us": 277.29152000000005,
+          "p50_us": 273.097,
+          "p95_us": 300.268,
+          "samples": 200
+        },
+        "weights": "bf16"
+      }
+    ],
+    "bf16_weight_bytes": 8388608,
+    "guards_and_immutable_inputs": "passed",
+    "input_passes": 4,
+    "int8_weight_bytes": 4259840,
+    "oracle_max_abs": 4.366040229797363e-06,
+    "oracle_tolerance": "2e-5 + 2e-5*abs(reference), FP64 dot and scale",
+    "status": "passed",
+    "synthetic_projection_relative_l2_vs_bf16": 0.004191343226469205,
+    "zero_rows_and_input": "passed"
+  },
+  "rebuilt_bf16_shared_graph_validation": {
+    "abba": [
+      {
+        "timing": {
+          "mean_us": 279.66664499999985,
+          "p50_us": 276.674,
+          "p95_us": 300.819,
+          "samples": 200
+        },
+        "weights": "bf16"
+      },
+      {
+        "timing": {
+          "mean_us": 176.38161999999986,
+          "p50_us": 174.089,
+          "p95_us": 199.377,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "timing": {
+          "mean_us": 173.82649499999997,
+          "p50_us": 172.346,
+          "p95_us": 186.183,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "timing": {
+          "mean_us": 277.2379249999999,
+          "p50_us": 274.479,
+          "p95_us": 296.481,
+          "samples": 200
+        },
+        "weights": "bf16"
+      }
+    ],
+    "bf16_weight_bytes": 8388608,
+    "guards_and_immutable_inputs": "passed",
+    "input_passes": 4,
+    "int8_weight_bytes": 4259840,
+    "oracle_max_abs": 4.366040229797363e-06,
+    "oracle_tolerance": "2e-5 + 2e-5*abs(reference), FP64 dot and scale",
+    "status": "passed",
+    "synthetic_projection_relative_l2_vs_bf16": 0.004191343226469205,
+    "zero_rows_and_input": "passed"
+  },
+  "whole_model": {
+    "order": "A/B/B/A; A=INT8 FFN only, B=INT8 FFN + attention output",
+    "same_executable_and_artifact_root": true,
+    "serial_unprofiled": true,
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "process_decode_means_ms": {
+      "A1": 189.20254033333333,
+      "B1": 186.80368314583328,
+      "B2": 186.69111918750005,
+      "A2": 189.00017454166664
+    },
+    "baseline_mean_ms": 189.10135743749998,
+    "candidate_mean_ms": 186.74740116666666,
+    "latency_reduction_percent": 1.2448119372233115,
+    "baseline_tokens_per_second": 5.288169337073694,
+    "candidate_tokens_per_second": 5.354826861057782,
+    "sequential_prefill_tokens_per_second": {
+      "baseline": 5.259944134619891,
+      "candidate": 5.358757738822986
+    },
+    "baseline_resident_bytes": 2124396544,
+    "candidate_resident_bytes": 2025306112,
+    "resident_bytes_saved": 99090432,
+    "runs_per_token": 123,
+    "root_bos": 291,
+    "host_upload_bytes_per_token": 8192,
+    "host_download_bytes_per_token": 262144
+  },
+  "profiles": {
+    "tokens": 17,
+    "excluded_initial_tokens": 1,
+    "median_host_elapsed_ms_per_token": {
+      "int8-ffn": {
+        "attention_projections": 45.29235,
+        "channel_mix": 50.078,
+        "head": 7.375885,
+        "norm": 0.4549875,
+        "norm_mix": 8.05086,
+        "projection_residual": 23.83105,
+        "recurrence_stage": 2.08315,
+        "value_recurrence_stage": 51.54705
+      },
+      "int8-ffn-output": {
+        "attention_projections": 46.0911,
+        "channel_mix": 50.532399999999996,
+        "head": 7.4264399999999995,
+        "norm": 0.453214,
+        "norm_mix": 8.159130000000001,
+        "projection_residual": 21.9158,
+        "recurrence_stage": 2.0959950000000003,
+        "value_recurrence_stage": 52.44115
+      }
+    },
+    "limitation": "Host elapsed includes scheduling/context/DMA/arithmetic; not isolated DMA latency, utilization or memory-bandwidth counters."
+  },
+  "accuracy": {
+    "candidate_vs_bf16": {
+      "baseline_perplexity": 3.6260626127528526,
+      "baseline_precision": "bf16_fp32_state",
+      "baseline_resident_bytes": 2917120000,
+      "candidate_perplexity": 3.6253228806514977,
+      "candidate_resident_bytes": 2025306112,
+      "checkpoint_nodes_compared": 3840,
+      "first_token_nodes_compared": 960,
+      "max_abs_logits": 2.8124237060546875,
+      "max_kl": 0.027517549152944545,
+      "mean_kl": 0.0012013597283677937,
+      "mean_nll_increase": -0.00020402503896499447,
+      "nll_tokens": 512,
+      "perplexity_ratio": 0.9997959957727279,
+      "precision": "int8_ffn_output_bf16_others_fp32_state",
+      "quality_gate": "No language-quality acceptance threshold is implied by this measurement.",
+      "reset_and_branch": "passed",
+      "status": "measured",
+      "steps": 512,
+      "top1_agreement": 0.98828125,
+      "traced_checkpoints": 4,
+      "type": "summary",
+      "workload": "supplied UTF-8 text"
+    },
+    "ffn_only_vs_bf16": {
+      "baseline_perplexity": 3.6260626127528526,
+      "baseline_precision": "bf16_fp32_state",
+      "baseline_resident_bytes": 2917120000,
+      "candidate_perplexity": 3.634336796879438,
+      "candidate_resident_bytes": 2124396544,
+      "checkpoint_nodes_compared": 3840,
+      "first_token_nodes_compared": 960,
+      "max_abs_logits": 2.562135696411133,
+      "max_kl": 0.03180275021430237,
+      "mean_kl": 0.0010428022785350015,
+      "mean_nll_increase": 0.0022792651593448454,
+      "nll_tokens": 512,
+      "perplexity_ratio": 1.0022818646587859,
+      "precision": "int8_ffn_bf16_others_fp32_state",
+      "quality_gate": "No language-quality acceptance threshold is implied by this measurement.",
+      "reset_and_branch": "passed",
+      "status": "measured",
+      "steps": 512,
+      "top1_agreement": 0.98828125,
+      "traced_checkpoints": 4,
+      "type": "summary",
+      "workload": "supplied UTF-8 text"
+    },
+    "checkpoints": [
+      {
+        "step": 1,
+        "aggregate_state": {
+          "cosine": 0.9997583998757389,
+          "max_abs": 2.7088427543640137,
+          "relative_l2": 0.022022683055505077,
+          "rmse": 0.010125974082782874
+        },
+        "worst_matrix_layer": {
+          "attention_shift": {
+            "cosine": 0.9996658990698967,
+            "max_abs": 0.19642436504364014,
+            "relative_l2": 0.025861368494580258,
+            "rmse": 0.046155407598615236
+          },
+          "ffn_shift": {
+            "cosine": 0.998847690589795,
+            "max_abs": 0.1819455623626709,
+            "relative_l2": 0.048004170017058256,
+            "rmse": 0.045789079978510956
+          },
+          "layer": 17,
+          "matrix": {
+            "cosine": 0.9993593894439725,
+            "max_abs": 0.32410144805908203,
+            "relative_l2": 0.03582144051136079,
+            "rmse": 0.009360861170926646
+          }
+        }
+      },
+      {
+        "step": 8,
+        "aggregate_state": {
+          "cosine": 0.9999405379623776,
+          "max_abs": 1.0392236709594727,
+          "relative_l2": 0.010937261496626317,
+          "rmse": 0.006834476118965748
+        },
+        "worst_matrix_layer": {
+          "attention_shift": {
+            "cosine": 0.9998331976619632,
+            "max_abs": 0.07611855864524841,
+            "relative_l2": 0.018269487063570386,
+            "rmse": 0.01729744553735946
+          },
+          "ffn_shift": {
+            "cosine": 0.9998170356050067,
+            "max_abs": 0.0471147745847702,
+            "relative_l2": 0.019136792696977375,
+            "rmse": 0.013011328751181397
+          },
+          "layer": 14,
+          "matrix": {
+            "cosine": 0.9999003406003816,
+            "max_abs": 0.8999767303466797,
+            "relative_l2": 0.014120478959425822,
+            "rmse": 0.013219071918514352
+          }
+        }
+      },
+      {
+        "step": 32,
+        "aggregate_state": {
+          "cosine": 0.9999315719865484,
+          "max_abs": 1.2658624649047852,
+          "relative_l2": 0.011753352247213553,
+          "rmse": 0.007460175423696565
+        },
+        "worst_matrix_layer": {
+          "attention_shift": {
+            "cosine": 0.9998006196214033,
+            "max_abs": 0.3187265396118164,
+            "relative_l2": 0.020001860648323527,
+            "rmse": 0.02857277809787772
+          },
+          "ffn_shift": {
+            "cosine": 0.9998056592274286,
+            "max_abs": 0.2046060562133789,
+            "relative_l2": 0.019777039482429294,
+            "rmse": 0.0370298004771889
+          },
+          "layer": 21,
+          "matrix": {
+            "cosine": 0.9999038862976887,
+            "max_abs": 0.7385749816894531,
+            "relative_l2": 0.01410772805676682,
+            "rmse": 0.007661481183255284
+          }
+        }
+      },
+      {
+        "step": 512,
+        "aggregate_state": {
+          "cosine": 0.9999337197530498,
+          "max_abs": 0.7019824981689453,
+          "relative_l2": 0.011546847678350658,
+          "rmse": 0.007559065691242664
+        },
+        "worst_matrix_layer": {
+          "attention_shift": {
+            "cosine": 0.999809244792931,
+            "max_abs": 0.11933422088623047,
+            "relative_l2": 0.0195527759281392,
+            "rmse": 0.023260860617670378
+          },
+          "ffn_shift": {
+            "cosine": 0.9997297772025117,
+            "max_abs": 0.08692216873168945,
+            "relative_l2": 0.023255909907446817,
+            "rmse": 0.02189527662342548
+          },
+          "layer": 15,
+          "matrix": {
+            "cosine": 0.9998997765596532,
+            "max_abs": 0.42052388191223145,
+            "relative_l2": 0.014174759178288119,
+            "rmse": 0.010174038777517956
+          }
+        }
+      }
+    ],
+    "interpretation": "Mean KL increases with additional output quantization. Smoke perplexity slightly lower than BF16 does not establish improved language quality; no representative-corpus acceptance gate has passed."
+  },
+  "weight_error_attribution": {
+    "matrices": 24,
+    "codes": 100663296,
+    "int8_reconstruction_relative_l2_range": [
+      0.009638599166823688,
+      0.013344910699667912
+    ],
+    "scale_rounding_effect_relative_l2_range": [
+      0.001983395517373518,
+      0.0022527802849021824
+    ],
+    "scale_rounding_changed_codes": 423794,
+    "minimum_scale_rows": 0,
+    "checkpoint_bf16_storage_max_abs": 0.0,
+    "limits": "Weight-local reconstruction, on-device implementation error, and propagated model errors are measured separately. Propagated errors are not proof of individual layer causality."
+  },
+  "regressions": {
+    "cpu_ctest": "3/3 passed",
+    "bf16": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 204.1533714330709,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.898278157154203,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "int8_ffn": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 188.96841989763783,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2124396544,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 5.2918895154105074,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn"
+    },
+    "new_mode_baseline": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 186.5627696141732,
+      "measured_steps": 127,
+      "mode": "record",
+      "resident_bytes": 2025306112,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 5.360126257066619,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "int8-ffn-output"
+    },
+    "new_mode_baseline_scope": "Recorded 128-token baseline for future changes; checks reset, branch, host/resident replay and invalid input behavior. Not an independent pre-change cross-implementation comparison.",
+    "fail_fast": [
+      {
+        "case": "missing_artifact",
+        "returncode": 1,
+        "stderr": "rwkv-bench: Missing production artifact: int8-projection-residual"
+      },
+      {
+        "case": "incompatible_artifact",
+        "returncode": 1,
+        "stderr": "rwkv-bench: Incompatible production artifact: int8-projection-residual field tile_bytes"
+      },
+      {
+        "case": "cross_precision_snapshot",
+        "returncode": 1,
+        "stderr": "Snapshot version/precision mismatch"
+      }
+    ],
+    "new_mode_baseline_path": "build/int8-ffn-output-baseline.bin",
+    "bf16_compiler_instructions_unchanged": true,
+    "bf16_compiler_xclbin_note": "Rebuilt XCLBIN hash differs; stage oracle/guards passed. No binary identity claim for the XCLBIN."
+  },
+  "remaining": [
+    "Representative and long-context accuracy validation, strict IEEE FP16 path, broader native INT8 compute coverage, batched prefill and hardware resource-limit evidence remain incomplete."
+  ],
+  "raw_logs": "reports/runs/int8-output-2026-10-03",
+  "sha256": {
+    "include/rwkv/inference/graph.hpp": "0a71a571181bac56d299435e3aa20e37dbf295f3914be140ad0ce15a49eb00c6",
+    "src/inference/graph.cpp": "ff7ab20fd5f7e2cd97807d93d8560ecec99a559b7ad291e0276f4cc841d3ff17",
+    "src/inference/resident_plan.cpp": "50aa3258eee66cd7de725dff02ff33fdba7ade4801ccfb17853a56ab725dd3b0",
+    "src/inference/artifacts.cpp": "3911c22b898be7f299a9797b56484ffcd3cb5fad65025fb46ef3aee83285e09b",
+    "kernels/rwkv/projection_residual_int8.cc": "60f3b1bb286abc0953beab00b6610243f68483fabc01da0d527465d95655302f",
+    "tools/compile/rwkv7_projection_residual.py": "5236e71315395cdd75b79e367ea28bc922b0896ffce22031d9ae7fe40be57a3e",
+    "tools/compile/rwkv7_projection_residual_int8.py": "0bdccbb9490ec480a693c2b69886e54f009683a1ba3ab49e1e49858e03397076",
+    "tools/compile/rwkv7_optimized.py": "3cebcb6f493282fac6d66194fcf506b7dec0e38f608b2ee6362a959ded656c85",
+    "apps/rwkv_accuracy.cpp": "4e8fb0e7bd087d41023c3b56e6f9806c0389aa6b88661c1a56255d06fadbc19c",
+    "apps/rwkv_bench.cpp": "2aecea319bd3bf748ab9f884bf83024ba32d64fde7d5a0d8040b7e2a7ad2cec2",
+    "apps/rwkv_cli.cpp": "258b67155e753b5efa04bb9c531fdc08dc5e374badcf29491de6039e1d46c884",
+    "apps/rwkv_quantization_audit.cpp": "9293dffe13638c91969304116879b2b79bfd0a10de0d070ed0089921fd323812",
+    "tests/inference/projection_residual_int8_test.cpp": "effce388e19e34ac580be83c252f2c00914e18c7a8036993845aa0ebc067fb48",
+    "tests/inference/cleanup_regression.cpp": "764794c51d6da46d6f0be5e8f642f688ed917cc686a8bb87ba5443a2816cd275",
+    "build/release/rwkv-bench": "ceeb4f85993b9ce775e12954db1162254e8a27ab62cbb701a0b2963e80d76f65",
+    "build/release/rwkv-accuracy": "4a7ea6d6535defa8689d2343e173b6c45f38865a2bff56fe0a8215941c4c853d",
+    "build/test/rwkv-projection-residual-int8-test": "42b9500643e3acbf8b8f99a90b784316a6619649c8dc454ff33f58a3430d207d",
+    "tests/data/precision_smoke.txt": "012617366c731ff4a2adbca903fdecc572a90c1681eead52f04e04637642e73e",
+    "build/kernels/rwkv7-bf16/int8-projection-residual/design.xclbin": "a1afa89ef92cacc094d8561805fdf5c1c3a0241fb90060c91867a0aa096def15",
+    "build/kernels/rwkv7-bf16/int8-projection-residual/instructions.bin": "6ff5076b21d39d3a26b9f192c2a6a0b7cd7e252288675f6ccd596b6185ed280f",
+    "build/kernels/rwkv7-bf16/int8-projection-residual/config.json": "cd04f7dd1d8ecf1013946ba1965a1af9cddc40834a629f01c3e667c9e73e44de"
+  }
+}

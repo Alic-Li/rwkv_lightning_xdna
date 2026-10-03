@@ -139,6 +139,9 @@ Vector DecodeGraph::Impl::replay(int token, State &state, bool persistent) {
           if (span > 1 && n.kind == Kind::Element && n.op == Op::Norm)
             category = span == 6 ? "channel_mix" : "norm_mix";
           else if (span > 1 && n.kind == Kind::Element &&
+                   n.op == Op::ValueResidual)
+            category = "value_recurrence_stage";
+          else if (span > 1 && n.kind == Kind::Element &&
                    n.op == Op::NormalizeKey)
             category = "recurrence_stage";
           else if (span > 2 && n.kind == Kind::Linear && !n.transpose &&

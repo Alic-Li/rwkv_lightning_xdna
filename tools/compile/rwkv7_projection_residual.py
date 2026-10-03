@@ -11,20 +11,21 @@ from aie.helpers.taplib import TensorAccessPattern as TAP
 from rwkv7_common import KERNEL_ROOT, typ, external
 
 
-@iron.jit
-def design(x: In, w: In, residual: In, result: Out):
-    wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]]
+def projection_residual_program(quantized=False):
+    wt = lambda n: np.ndarray[(n,), np.dtype[np.uint8 if quantized else bfloat16]]
+    tile = 4160 if quantized else 4096
+    weights = tile * 1024
     fn = external(
-        "rwkv7_ffn_value_tile",
-        "ffn_pipeline_bf16.cc",
-        [typ(2048), wt(4096), typ(256), np.int32, np.int32],
+        "rwkv7_output_int8_tile" if quantized else "rwkv7_ffn_value_tile",
+        "projection_residual_int8.cc" if quantized else "ffn_pipeline_bf16.cc",
+        [typ(2048), wt(tile), typ(256), np.int32, np.int32],
         optimization="-O3",
     )
     zero = fn.object_file.bind("rwkv7_ffn_zero256", [typ(256)])
     copy = fn.object_file.bind("rwkv7_ffn_copy1024", [typ(1024), typ(1024)])
     add = fn.object_file.bind("rwkv7_ffn_residual", [typ(4096), typ(4096)])
     xfifo = ObjectFifo(typ(2048), name="input", depth=1)
-    ws = [ObjectFifo(wt(4096), name=f"w{i}", depth=2) for i in range(8)]
+    ws = [ObjectFifo(wt(tile), name=f"w{i}", depth=2) for i in range(8)]
     groups = [ObjectFifo(typ(1024), name=f"group{i}", depth=1) for i in range(2)]
     ys = []
     for group in groups:
@@ -68,7 +69,7 @@ def design(x: In, w: In, residual: In, result: Out):
         hx.fill(x)
         for i in range(8):
             hw[i].fill(
-                w, tap=TAP((4194304,), i * 524288, [1, 1, 1, 524288], [0, 0, 0, 1])
+                w, tap=TAP((weights,), i * (weights // 8), [1, 1, 1, weights // 8], [0, 0, 0, 1])
             )
         hr.fill(res)
         ho.drain(out, wait=True)
@@ -79,7 +80,7 @@ def design(x: In, w: In, residual: In, result: Out):
             seq,
             [
                 typ(2048),
-                wt(4194304),
+                wt(weights),
                 typ(2048),
                 typ(4096),
                 xfifo.prod(),
@@ -90,6 +91,11 @@ def design(x: In, w: In, residual: In, result: Out):
         ),
         workers=workers,
     ).resolve_program()
+
+
+@iron.jit
+def design(x: In, w: In, residual: In, result: Out):
+    return projection_residual_program()
 
 
 if __name__ == "__main__":

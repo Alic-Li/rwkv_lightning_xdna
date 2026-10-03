@@ -70,8 +70,11 @@ DecodeGraph::Impl::Id DecodeGraph::Impl::recurrent(Id state, Id r, Id d, Id k,
   return node.output;
 }
 DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
-                        const std::filesystem::path &resident)
-    : weights(w), backend(b) {
+                        const std::filesystem::path &resident, WeightMode mode)
+    : weights(w), backend(b), weight_mode(mode) {
+  if (mode != WeightMode::BFloat16 && mode != WeightMode::Int8FFN &&
+      mode != WeightMode::Int8FFNOutput)
+    throw std::invalid_argument("Invalid weight mode");
   const size_t c = w.channels(), n = w.head_size();
   embedding = allocate(c);
   Id x = norm(embedding, w.at("blocks.0.ln0.weight"), w.at("blocks.0.ln0.bias"),
@@ -146,8 +149,8 @@ DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
 DecodeGraph::DecodeGraph(const Weights &w, RecurrentBackend &b)
     : impl_(std::make_unique<Impl>(w, &b, std::filesystem::path{})) {}
 DecodeGraph::DecodeGraph(const Weights &w,
-                         const std::filesystem::path &resident)
-    : impl_(std::make_unique<Impl>(w, nullptr, resident)) {
+                         const std::filesystem::path &resident, WeightMode mode)
+    : impl_(std::make_unique<Impl>(w, nullptr, resident, mode)) {
   if (resident.empty())
     throw std::invalid_argument("NPU artifact directory is required");
 }

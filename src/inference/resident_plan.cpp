@@ -2,6 +2,7 @@
 #include "artifacts.hpp"
 #include "graph_internal.hpp"
 #include "weight_layout.hpp"
+#include "quantization.hpp"
 #include <algorithm>
 #include <stdexcept>
 
@@ -38,7 +39,7 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
   return b;
 }
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
-  validate_resident_artifacts(root, weights);
+  validate_resident_artifacts(root, weights, weight_mode);
   ResidentLayout layout;
   prepare_resident_arenas(root, layout);
   prepare_resident_runs(root, layout);
@@ -53,8 +54,8 @@ void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   }
 }
 // Allocate stable shared arenas before binding any run. The recurrence arena
-// contains 27 FP32 vectors; its aliases are also consumed by attention
-// projection.
+// contains 27 FP32 vectors for layer zero, or 30 with fused value inputs;
+// its aliases are also consumed by attention projection.
 void DecodeGraph::Impl::prepare_resident_arenas(
     const std::filesystem::path &root, ResidentLayout &layout) {
   auto &value_args = layout.value_args;
@@ -90,7 +91,17 @@ void DecodeGraph::Impl::prepare_resident_arenas(
           post[2].inputs[1] != post[1].output ||
           post[3].inputs[0] != post[2].output)
         throw std::runtime_error("Unexpected recurrence stage dependencies");
-      std::vector<Id> ids(27, none);
+      const bool fused_value = ni >= 7 && nodes[ni - 7].kind == Kind::Element &&
+                               nodes[ni - 7].op == Op::ValueResidual;
+      std::vector<Id> ids(fused_value ? 30 : 27, none);
+      if (fused_value) {
+        const auto &value = nodes[ni - 7];
+        if (value.output != node.inputs[4])
+          throw std::runtime_error("Unexpected fused value dependency");
+        ids[27] = value.inputs[0];
+        ids[28] = value.inputs[2];
+        ids[29] = value.inputs[3];
+      }
       const std::vector<Id> pi{pre[0].inputs[0], pre[1].inputs[0],
                                pre[5].inputs[0], pre[0].inputs[1],
                                pre[4].inputs[2], pre[1].inputs[1],
@@ -106,7 +117,7 @@ void DecodeGraph::Impl::prepare_resident_arenas(
       ids[20] = pre[1].output;
       for (size_t j = 0; j < 4; ++j)
         ids[21 + j] = post[j].output;
-      Vector values(27 * 2048, 0);
+      Vector values(ids.size() * 2048, 0);
       for (size_t j = 0; j < ids.size(); ++j)
         if (ids[j] != none && buffers[ids[j]].constant)
           std::copy(read(ids[j]).begin(), read(ids[j]).end(),
@@ -123,28 +134,13 @@ void DecodeGraph::Impl::prepare_resident_arenas(
       continue;
     }
   }
-  auto pack_vectors = [&](const std::vector<Id> &ids, size_t slots) {
-    Vector value(slots * 2048, 0);
-    for (size_t i = 0; i < ids.size(); ++i) {
-      if (buffers[ids[i]].constant)
-        std::copy(read(ids[i]).begin(), read(ids[i]).end(),
-                  value.begin() + i * 2048);
-      if (device_buffers[ids[i]].size())
-        throw std::runtime_error("Stage input alias");
-    }
-    auto packed = initialized(allocator, value);
-    for (size_t i = 0; i < ids.size(); ++i)
-      device_buffers[ids[i]] = packed.slice(i * 2048 * 4, 2048 * 4);
-    return packed;
-  };
   for (size_t i = 0; i < nodes.size(); ++i) {
     const auto *n = &nodes[i];
     if (n->kind != Kind::Element)
       continue;
     if (n->op == Op::ValueResidual) {
-      auto input = pack_vectors({n->inputs[0], n->inputs[2], n->inputs[3]}, 3);
-      value_args[i] = {input, device_buffers[n->inputs[1]],
-                       device_buffers[n->output]};
+      auto input = recurrence_stages.at(i + 1).slice(27 * 2048 * 4, 6144 * 4);
+      value_args[i] = {input, device_buffers[n->inputs[1]]};
     }
   }
   // One root BO for constants and activation slots. Offsets stay fixed;
@@ -261,7 +257,8 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
                 states.begin(), states.end(),
                 [&](const StateBinding &s) { return s.old_ffn == old; }))
           throw std::runtime_error("Unexpected ChannelMix topology");
-        auto &stage = session(root, "bf16-channel-mix");
+        const bool int8 = weight_mode != WeightMode::BFloat16;
+        auto &stage = session(root, int8 ? "int8-channel-mix" : "bf16-channel-mix");
         Vector parameters(6144);
         for (size_t j = 0; j < 3; ++j) {
           const auto &value = read(j < 2 ? a[j + 1] : n[1].inputs[2]);
@@ -269,7 +266,17 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
             throw std::runtime_error("Unexpected ChannelMix parameter shape");
           std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
         }
-        auto packed = weight_layout::channel_mix(*n[2].weight, *n[4].weight);
+        xdna::DeviceBuffer packed_weights;
+        if (int8) {
+          auto packed = quantization::channel_mix(*n[2].weight, *n[4].weight);
+          packed_weights = stage.allocate(packed.size());
+          packed_weights.upload(packed.data(), packed.size());
+          resident_bytes += packed.size();
+          ++root_bos;
+        } else {
+          packed_weights = initialized_bf16(stage,
+              weight_layout::channel_mix(*n[2].weight, *n[4].weight));
+        }
         auto diagnostic = initialized(stage, Vector(22528, 0));
         auto result = initialized(stage, Vector(4096, 0));
         device_buffers[old] = diagnostic.slice(0, 2048 * 4);
@@ -281,7 +288,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         device_buffers[n[5].output] = result.slice(2048 * 4, 2048 * 4);
         runs.push_back(stage.prepare(
             {device_buffers[a[0]], initialized(stage, parameters),
-             initialized_bf16(stage, packed), diagnostic, result}));
+             packed_weights, diagnostic, result}));
         for (size_t j = 0; j < 6; ++j)
           node_run_ends.push_back(runs.size());
         node_index += 5;
@@ -325,15 +332,25 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         nodes[node_index + 1].kind == Kind::Element &&
         nodes[node_index + 1].op == Op::Add &&
         nodes[node_index + 1].inputs[1] == node.output) {
-      auto &stage = session(root, "bf16-projection-residual");
-      auto packed =
-          weight_layout::projection(*node.weight, false, 0, 2048, 2048);
+      const bool int8 = weight_mode == WeightMode::Int8FFNOutput;
+      auto &stage = session(root, int8 ? "int8-projection-residual" : "bf16-projection-residual");
+      xdna::DeviceBuffer packed_weights;
+      if (int8) {
+        auto packed = quantization::pack(quantization::quantize(*node.weight));
+        packed_weights = stage.allocate(packed.size());
+        packed_weights.upload(packed.data(), packed.size());
+        resident_bytes += packed.size();
+        ++root_bos;
+      } else {
+        packed_weights = initialized_bf16(stage,
+            weight_layout::projection(*node.weight, false, 0, 2048, 2048));
+      }
       auto result = initialized(stage, Vector(4096, 0));
       device_buffers[node.output] = result.slice(0, 2048 * 4);
       device_buffers[nodes[node_index + 1].output] =
           result.slice(2048 * 4, 2048 * 4);
       runs.push_back(stage.prepare(
-          {device_buffers[a[0]], initialized_bf16(stage, packed),
+          {device_buffers[a[0]], packed_weights,
            device_buffers[nodes[node_index + 1].inputs[0]], result}));
       node_run_ends.push_back(runs.size());
       node_run_ends.push_back(runs.size());
@@ -386,6 +403,20 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         continue;
       }
     }
+    if (node.kind == Kind::Element && node.op == Op::ValueResidual) {
+      const size_t prepare = node_index + 1;
+      if (!recurrence_stages.count(prepare) ||
+          nodes.at(prepare + 6).inputs[4] != node.output)
+        throw std::runtime_error("Value residual not adjacent to recurrence");
+      auto &stage = session(root, "fused-value-recurrence-stage");
+      runs.push_back(stage.prepare(
+          {device_buffers[nodes[prepare + 6].inputs[0]],
+           recurrence_stages.at(prepare), value_args.at(node_index)[1]}));
+      for (size_t j = 0; j < 12; ++j)
+        node_run_ends.push_back(runs.size());
+      node_index += 11;
+      continue;
+    }
     if (recurrence_stages.count(node_index)) {
       auto &stage = session(root, "fused-recurrence-stage");
       runs.push_back(
@@ -396,10 +427,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
       node_index += 10;
       continue;
     }
-    if (node.kind == Kind::Element && node.op == Op::ValueResidual) {
-      auto &value = session(root, "fused-value");
-      runs.push_back(value.prepare(value_args.at(node_index)));
-    } else if (node.kind == Kind::Element && node.op == Op::Norm &&
+    if (node.kind == Kind::Element && node.op == Op::Norm &&
                node.group == 2048 && node.epsilon == 1e-5f) {
       auto &norm = session(root, "upstream-norm");
       runs.push_back(

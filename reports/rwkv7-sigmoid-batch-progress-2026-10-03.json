@@ -1,0 +1,205 @@
+{
+  "date": "2026-10-03",
+  "status": "retained_measured_incremental_optimization",
+  "scope": "Batch the existing sigmoid vector-lane multiply across 32 lanes; retain native scalar reciprocal, exponential order, FP64 normalization statistics and FP32 recurrent state. Overall goal remains active.",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / 8 columns / performance power mode / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "profiling_basis": "reports/rwkv7-prepare-region-profile-2026-10-03.json",
+  "device_trace": {
+    "sigmoid_decay": {
+      "baseline_cycles_per_head": 72349.0,
+      "candidate_cycles_per_head": 63923.0,
+      "reduction_percent": 11.646325450248103,
+      "heads_per_trace": 5,
+      "candidate_trace_core": {
+        "core": "core_trace for tile2,0",
+        "invocations": 5,
+        "marked_cycles": 319615,
+        "event_cycles": {
+          "LOCK_STALL": 0,
+          "PORT_RUNNING_0": 0,
+          "INSTR_VECTOR": 9440,
+          "MEMORY_STALL": 30
+        },
+        "event_fraction": {
+          "LOCK_STALL": 0.0,
+          "PORT_RUNNING_0": 0.0,
+          "INSTR_VECTOR": 0.02953553494047526,
+          "MEMORY_STALL": 9.386292883625612e-05
+        }
+      }
+    },
+    "value_sigmoid_blend": {
+      "baseline_cycles_per_head": 34979.0,
+      "candidate_cycles_per_head": 30766.0,
+      "reduction_percent": 12.044369478830156,
+      "heads_per_trace": 5,
+      "candidate_trace_core": {
+        "core": "core_trace for tile2,0",
+        "invocations": 5,
+        "marked_cycles": 153830,
+        "event_cycles": {
+          "PORT_RUNNING_0": 0,
+          "LOCK_STALL": 0,
+          "INSTR_VECTOR": 4070,
+          "MEMORY_STALL": 10
+        },
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.0,
+          "INSTR_VECTOR": 0.026457778066697003,
+          "MEMORY_STALL": 6.500682571670025e-05
+        }
+      }
+    }
+  },
+  "isolated_fused_stage": {
+    "order": "A/B/B/A",
+    "samples_per_process": 300,
+    "warmup_runs": 4,
+    "reset_outside_timing": true,
+    "process_mean_us": {
+      "A1": 977.899,
+      "B1": 941.311,
+      "B2": 943.02,
+      "A2": 975.987
+    },
+    "baseline_mean_us": 976.943,
+    "candidate_mean_us": 942.1655000000001,
+    "latency_reduction_percent": 3.559828976716136,
+    "oracle_max_abs": 9.53674e-07,
+    "guards_replay": "passed"
+  },
+  "whole_model": {
+    "order": "A/B/B/A per precision",
+    "same_executable": true,
+    "serial_unprofiled_no_concurrent_compilation": true,
+    "samples_per_variant": 96,
+    "warmup_tokens_per_process": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "results": {
+      "bf16": {
+        "process_decode_means_ms": {
+          "A1": 202.66856664583338,
+          "B1": 202.0037812708334,
+          "B2": 201.74435316666666,
+          "A2": 202.81738775
+        },
+        "baseline_mean_ms": 202.74297719791667,
+        "candidate_mean_ms": 201.87406721875004,
+        "latency_reduction_percent": 0.4285771034714585,
+        "baseline_tokens_per_second": 4.932353336331867,
+        "candidate_tokens_per_second": 4.95358325998556,
+        "sequential_prefill_tokens_per_second": {
+          "baseline": 4.935026145158579,
+          "candidate": 4.951605726689422
+        },
+        "runs_per_token": 123,
+        "resident_bytes": 2917120000,
+        "root_bos": 291,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      "int8-output": {
+        "process_decode_means_ms": {
+          "A1": 185.5866506041667,
+          "B1": 184.77929785416669,
+          "B2": 184.87106527083333,
+          "A2": 185.37480335416663
+        },
+        "baseline_mean_ms": 185.48072697916666,
+        "candidate_mean_ms": 184.8251815625,
+        "latency_reduction_percent": 0.35343047622424206,
+        "baseline_tokens_per_second": 5.391395733058134,
+        "candidate_tokens_per_second": 5.410518153132951,
+        "sequential_prefill_tokens_per_second": {
+          "baseline": 5.394382099486753,
+          "candidate": 5.4082636965215265
+        },
+        "runs_per_token": 123,
+        "resident_bytes": 2025306112,
+        "root_bos": 291,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      }
+    }
+  },
+  "validation": {
+    "scalar_vector_sigmoid_exp": "vector exponential/sigmoid scalar bits/oracle/guards passed values=9216 max_abs=9.44104e-08",
+    "regular_recurrence_stage": "recurrence oracle/replay/guards passed max_abs=1.19209e-06",
+    "whole_model_exact": {
+      "bf16": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 202.1031525905512,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2917120000,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 4.947968337861309,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "bf16"
+      },
+      "int8-ffn": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 188.40720181102364,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2124396544,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 5.307652735074432,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "int8-ffn"
+      },
+      "int8-output": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 192.32232667716528,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2025306112,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 5.199604316760439,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "int8-ffn-output"
+      }
+    },
+    "promoted_artifact_files_matching_tested_candidate": 36
+  },
+  "limits": [
+    "Small end-to-end gain, substantially below isolated stage gain; process means do not establish population confidence intervals.",
+    "128-token exact regression in all three modes is sampled numerical evidence, not an exhaustive FP32 proof.",
+    "Selected-core trace fractions are not peak-compute utilization.",
+    "No native INT8 MAC, IEEE FP16 or batched prefill claim; hardware-limit goal remains incomplete."
+  ],
+  "raw_logs": "reports/runs/sigmoid-batch-2026-10-03",
+  "baseline_artifact_root": "build/kernels/before-sigmoid-batch",
+  "candidate_artifact_root": "build/kernels/sigmoid-batch",
+  "retained_artifact_root": "build/kernels/rwkv7-bf16",
+  "sha256": {
+    "kernels/rwkv/vector_exp_fp32.hpp": "3b5880277585857287a80181d5b1a37dcc63639fdb19a73950640e55d6e1224e",
+    "kernels/rwkv/stages_fp32.cc": "75b6d62d980ea967d920ccb844b739827ddddc8c9c9d07d1f71d872872318ea0",
+    "kernels/rwkv/value_recurrence_fp32.cc": "df4692016de784abc959de5c8f2ba568920f0dc8801dd178ebc99ceaa6a7b8bd",
+    "tools/compile/rwkv7_common.py": "34ada57cef57798ad2a1ec1dc646a6327cbf8cbe10c31993161b886a175fafc9",
+    "tools/compile/rwkv7_recurrence_stage.py": "a3453ab95297b95747e759133bc2788058bc5667c3299c5c4a291bc579b91aeb",
+    "tools/compile/rwkv7_value_recurrence.py": "c4853522cbc226dbed7aafb7907dddd7e8cbb07d1f98c5ddec859f98385935a8",
+    "build/release/rwkv-bench": "ceeb4f85993b9ce775e12954db1162254e8a27ab62cbb701a0b2963e80d76f65",
+    "build/test/rwkv-cleanup-regression": "d621c67a302cace55ad78a54d19a250bbd2139791d2a109df33710b0d436a0f8",
+    "build/test/rwkv-recurrence-stage-test": "ee7845e322f924f6e86f27dfe73c8be76bf9c68cc98e62936a3abbb0eb3825cf",
+    "build/kernels/rwkv7-bf16/fused-recurrence-stage/design.xclbin": "b524688ae2f82deec165c58fc3b36cc6e12093bfa738a235f3fbc045de0fef23",
+    "build/kernels/rwkv7-bf16/fused-recurrence-stage/instructions.bin": "79ffef6ed180c2bbe295bd38290b6122a09d169c2dab9cadf63ee0248a2024f8",
+    "build/kernels/rwkv7-bf16/fused-recurrence-stage/config.json": "b45ae6022c39063b2d5f916b5806503d99a527cd1a614a8752d5557c6032193e",
+    "build/kernels/rwkv7-bf16/fused-value-recurrence-stage/design.xclbin": "84ded41f0c6711d0c9ee8fafee389173aead197acff3b6d2edf345d42af84525",
+    "build/kernels/rwkv7-bf16/fused-value-recurrence-stage/instructions.bin": "24694fda8f35fd7ea0c1d6fcb6b5fd7dfdbc6fdc733becd6d587bc06fff580ee",
+    "build/kernels/rwkv7-bf16/fused-value-recurrence-stage/config.json": "0f2daa065bddc001ff268ceacad2f73ef52929a07239df1d8a0b2ffefa4c143b"
+  }
+}
