@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-03",
+  "status": "rejected_no_speedup",
+  "baseline_commit": "646ffed",
+  "hardware_software": "Ryzen AI 7 H 350 / XDNA2 AIE2P / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic; project-locked compiler",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "candidate": "Cache 2048 nearest-even BF16 key activations in a 4096-byte per-core static buffer; refresh each K tile on row zero, reuse across 128 output-row tiles. Value kernel and graph unchanged.",
+  "decision": "Reverted source; production artifacts were never replaced. No useful isolated or end-to-end gain to justify extra static storage and hot-path branching.",
+  "validation": {
+    "compile": "passed",
+    "channel_mix_oracle_replay_guards": "passed in all four stage runs, max_abs=2.42144e-7",
+    "whole_model": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 203.780016472441,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 123,
+      "status": "passed",
+      "tokens_per_second": 4.907252523140507,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "baseline": "Fresh snapshot from unmodified production artifacts before candidate compilation; 128 tokens and 1116 checked vectors. Exact finite numerical comparisons, no relaxed tolerance."
+  },
+  "isolated_stage": {
+    "order": [
+      "A1",
+      "B1",
+      "B2",
+      "A2"
+    ],
+    "iterations_per_process": 300,
+    "mean_us": [
+      1889.23,
+      1898.12,
+      1882.36,
+      1885.37
+    ]
+  },
+  "whole_model": {
+    "order": [
+      "A1",
+      "B1",
+      "B2",
+      "A2"
+    ],
+    "warmup_tokens": 4,
+    "prefill_tokens_per_trial": 8,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "process_decode_mean_ms": [
+      202.99332954166667,
+      203.3169282291667,
+      203.88649729166664,
+      203.5269838541667
+    ],
+    "baseline_mean_ms": 203.26015669791667,
+    "candidate_mean_ms": 203.60171276041666,
+    "latency_change_percent": 0.16803886607625884
+  },
+  "limits": [
+    "Unchanged isolated time suggests conversion in key workers is not the critical stage bottleneck; this does not prove hardware saturation.",
+    "128-token numerical regression is not exhaustive or long-context quality validation.",
+    "INT8 kernels and arithmetic were not changed."
+  ],
+  "next_work": [
+    "Investigate converting BF16 value activations on existing ReLU producer workers, avoiding the extra converter cores from the earlier rejected experiment. Preserve FP32 diagnostic outputs and verify tile memory/routing constraints.",
+    "Continue NPU batched prefill and INT8 profiling; the hardware-limit objective remains incomplete."
+  ],
+  "candidate_source_sha256": "ec710aeca68a883c925243d10c874fd6f4782e86d1d5524228fbfcd4d413648c",
+  "snapshot_sha256": "9d9872b1048c19843837adc49dba6809b6f3ae9e476df6384738fce1590fb62e",
+  "candidate_artifact_root": "build/kernels/channel-key-cache",
+  "raw_logs": "reports/runs/channel-key-cache-2026-10-03"
+}

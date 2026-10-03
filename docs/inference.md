@@ -244,6 +244,11 @@ INT8 trace 将编译入口换为 `tools/compile/rwkv7_channel_mix_int8.py`，并
 计时窗口缩小到 ReLU²及 FIFO release；value core 仍记录原有矩阵窗口。
 `config.json` 中的 `trace_key_region` 标明该差异，不能混用两种窗口比较周期数。
 
+2026-10-03 另测每个 BF16 key core 缓存2048个已转换 activation，避免跨输出行重复
+FP32→BF16 转换。阶段 oracle、guard 和128步整模型回归通过，但 A/B/B/A 为
+203.26→203.60 ms/token，未加速，已撤回。详见
+[key activation cache 实验](../reports/rwkv7-channel-key-cache-rejected-2026-10-03.json)。
+
 2026-10-03 定向 trace 显示 scalar ReLU²占257,879 cycles；改为24位 significand
 的精确整数向量平方并仅舍入一次后，降到5,780 cycles（该 key core 窗口减少97.76%）。
 直接使用 AIE FP32 vector multiply 曾产生1 ULP差异，已拒绝；保留实现通过917.5万
