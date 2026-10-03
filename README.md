@@ -9,7 +9,8 @@ token 的权重流，并按层连续执行同一阶段。构建、实测范围�
 当前优化主线是**单请求、单 token decode 内部的空间并行**：同 token 的独立 projection、
 按 head/channel 切分 WKV、FFN 输出分片及阶段间流水。以重复整模型 ms/token 验收，
 不开展多请求 batching 或 continuous batching；已有 prefill 功能保留。
-见[空间并行实测](reports/rwkv7-spatial-w2-eight-rejected-2026-10-03.json)。
+见[空间分片实测](reports/rwkv7-spatial-w2-eight-rejected-2026-10-03.json)和
+[W1→activation→W2 流式实验](reports/rwkv7-spatial-stream-2026-10-03.json)。
 
 运行路径：`C++ → XRT → amdxdna → NPU`。Python 仅用于离线编译、测试数据和数值检查。
 

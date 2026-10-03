@@ -22,6 +22,12 @@ PACKED_K_MAJOR = os.environ.get("RWKV_XDNA_FFN_W2_PACKED_K_MAJOR", "0") == "1"
 # Offline diagnostic build only. Tracing adds a trailing BO to the ABI.
 TRACE_ACTIVATION = os.environ.get("RWKV_XDNA_TRACE_ACTIVATION", "0") == "1"
 TRACE_BYTES = int(os.environ.get("RWKV_XDNA_TRACE_BYTES", "0"))
+TRACE_PAIR = int(os.environ.get("RWKV_XDNA_TRACE_PAIR", "0"))
+TRACE_ROLE = os.environ.get("RWKV_XDNA_TRACE_ROLE", "both")
+if TRACE_ROLE not in ("both", "key", "value"):
+    raise ValueError("RWKV_XDNA_TRACE_ROLE must be both, key or value")
+if TRACE_PAIR not in range(4):
+    raise ValueError("RWKV_XDNA_TRACE_PAIR must be 0..3")
 if TRACE_BYTES < 0 or TRACE_BYTES % 4:
     raise ValueError("RWKV_XDNA_TRACE_BYTES must be nonnegative and word aligned")
 if TRACE_ACTIVATION and not TRACE_BYTES:
@@ -334,7 +340,17 @@ def channel_mix_program():
         # One key core and one value core: vector issue, memory/stream/lock
         # stalls and DMA port activity, using the compiler's default events.
         program.enable_trace(
-            trace_size=TRACE_BYTES, workers=[workers[2], workers[6]], egress_shim_col=7
+            trace_size=TRACE_BYTES,
+            workers=(
+                [workers[2 + TRACE_PAIR]]
+                if TRACE_ROLE == "key"
+                else (
+                    [workers[6 + TRACE_PAIR]]
+                    if TRACE_ROLE == "value"
+                    else [workers[2 + TRACE_PAIR], workers[6 + TRACE_PAIR]]
+                )
+            ),
+            egress_shim_col=7,
         )
     return program.resolve_program()
 
@@ -375,6 +391,8 @@ if __name__ == "__main__":
                 trace_value_region="first_activation_to_finish_including_later_activation_wait",
                 exact_fp32=False,
                 trace_buffer_bytes=TRACE_BYTES,
+                trace_pair=TRACE_PAIR,
+                trace_role=TRACE_ROLE,
                 trace_key_region=(
                     "activation" if TRACE_ACTIVATION else "matrix_and_activation"
                 ),

@@ -273,6 +273,61 @@ key/value 核在标记窗口内约59–62%为 lock stall，INT8 约1–1.6%。
 详见[当前 FFN trace](../reports/rwkv7-current-ffn-trace-2026-10-03.json)。
 后续并行优化应同时设计存储、DMA、广播/汇聚和阶段节拍，再用整模型验收。
 
+## 单 token 空间并行实验
+
+当前优化范围是单请求的单 token decode，按片上存储、DMA、广播/汇聚和流水依赖
+共同设计 Tile 分工。已有 batch2/chunk4 保留，本轮不扩展 batching。
+生产 BF16 / INT8 FFN-only 已使用七组 recurrent head lane 与八个输出 projection
+worker 的 31 核融合图；INT8 FFN+output 使用不同的输出路径。
+
+隔离的 `rwkv7_channel_mix_spatial.py` 对照四/八路 W2。八路方案通过 128 步逐位回归，
+但 A/B/B/A 整模型为 199.60→209.35 ms/token，因此不替换默认图；相同新汇聚结构
+恢复四路也为 198.34→203.65 ms/token。详见[分片实验](../reports/rwkv7-spatial-w2-eight-rejected-2026-10-03.json)。
+
+`rwkv7_channel_mix_stream.py` 实验把 W1→activation→W2 连接为流式数据流。
+`RWKV_XDNA_FFN_INTERLEAVED=1` 时，W1 第 j 个 worker 负责编号 j、j+4、… 的
+256 通道块；MemTile 每次汇成下一段连续的 1024 通道，W2 可提前消费。
+此方案无额外收集核，仍为 11 个计算核。W2 各行按原来的 K 顺序累加，
+raw diagnostic 用 DMA 恢复规范排列；WKV 与关键递推精度不变。
+
+```mermaid
+flowchart LR
+    X["层输入"] --> N["norm / mix：2 核"]
+    N --> K["W1 + ReLU²：4 核<br/>每核输出 256 通道块"]
+    K --> M["MemTile 汇聚 4×256<br/>逐块送出 1024 通道"]
+    M --> V["W2：4 核<br/>按原 K 顺序累加"]
+    V --> R["FP32 residual：1 核"]
+    X --> R
+    W["DDR 权重"] --> K
+    W --> V
+```
+
+图中每一轮处理同一个 token 的部分通道；没有 token/request batching。
+
+```bash
+export PATH="$PWD/.venv/bin:$PATH"
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
+RWKV_XDNA_FFN_INTERLEAVED=1 RWKV_XDNA_FFN_W2_PACKED_K_MAJOR=1 \
+RWKV_XDNA_KERNEL_DIR="$PWD/build/kernels/spatial-stream-interleaved" \
+python tools/compile/rwkv7_channel_mix_stream.py
+./build/test/rwkv-channel-mix-test build/kernels/spatial-stream-interleaved 400
+```
+
+编译器要求隔离目录，并拒绝覆盖默认生产目录。整模型实验目录的其他产物需引用
+生产目录；不要通过符号链接向生产目录编译。K-major 变体只在加载时重排 W2 权重，
+decode 不增加 host 权重传输。它只支持 sequential decode/prefill，batch2/chunk4
+明确拒绝该权重布局；这不是 prefill 优化。未设置 interleaved 的三个收集核方案虽通过
+数值验证，整模型仍退化，作为对照保留。测试、性能结论和 trace 边界见
+[流式实验记录](../reports/rwkv7-spatial-stream-2026-10-03.json)。
+
+交错＋连续权重版本的整模型 A/B/B/A 为 198.50→197.38 ms/token（约0.56%），
+更长的 B/A/A/B 为 198.19→197.16 ms/token（约0.52%）；每个版本共576个 decode 样本。
+收益较小，保持显式实验入口，不替换默认生产配置。三种流式对照各通过128步逐位回归，
+原 BF16、INT8 FFN-only、INT8 FFN+output 也全部回归，84项基线产物哈希不变。
+八个矩阵核已分组取得完整 trace；采样 W2 在 W1 结束前已发出87.5%的 vector-issue
+起始事件，证明阶段重叠。约77–79%的 lock stall 混合了权重等待和 activation backpressure，
+不能解释为纯 DDR 等待或全阵列利用率。整层32-Tile融合与可验证性能上限仍未完成。
+
 ## 缺少生产 kernel
 
 若 CLI 报：

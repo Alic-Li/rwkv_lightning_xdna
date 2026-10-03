@@ -1,7 +1,7 @@
 {
   "date": "2026-10-03",
   "scope": "Single-request single-token BF16 FFN producer-consumer dataflow; no batching",
-  "status": "All three retained streaming variants pass stage oracle and 128-step bitwise model regression; performance evaluation continues for block-cyclic variant",
+  "status": "Round complete: reproducible ~0.5% BF16 decode gain from block-cyclic streaming, retained as isolated experiment; default production unchanged. Other spatial/collector candidates rejected for production.",
   "precision": "Original BF16 GEMV operands and FP32 accumulation, activation/residual/norm. WKV state stays FP32. Per-output K tile order stays 0..31; no reassociation, approximation, fast-math or activation precision change.",
   "device": "RyzenAI-npu6, XDNA2 eight columns, default power mode; same model/toolchain as spatial-w2-eight report",
   "variants": {
@@ -11,49 +11,28 @@
   },
   "validation": {
     "stream": {
-      "download_bytes": 262144,
-      "first_token_nodes": 960,
-      "mean_ms": 206.4664005196851,
-      "measured_steps": 127,
-      "mode": "verify",
-      "resident_bytes": 2917120000,
-      "runs_per_token": 100,
       "status": "passed",
-      "tokens_per_second": 4.843403079062528,
-      "upload_bytes": 8192,
       "vectors_checked": 1116,
-      "weights": "bf16",
-      "logits_state_max_abs": 0
+      "first_token_nodes": 960,
+      "runs_per_token": 100,
+      "logits_state_max_abs": 0,
+      "steps": 128
     },
     "stream-packed": {
-      "download_bytes": 262144,
-      "first_token_nodes": 960,
-      "mean_ms": 204.75483858267717,
-      "measured_steps": 127,
-      "mode": "verify",
-      "resident_bytes": 2917120000,
-      "runs_per_token": 100,
       "status": "passed",
-      "tokens_per_second": 4.883889469582493,
-      "upload_bytes": 8192,
       "vectors_checked": 1116,
-      "weights": "bf16",
-      "logits_state_max_abs": 0
+      "first_token_nodes": 960,
+      "runs_per_token": 100,
+      "logits_state_max_abs": 0,
+      "steps": 128
     },
     "interleaved": {
-      "download_bytes": 262144,
-      "first_token_nodes": 960,
-      "mean_ms": 197.0851437086615,
-      "measured_steps": 127,
-      "mode": "verify",
-      "resident_bytes": 2917120000,
-      "runs_per_token": 100,
       "status": "passed",
-      "tokens_per_second": 5.073949163201447,
-      "upload_bytes": 8192,
       "vectors_checked": 1116,
-      "weights": "bf16",
-      "logits_state_max_abs": 0
+      "first_token_nodes": 960,
+      "runs_per_token": 100,
+      "logits_state_max_abs": 0,
+      "steps": 128
     }
   },
   "collector_model_comparison": {
@@ -85,52 +64,169 @@
     "decision": "Reject both 3-collector graphs for production; ~205.85/203.82 vs ~198.73 ms/token."
   },
   "trace": {
-    "interleaved_first_capture": {
-      "schema_version": 1,
-      "cores": [
-        {
-          "core": "core_trace for tile3,0",
-          "invocations": 1,
-          "marked_cycles": 2907344,
-          "event_cycles": {
-            "PORT_RUNNING_0": 0,
-            "LOCK_STALL": 2278053,
-            "INSTR_VECTOR": 113152,
-            "MEMORY_STALL": 550,
-            "PORT_RUNNING_1": 917
-          },
-          "event_fraction": {
-            "PORT_RUNNING_0": 0.0,
-            "LOCK_STALL": 0.7835512412703829,
-            "INSTR_VECTOR": 0.03891937108233494,
-            "MEMORY_STALL": 0.00018917610024819903,
-            "PORT_RUNNING_1": 0.00031540815259563365
-          }
-        },
-        {
-          "core": "core_trace for tile5,0",
-          "invocations": 1,
-          "marked_cycles": 2916012,
-          "event_cycles": {
-            "PORT_RUNNING_0": 3584,
-            "LOCK_STALL": 2286804,
-            "MEMORY_STALL": 725,
-            "INSTR_VECTOR": 110592,
-            "PORT_RUNNING_1": 0
-          },
-          "event_fraction": {
-            "PORT_RUNNING_0": 0.0012290758748592255,
-            "LOCK_STALL": 0.7842231101929622,
-            "MEMORY_STALL": 0.0002486272347301726,
-            "INSTR_VECTOR": 0.03792576985279896,
-            "PORT_RUNNING_1": 0.0
-          }
-        }
+    "interleaved_first_capture": [
+      {
+        "core": "core_trace for tile3,0",
+        "marked_cycles": 2907344,
+        "lock_stall_cycles": 2278053,
+        "vector_issue_cycles": 113152,
+        "memory_stall_cycles": 550,
+        "lock_stall_fraction": 0.7835512412703829,
+        "vector_issue_fraction": 0.03891937108233494,
+        "dma_port0_running_cycles": 0,
+        "dma_port1_running_cycles": 917
+      },
+      {
+        "core": "core_trace for tile5,0",
+        "marked_cycles": 2916012,
+        "lock_stall_cycles": 2286804,
+        "vector_issue_cycles": 110592,
+        "memory_stall_cycles": 725,
+        "lock_stall_fraction": 0.7842231101929622,
+        "vector_issue_fraction": 0.03792576985279896,
+        "dma_port0_running_cycles": 3584,
+        "dma_port1_running_cycles": 0
+      }
+    ],
+    "scope": "All eight matrix cores captured across five serial diagnostic programs, not simultaneously. Pair2 failed joint routing with egress7/3/2; solo key2 via egress0 and value2 via egress2 passed. Key0/value0 has two valid captures. All captures pass numerical/shift/replay/guards and strict complete-marker analysis. Trace changes routing and can perturb waits. W1 includes activation producer backpressure; W2 includes later activation waits. Lock events do not distinguish weight FIFO from activation FIFO. DMA port0 activity is not full-channel bandwidth. Remaining cycles are not automatically compute; no all-array peak claim.",
+    "diagnostic_fix": "Direct MLIR event markers produced incomplete W2 windows (end before begin); moving the source marker behind acquire did not fix it. Out-of-line diagnostic C++ event calls gave complete windows. Initial incomplete traces are excluded, not repaired in the analyzer.",
+    "all_matrix_cores": [
+      {
+        "core": "core_trace for tile3,0",
+        "role": "W1",
+        "worker": 0,
+        "capture": "interleaved-trace-pair0-final",
+        "egress_shim_col": 7,
+        "marked_cycles": 2877842,
+        "lock_stall_cycles": 2248496,
+        "vector_issue_cycles": 113152,
+        "memory_stall_cycles": 605,
+        "lock_stall_fraction": 0.7813132201142384,
+        "vector_issue_fraction": 0.03931835034723936,
+        "dma_port0_running_cycles": 0,
+        "dma_port1_running_cycles": 917
+      },
+      {
+        "core": "core_trace for tile4,0",
+        "role": "W1",
+        "worker": 1,
+        "capture": "interleaved-trace-pair1-final",
+        "egress_shim_col": 7,
+        "marked_cycles": 2873405,
+        "lock_stall_cycles": 2244114,
+        "vector_issue_cycles": 113152,
+        "memory_stall_cycles": 550,
+        "lock_stall_fraction": 0.7809946735667266,
+        "vector_issue_fraction": 0.039379064211275475,
+        "dma_port0_running_cycles": 0,
+        "dma_port1_running_cycles": 916
+      },
+      {
+        "core": "core_trace for tile2,1",
+        "role": "W1",
+        "worker": 2,
+        "capture": "interleaved-trace-key2-final",
+        "egress_shim_col": 0,
+        "marked_cycles": 2783837,
+        "lock_stall_cycles": 2154531,
+        "vector_issue_cycles": 113152,
+        "memory_stall_cycles": 565,
+        "lock_stall_fraction": 0.773942942780055,
+        "vector_issue_fraction": 0.04064605794089237,
+        "dma_port0_running_cycles": 0,
+        "dma_port1_running_cycles": 917
+      },
+      {
+        "core": "core_trace for tile4,1",
+        "role": "W1",
+        "worker": 3,
+        "capture": "interleaved-trace-pair3-final",
+        "egress_shim_col": 7,
+        "marked_cycles": 2936973,
+        "lock_stall_cycles": 2307637,
+        "vector_issue_cycles": 113152,
+        "memory_stall_cycles": 595,
+        "lock_stall_fraction": 0.7857195146158987,
+        "vector_issue_fraction": 0.03852674164862939,
+        "dma_port0_running_cycles": 0,
+        "dma_port1_running_cycles": 917
+      },
+      {
+        "core": "core_trace for tile5,0",
+        "role": "W2",
+        "worker": 0,
+        "capture": "interleaved-trace-pair0-final",
+        "egress_shim_col": 7,
+        "marked_cycles": 2880341,
+        "lock_stall_cycles": 2251161,
+        "vector_issue_cycles": 110592,
+        "memory_stall_cycles": 697,
+        "lock_stall_fraction": 0.7815605860556094,
+        "vector_issue_fraction": 0.03839545387160756,
+        "dma_port0_running_cycles": 3584,
+        "dma_port1_running_cycles": 0
+      },
+      {
+        "core": "core_trace for tile5,1",
+        "role": "W2",
+        "worker": 1,
+        "capture": "interleaved-trace-pair1-final",
+        "egress_shim_col": 7,
+        "marked_cycles": 2876764,
+        "lock_stall_cycles": 2247593,
+        "vector_issue_cycles": 110592,
+        "memory_stall_cycles": 688,
+        "lock_stall_fraction": 0.7812921046008641,
+        "vector_issue_fraction": 0.03844319520127477,
+        "dma_port0_running_cycles": 3584,
+        "dma_port1_running_cycles": 0
+      },
+      {
+        "core": "core_trace for tile2,2",
+        "role": "W2",
+        "worker": 2,
+        "capture": "interleaved-trace-value2-final",
+        "egress_shim_col": 2,
+        "marked_cycles": 2839533,
+        "lock_stall_cycles": 2210362,
+        "vector_issue_cycles": 110592,
+        "memory_stall_cycles": 688,
+        "lock_stall_fraction": 0.7784244803634964,
+        "vector_issue_fraction": 0.03894724942446522,
+        "dma_port0_running_cycles": 3584,
+        "dma_port1_running_cycles": 0
+      },
+      {
+        "core": "core_trace for tile3,2",
+        "role": "W2",
+        "worker": 3,
+        "capture": "interleaved-trace-pair3-final",
+        "egress_shim_col": 7,
+        "marked_cycles": 2966780,
+        "lock_stall_cycles": 2337571,
+        "vector_issue_cycles": 110592,
+        "memory_stall_cycles": 726,
+        "lock_stall_fraction": 0.7879151807683752,
+        "vector_issue_fraction": 0.037276778190496095,
+        "dma_port0_running_cycles": 3584,
+        "dma_port1_running_cycles": 0
+      }
+    ],
+    "overlap_evidence": {
+      "key0_marker_window_cycles": [
+        41885,
+        2919727
       ],
-      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      "value0_marker_window_cycles": [
+        237858,
+        3118199
+      ],
+      "overlap_cycles": 2681869,
+      "value0_vector_issue_begin_events_in_window": 81920,
+      "value0_vector_issue_begin_events_before_key0_finished": 71680,
+      "scope": "Observed broadcast-synchronized trace timelines have a few-cycle tile skew. Value marker excludes zeroing. Vector-event counts are not FLOPs or DDR bytes."
     },
-    "scope": "Only key0/value0. W1 includes activation production/backpressure; W2 begins after first activation and includes later chunk waits. Different regions/data dependencies from monolithic production, so lock fraction changes are not a utilization comparison. No whole-array compute/DMA utilization claim.",
-    "diagnostic_fix": "Direct MLIR event markers produced incomplete W2 windows (end before begin); moving the source marker behind acquire did not fix it. Out-of-line diagnostic C++ event calls gave complete windows. Initial incomplete traces are excluded, not repaired in the analyzer."
+    "timer_reference": "Pinned local mlir_aie/python/aie/utils/trace/__init__.py documents broadcast15 timer reset/start synchronization, with a few-cycle tile skew."
   },
   "raw_logs": "reports/runs/spatial-decode-2026-10-03",
   "production_default": "Untouched; all builds require isolated roots and refuse the default production directory.",
@@ -138,5 +234,289 @@
     "K-major experimental weights support sequential decode/prefill only; batch2/chunk4 rejects them before dispatch.",
     "Spatial INT8 variants are not introduced. Existing W8A16 path remains unchanged.",
     "This is an FFN subgraph prototype, not an integrated 32-tile full-layer graph or a measured hardware ceiling."
-  ]
+  ],
+  "interleaved_model_comparison": {
+    "short": {
+      "a": {
+        "process_means_ms": [
+          198.33771048958337,
+          198.65691794791664
+        ],
+        "trial_means_ms": [
+          198.34820541666667,
+          198.32721556249996,
+          198.34709785416672,
+          198.96673804166667
+        ],
+        "mean_ms": 198.49731421875,
+        "p50_ms": 198.37166200000001,
+        "p95_ms": 200.20294099999998,
+        "samples": 192,
+        "tokens_per_second": 5.037851539381384,
+        "graph_build_seconds": [
+          3.345026574,
+          3.316965153
+        ]
+      },
+      "b": {
+        "process_means_ms": [
+          197.22566001041682,
+          197.53908273958325
+        ],
+        "trial_means_ms": [
+          197.1894821041667,
+          197.26183791666668,
+          198.4141257083334,
+          196.66403977083337
+        ],
+        "mean_ms": 197.382371375,
+        "p50_ms": 196.923023,
+        "p95_ms": 201.607431,
+        "samples": 192,
+        "tokens_per_second": 5.066308571701849,
+        "graph_build_seconds": [
+          4.106501244,
+          4.105732602
+        ]
+      },
+      "latency_reduction_percent": 0.561691652170826
+    },
+    "long": {
+      "a": {
+        "process_means_ms": [
+          198.19403171354156,
+          198.19194421354166
+        ],
+        "trial_means_ms": [
+          198.13880995833344,
+          198.24925346875003,
+          198.11729426041677,
+          198.26659416666664
+        ],
+        "mean_ms": 198.19298796354167,
+        "p50_ms": 198.102445,
+        "p95_ms": 199.85461700000002,
+        "samples": 384,
+        "tokens_per_second": 5.045587183861185,
+        "graph_build_seconds": [
+          3.328016261,
+          3.310664758
+        ]
+      },
+      "b": {
+        "process_means_ms": [
+          197.0712243958334,
+          197.2452984114583
+        ],
+        "trial_means_ms": [
+          197.09327988541668,
+          197.04916890625,
+          197.53833462499998,
+          196.95226219791675
+        ],
+        "mean_ms": 197.15826140364584,
+        "p50_ms": 196.793794,
+        "p95_ms": 199.247771,
+        "samples": 384,
+        "tokens_per_second": 5.072067449168062,
+        "graph_build_seconds": [
+          4.240882112,
+          4.108253381
+        ]
+      },
+      "latency_reduction_percent": 0.5220803069411195
+    },
+    "short_order": "A/B/B/A; 8 prompt, 48 decode, 2 trials per process",
+    "long_order": "B/A/A/B; 32 prompt, 96 decode, 2 trials per process",
+    "warmup_tokens_per_process": 4,
+    "total_decode_samples_per_variant": 576,
+    "scope": "Fixed synthetic tokens, single request; sequential prefill; graph build and CPU weight packing outside measured decode; no overlapping compilation or NPU jobs. Two workloads are reported separately. Token samples in a process are not independent statistical trials.",
+    "unchanged_execution": {
+      "runs_per_token": 100,
+      "resident_bytes": 2917120000,
+      "host_upload_bytes_per_token": 8192,
+      "host_download_bytes_per_token": 262144
+    }
+  },
+  "interleaved_stage_comparison_us": {
+    "a": {
+      "process_means_us": [
+        1865.1,
+        1842.7
+      ],
+      "mean_us": 1853.9,
+      "samples": 800
+    },
+    "b": {
+      "process_means_us": [
+        1763.45,
+        1772.66
+      ],
+      "mean_us": 1768.055,
+      "samples": 800
+    }
+  },
+  "host_stage_profile": {
+    "captures": {
+      "baseline": {
+        "attention_projections": 44.9265,
+        "channel_mix": 64.216,
+        "head": 7.1501,
+        "norm": 0.463819,
+        "norm_mix": 8.16478,
+        "projection_residual": 0.992871,
+        "recurrence_stage": 2.0806,
+        "value_recurrence_projection": 70.4097
+      },
+      "eight": {
+        "attention_projections": 44.7192,
+        "channel_mix": 74.8237,
+        "head": 7.28534,
+        "norm": 0.466946,
+        "norm_mix": 8.08465,
+        "projection_residual": 0.990527,
+        "recurrence_stage": 2.0612,
+        "value_recurrence_projection": 70.3154
+      },
+      "interleaved": {
+        "attention_projections": 45.0631,
+        "channel_mix": 62.8812,
+        "head": 7.16901,
+        "norm": 0.450245,
+        "norm_mix": 8.27007,
+        "projection_residual": 1.01809,
+        "recurrence_stage": 2.07663,
+        "value_recurrence_projection": 70.2203
+      }
+    },
+    "scope": "Single diagnostic process each, eight explicit input tokens; exclude first token. Host wall time includes compute, DMA, waits, PDI/program alternation, and profiling overhead. Not a pure program-switch measurement and not used instead of uninstrumented model benchmark.",
+    "unit": "median ms per token, excluding first of eight input tokens",
+    "interpretation": "The eight-W2 regression is localized mainly to ChannelMix (64.216 -> 74.8237 ms); block-cyclic streaming lowers it to 62.8812 ms. This does not isolate pure PDI cost from weight DMA or other waits."
+  },
+  "decision": "Keep the block-cyclic 4+4 / eleven-core FFN as a validated experiment and future dataflow basis. Do not switch production defaults for this small gain and decode-only packed layout. No claim of 8/16-worker universal optimum, full 32-tile layer integration or hardware ceiling.",
+  "production_regression": {
+    "bf16": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 100,
+      "logits_state_max_abs": 0,
+      "steps": 128
+    },
+    "int8-ffn": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 100,
+      "logits_state_max_abs": 0,
+      "steps": 128
+    },
+    "int8-ffn-output": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 123,
+      "logits_state_max_abs": 0,
+      "steps": 128
+    }
+  },
+  "production_artifact_check": {
+    "checked_files": 84,
+    "changed_or_missing": [],
+    "baseline_manifest": "reports/runs/throughput-resume-2026-10-03/artifact-manifest.json"
+  },
+  "candidate_final_source_rebuild": {
+    "before": {
+      "design.xclbin": "ce66c53c41c8255bdf2fb704f5dc1b90ce844d2d00051383d778a841ed9452b7",
+      "instructions.bin": "87f61e3ff4bba50aea0ef89a84a2965233a092a457ce597ffff03fe2711be22e",
+      "config.json": "ec66e0e8b77e322df6468c7ce0b5d7c0044f3ac98b1bb6ccc064e84931b47d0a"
+    },
+    "after": {
+      "design.xclbin": "ce66c53c41c8255bdf2fb704f5dc1b90ce844d2d00051383d778a841ed9452b7",
+      "instructions.bin": "87f61e3ff4bba50aea0ef89a84a2965233a092a457ce597ffff03fe2711be22e",
+      "config.json": "a1bd3fa94743cfbd10509a6287a2623b8cedbb42055da20368313138f0c78e0f"
+    },
+    "device_binaries_unchanged": true
+  },
+  "reproduce": {
+    "build_host": [
+      "export PATH=\"$PWD/.venv/bin:$PATH\"",
+      "cmake --build --preset release",
+      "cmake --build --preset test"
+    ],
+    "compile_interleaved": "PATH=\"$PWD/.venv/bin:$PATH\" MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie RWKV_XDNA_FFN_INTERLEAVED=1 RWKV_XDNA_FFN_W2_PACKED_K_MAJOR=1 RWKV_XDNA_KERNEL_DIR=\"$PWD/build/kernels/spatial-stream-interleaved\" .venv/bin/python tools/compile/rwkv7_channel_mix_stream.py",
+    "stage": "./build/test/rwkv-channel-mix-test build/kernels/spatial-stream-interleaved 400",
+    "model_root": "Keep bf16-channel-mix built locally; symlink every other production root child only when destination does not exist. Do not compile through production symlinks.",
+    "bench": "./build/release/rwkv-bench MODEL ROOT 32 96 2",
+    "oracle": "./build/test/rwkv-cleanup-regression MODEL ROOT verify build/channel-key-cache-baseline.bin",
+    "trace": {
+      "common_env": {
+        "RWKV_XDNA_FFN_INTERLEAVED": "1",
+        "RWKV_XDNA_FFN_W2_PACKED_K_MAJOR": "1",
+        "RWKV_XDNA_TRACE_BYTES": "16777216"
+      },
+      "capture_envs": [
+        {
+          "RWKV_XDNA_TRACE_PAIR": "0",
+          "RWKV_XDNA_TRACE_ROLE": "both",
+          "RWKV_XDNA_TRACE_EGRESS_COL": "7"
+        },
+        {
+          "RWKV_XDNA_TRACE_PAIR": "1",
+          "RWKV_XDNA_TRACE_ROLE": "both",
+          "RWKV_XDNA_TRACE_EGRESS_COL": "7"
+        },
+        {
+          "RWKV_XDNA_TRACE_PAIR": "3",
+          "RWKV_XDNA_TRACE_ROLE": "both",
+          "RWKV_XDNA_TRACE_EGRESS_COL": "7"
+        },
+        {
+          "RWKV_XDNA_TRACE_PAIR": "2",
+          "RWKV_XDNA_TRACE_ROLE": "key",
+          "RWKV_XDNA_TRACE_EGRESS_COL": "0"
+        },
+        {
+          "RWKV_XDNA_TRACE_PAIR": "2",
+          "RWKV_XDNA_TRACE_ROLE": "value",
+          "RWKV_XDNA_TRACE_EGRESS_COL": "2"
+        }
+      ],
+      "compile": "Use same streaming compiler and a distinct RWKV_XDNA_KERNEL_DIR for each diagnostic program.",
+      "dispatch": "./build/test/rwkv-channel-mix-test TRACE_ROOT 1 TRACE.txt",
+      "parse": ".venv/bin/python -m aie.utils.trace.parse --input TRACE.txt --mlir TRACE_ROOT/bf16-channel-mix/design.prj/input_with_addresses.mlir --output TRACE.json",
+      "summarize": ".venv/bin/python tools/validation/trace_summary.py TRACE.json"
+    }
+  },
+  "tested_stream_combinations": [
+    {
+      "interleaved": false,
+      "packed_k_major": false
+    },
+    {
+      "interleaved": false,
+      "packed_k_major": true
+    },
+    {
+      "interleaved": true,
+      "packed_k_major": true
+    }
+  ],
+  "remaining_work": [
+    "No complete 32-compute-tile full-layer graph yet. Existing production has 14-core parallel attention projections, 31-core FP32 recurrence/BF16 output graph for non-initial layers, and a separate FFN graph.",
+    "Eight-way W1 and sixteen-way FFN are not validated here; simple independent streams exceed this graph\u2019s sixteen shim MM2S budget without further supply/resource redesign.",
+    "No projection-to-WKV streaming change in this round; FP64/FP32-emulation and approximate math remain separate numerical questions.",
+    "No new quantization or INT8 spatial implementation. INT8 remains W8A16: INT8 weight codes and FP16-derived per-output scales, BF16 activation/MAC operands, FP32 sums and recurrent state.",
+    "Separate weight-FIFO stalls, activation backpressure and DMA/PDI costs with more selective instrumentation before extending workers, depth or fusion."
+  ],
+  "final_checks": {
+    "host_builds": "release and test passed",
+    "cpu_tests": "CTest 3/3 passed",
+    "stage_after_final_source_rebuild": "independent oracle/shift/replay/immutable-input/BO guards passed max_abs=2.42144e-07",
+    "packed_batch2": "explicitly rejected before dispatch",
+    "trace_inference": "explicitly rejected before dispatch",
+    "production_root_overwrite": "both experimental compilers rejected default-root override",
+    "device_health": "xrt-smi aie-partitions: No hardware contexts running on device",
+    "source_checks": "Python syntax, Black formatting and git diff --check passed"
+  }
 }
