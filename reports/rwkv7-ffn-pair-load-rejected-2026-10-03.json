@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-03",
+  "status": "rejected; source restored and production artifacts unchanged",
+  "hypothesis": "Reuse each local BF16 weight vector load across two independent token accumulators; identical per-token MAC/reduction order. No DMA/worker/FIFO changes.",
+  "validation": "BF16 and W8A16 stages passed bitwise intermediates/output/shift, FP64 oracle, reset/branch, guards and immutable input checks. BF16 full-model 1533 vectors bitwise.",
+  "bf16_abba": {
+    "A1": {
+      "decode_ms": 198.5463516041666,
+      "prefill_s": [
+        3.430941749,
+        3.426999381
+      ]
+    },
+    "B1": {
+      "decode_ms": 201.0484744583334,
+      "prefill_s": [
+        3.432471881,
+        3.445066397
+      ]
+    },
+    "B2": {
+      "decode_ms": 201.07130637499998,
+      "prefill_s": [
+        3.448149895,
+        3.444600209
+      ]
+    },
+    "A2": {
+      "decode_ms": 203.84819854166665,
+      "prefill_s": [
+        3.467508603,
+        3.447730119
+      ]
+    }
+  },
+  "bf16_prefill_control_s": 3.443294963,
+  "bf16_prefill_candidate_s": 3.4425720955,
+  "bf16_latency_reduction_percent": 0.02099348175998994,
+  "int8_stage_screen": {
+    "control_us": 1784.2763550000004,
+    "candidate_us": 2074.793924999999,
+    "limits": "Separate stage blocks, not a paired full-model experiment; slower candidate not integrated or promoted."
+  },
+  "decision": "No repeatable BF16 end-to-end benefit (0.021% mean difference); W8A16 stage slower. Register pressure/load scheduling are hypotheses, not hardware-counter conclusions.",
+  "logs": "reports/runs/throughput-resume-2026-10-03",
+  "hardware": "RyzenAI-npu6, 8 columns, XRT 2.25, default power mode"
+}
