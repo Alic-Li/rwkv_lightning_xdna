@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-03",
+  "status": "Stage validated; no runtime integration or full-model performance claim yet.",
+  "hardware": "RyzenAI-npu6 AIE2P, Ryzen AI 7 H 350; XRT 2.25.00; firmware 1.0.0.63",
+  "model_shape": {
+    "channels": 2048,
+    "batch": 2
+  },
+  "design": "Eight projection workers reuse each BF16 weight tile for both tokens, eight residual workers preserve FP32 output and addition ordering. Two residual input groups each fan out through a MemTile to four workers.",
+  "compilation_findings": [
+    "Eight independent residual inputs plus weight/input streams exhaust Shim DMA capacity.",
+    "A single residual stream splitting to eight outputs exceeds per-MemTile DMA capacity.",
+    "Two residual groups with four outputs each compile successfully."
+  ],
+  "validation": {
+    "executable": "rwkv-prefill-output-test",
+    "passes": 3,
+    "independent_fp64_max_abs": 1.2815e-06,
+    "bitwise": "Both token projections and residual outputs match existing single-token kernel.",
+    "guards": "All five allocations checked.",
+    "timing_samples_per_run": 200,
+    "order": "single pair / batch / batch / single pair",
+    "single_pair_us": [
+      555.352,
+      555.745
+    ],
+    "batch_us": [
+      276.872,
+      271.213
+    ]
+  },
+  "limitations": [
+    "Contiguous test inputs only; resident recurrence and residual views need strided gather support before integration.",
+    "INT8 output variant not implemented.",
+    "No accepted whole-model speedup; baseline production artifacts unchanged."
+  ],
+  "logs": "reports/runs/prefill-output-2026-10-03"
+}

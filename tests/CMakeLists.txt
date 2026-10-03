@@ -86,3 +86,6 @@ add_executable(rwkv-prefill-attention-test inference/prefill_attention_test.cpp)
 target_link_libraries(rwkv-prefill-attention-test PRIVATE rwkv::xdna)
 target_include_directories(rwkv-prefill-attention-test PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 target_compile_options(rwkv-prefill-attention-test PRIVATE -Wall -Wextra -ffp-contract=off)
+
+add_executable(rwkv-prefill-output-test inference/prefill_output_test.cpp)
+target_link_libraries(rwkv-prefill-output-test PRIVATE rwkv_xdna)
