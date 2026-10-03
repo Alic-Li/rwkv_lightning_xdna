@@ -4,7 +4,7 @@
 #include <cstdint>
 
 namespace rwkv::inference::quantization {
-// CUDA RWKV W8A16 contract: symmetric per-output rows, codes [-127,127],
+// Weight contract: symmetric per-output rows, codes [-127,127],
 // scales rounded using the checkpoint I/O FP16 conversion before quantizing.
 // FP16 scales are expanded exactly to FP32 for device epilogues.
 struct Rows {
@@ -17,5 +17,7 @@ Rows quantize(const Tensor &, bool transposed = false);
 // Repeated row scales keep each streamed tile self-contained and 64B aligned.
 constexpr size_t tile_bytes = 4160;
 std::vector<uint8_t> pack(const Rows &);
+// Decode-only W2 stream layout: [worker, K/256, local output/16, tile bytes].
+std::vector<uint8_t> pack_value_k_major(const Rows &);
 std::vector<uint8_t> channel_mix(const Tensor &key, const Tensor &value);
 } // namespace rwkv::inference::quantization

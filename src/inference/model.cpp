@@ -18,7 +18,7 @@ Vector Model::forward(int token, State &state) const {
 std::vector<Vector> Model::prefill(const std::vector<int> &tokens,
                                    State &state) const {
   std::vector<Vector> output;
-  // Bounded staging. Each chunk uses a distinct sequence transition on NPU.
+  // Bound temporary host activations in the CPU sequence reference.
   for (size_t start = 0; start < tokens.size(); start += 16) {
     auto end = std::min(tokens.size(), start + 16);
     auto chunk =

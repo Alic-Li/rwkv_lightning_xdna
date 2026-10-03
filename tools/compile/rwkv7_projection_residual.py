@@ -11,12 +11,12 @@ from aie.helpers.taplib import TensorAccessPattern as TAP
 from rwkv7_common import KERNEL_ROOT, typ, external
 
 
-def projection_residual_graph(quantized=False):
-    wt = lambda n: np.ndarray[(n,), np.dtype[np.uint8 if quantized else bfloat16]]
-    tile = 4160 if quantized else 4096
+def projection_residual_graph():
+    wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]]
+    tile = 4096
     fn = external(
-        "rwkv7_output_int8_tile" if quantized else "rwkv7_ffn_value_tile",
-        "projection_residual_int8.cc" if quantized else "ffn_pipeline_bf16.cc",
+        "rwkv7_ffn_value_tile",
+        "ffn_pipeline_bf16.cc",
         [typ(2048), wt(tile), typ(256), np.int32, np.int32],
         optimization="-O3",
     )
@@ -36,7 +36,7 @@ def projection_residual_graph(quantized=False):
     final = ObjectFifo(typ(4096), name="final", depth=1)
 
     def core(x, w, y, f, z):
-        xv, yv = x.acquire(1), y.acquire(1)
+        xv, yv = (x.acquire(1), y.acquire(1))
         z(yv)
         for row in range_(16):
             for col in range_(8):
@@ -47,7 +47,7 @@ def projection_residual_graph(quantized=False):
         y.release(1)
 
     def unary(x, y, f):
-        xv, yv = x.acquire(1), y.acquire(1)
+        xv, yv = (x.acquire(1), y.acquire(1))
         f(xv, yv)
         x.release(1)
         y.release(1)
@@ -63,20 +63,25 @@ def projection_residual_graph(quantized=False):
         for i in range(2)
     ]
     workers += [Worker(unary, [pair.cons(), final.prod(), add], stack_size=12288)]
+    return (workers, xfifo, ws, joins[2], final)
 
-    return workers, xfifo, ws, joins[2], final
 
-
-def projection_residual_program(quantized=False):
-    workers, xfifo, ws, residual_input, final = projection_residual_graph(quantized)
-    wt = lambda n: np.ndarray[(n,), np.dtype[np.uint8 if quantized else bfloat16]]
-    weights = (4160 if quantized else 4096) * 1024
+def projection_residual_program():
+    workers, xfifo, ws, residual_input, final = projection_residual_graph()
+    wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]]
+    weights = 4096 * 1024
 
     def seq(x, w, res, out, hx, hw, hr, ho):
         hx.fill(x)
         for i in range(8):
             hw[i].fill(
-                w, tap=TAP((weights,), i * (weights // 8), [1, 1, 1, weights // 8], [0, 0, 0, 1])
+                w,
+                tap=TAP(
+                    (weights,),
+                    i * (weights // 8),
+                    [1, 1, 1, weights // 8],
+                    [0, 0, 0, 1],
+                ),
             )
         hr.fill(res)
         ho.drain(out, wait=True)

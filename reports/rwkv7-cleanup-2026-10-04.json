@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-04",
+  "status": "passed",
+  "scope": "Maintenance refactor; no new performance optimization or numerical relaxation.",
+  "baseline_commit": "867e5f9ad4c915193695c3c5687b74bf64360d7c",
+  "recovered_evidence_commit": "e52ee70",
+  "selection": {
+    "int8": "Only W8A8 block-256 streaming FFN, W1 block-cyclic producers and four-worker K-major W2.",
+    "reason": "Reflog contained later validated implementations after HEAD reset. Archived long comparisons put stream at 178.152 ms/token, local at 178.828, base at 180.550; W8A16 short paired control at 183.724 vs stream 177.861.",
+    "evidence": "rwkv7-w8a8-stream-2026-10-04.json",
+    "default": "BF16; opt-in --weights int8-ffn now means W8A8, sequential prefill only.",
+    "removed": "W8A16 FFN/output and quantized batched prefill; BF16 spatial/stream/mode-worker switches, HRX/working-set probes, duplicate standalone projection/value experiments."
+  },
+  "modules": {
+    "graph": "logical capture/API/state binding",
+    "artifacts": "decode and prefill ABI validation",
+    "resident_buffers": "sessions, BOs and arena views",
+    "resident_plan": "fixed stage binding and decode fusion",
+    "graph_execution": "replay, state transfer and diagnostics",
+    "prefill_plan/chunked_plan": "BF16 pair/four-token scheduling",
+    "weight_layout/quantization": "BF16 layouts / one W8A8 packer",
+    "runtime/session": "XRT lifecycle",
+    "compile/rwkv7_optimized": "explicit offline production manifest"
+  },
+  "validation": {
+    "release_and_test_builds": "passed",
+    "cpu_ctest": "3/3 passed, includes W2 K-major scale/layout coverage",
+    "cpu_reference": "FP32/FP16/BF16 PTH and safetensors fixtures passed; host graph oracle/reset/branch/prefill passed",
+    "offline_kernels": "23 fresh artifact directories; complete final source manifest compiled",
+    "int8_stage": {
+      "status": "passed",
+      "oracle_max_abs": 2.384185791015625e-07,
+      "guards_and_immutable_inputs": "passed"
+    },
+    "int8_model": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "runs_per_token": 100,
+      "upload_bytes": 8192,
+      "download_bytes": 262144
+    },
+    "bf16_batch2_model": {
+      "status": "passed",
+      "bitwise_vectors": 1533
+    },
+    "bf16_chunk4_model": {
+      "status": "passed",
+      "bitwise_vectors": 2628
+    },
+    "bf16_stages": "FFN, batch2 projection/recurrence-input FFN, chunk4 FFN, recurrence and fused-value recurrence oracle/replay/reset/guards passed; paired output and recurrence/output fusion passed",
+    "package": "CMake install and independent consumer compile/link passed",
+    "default_cli": "BF16 and INT8 default-directory smoke dispatch passed"
+  },
+  "artifacts": {
+    "default_root": "build/kernels/rwkv7-bf16",
+    "count": 23,
+    "int8_sha256": {
+      "config.json": "52562a69b522d483c4ef82bf0cd861bee87eaaeae2d6128bea55a0a559f5fc88",
+      "design.xclbin": "a848d8e1ed85f58757a55bbc038ec2e72cd8b71ad675013c6a50609d060e3251",
+      "instructions.bin": "949e49794793892d3224818026b5ddc2a01869266557ba2968e8cab3920c8e2a"
+    },
+    "previous_root_backup": "build/kernels/archive-before-cleanup-2026-10-04 (ignored)"
+  },
+  "provenance": {
+    "hardware": "Ryzen AI 7 H 350 / RyzenAI-npu6, AIE2P (same local device as archived evidence)",
+    "kernel": "7.0.0-38-generic",
+    "mlir_aie": "1.4.4.dev53+gd53582d",
+    "numpy": "2.5.3",
+    "cmake": "4.1.0",
+    "checkpoint": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "checkpoint_sha256": "dfc1fc450641d5e00c5f412b5530a17b2a734ac02bde04d98c57608f5daaf773"
+  },
+  "limits": [
+    "Historical timings select the retained implementation; this refactor makes no new speedup claim.",
+    "W8A8 held-out corpus and long-context quality evaluation remain incomplete.",
+    "INT8 batched prefill is explicitly unsupported; old kernels and W8A16 snapshots require migration, not metadata editing."
+  ],
+  "logs": "reports/runs/cleanup-* (ignored)"
+}

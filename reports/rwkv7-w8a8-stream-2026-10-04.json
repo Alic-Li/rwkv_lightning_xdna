@@ -1,0 +1,400 @@
+{
+  "date": "2026-10-04",
+  "status": "Validated opt-in single-token W8A8 FFN pipeline; repeated whole-model gains and final regression audit complete; production defaults unchanged.",
+  "graph": "4 W1 workers own block-cyclic 256-output blocks. Each emits 256 raw + 256 activated FP32 diagnostics and one 320-byte activation packet. MemTile joins 4 packets into 1280 bytes; 4 W2 workers consume 8 chunks in K order. Norm/mix/input quantizer/residual unchanged; 12 compute cores.",
+  "weight_layout": "W1 canonical, DMA block-cyclic; W2 host-prepacked once as [worker=4, K/256=32, local output/16=32, tile bytes=4160]. Same resident weight bytes; no per-token CPU quantization.",
+  "precision": "Unchanged signed INT8 weights/activation, INT32 block dots, FP32 block scale and output partial sums. WKV state/update FP32. No activation quantization or FP reduction order change.",
+  "stage_oracle_max_abs": 2.384185791015625e-07,
+  "exact_128_step_regression": {
+    "download_bytes": 262144,
+    "first_token_nodes": 960,
+    "mean_ms": 177.97530203937006,
+    "measured_steps": 127,
+    "mode": "verify",
+    "resident_bytes": 2124396544,
+    "runs_per_token": 100,
+    "status": "passed",
+    "tokens_per_second": 5.618757145184049,
+    "upload_bytes": 8192,
+    "vectors_checked": 1116,
+    "weights": "w8a8-ffn"
+  },
+  "overlap": {
+    "key0_window_cycles": {
+      "INSTR_EVENT_0": 61518,
+      "INSTR_EVENT_1": 1633456
+    },
+    "value0_window_cycles": {
+      "INSTR_EVENT_0": 168557,
+      "INSTR_EVENT_1": 1736101
+    },
+    "overlap_cycles": 1464899,
+    "value_vector_issue_begin_events": 111616,
+    "value_vector_issue_before_key_finished": 97664,
+    "fraction": 0.875,
+    "scope": "Same capture, broadcast-synchronized core timers. Confirms W2 computation before full W1 completion; not FLOPS or untraced performance."
+  },
+  "trace_warning": "Initial direct W1 marker capture rejected by strict analyzer (missing complete core0 markers). Out-of-line C++ event calls fixed the diagnostic window. No malformed trace repaired or included. Trace windows include activation/backpressure and routing perturbations, not pure compute or DDR bandwidth.",
+  "artifacts": {
+    "design.xclbin": "98d93689d876ae18b2df357ae09f49df3411919a4af5bdfd486dfb1eafeab3e5",
+    "instructions.bin": "949e49794793892d3224818026b5ddc2a01869266557ba2968e8cab3920c8e2a",
+    "config.json": "214b164c49a7c5125adfb7d2797febd9c22406241fc0e83477b9614c89a406c3"
+  },
+  "logs": "reports/runs/w8a8-stream-2026-10-04",
+  "production_default": "Unchanged; explicit W8A8 isolated kernel root only.",
+  "long_abccba": {
+    "workload": "32 prompt, 96 decode, 2 trials per process; fixed tokens; no compilation or other NPU jobs during timing",
+    "samples_per_variant": 384,
+    "processes": [
+      {
+        "variant": "base",
+        "decode": {
+          "max_ms": 183.194705,
+          "mean_ms": 180.286616703125,
+          "min_ms": 179.029807,
+          "p50_ms": 180.228078,
+          "p95_ms": 181.540247,
+          "samples": 192,
+          "tokens_per_second": 5.546723424549497
+        },
+        "runs_per_token": 100,
+        "resident_bytes": 2124396544,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      {
+        "variant": "local",
+        "decode": {
+          "max_ms": 188.850595,
+          "mean_ms": 178.85196520312505,
+          "min_ms": 177.58104999999998,
+          "p50_ms": 178.653943,
+          "p95_ms": 180.692441,
+          "samples": 192,
+          "tokens_per_second": 5.591216170671001
+        },
+        "runs_per_token": 100,
+        "resident_bytes": 2124396544,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      {
+        "variant": "stream",
+        "decode": {
+          "max_ms": 182.27848,
+          "mean_ms": 177.89105628125012,
+          "min_ms": 176.424348,
+          "p50_ms": 177.754735,
+          "p95_ms": 179.27354300000002,
+          "samples": 192,
+          "tokens_per_second": 5.62141807972052
+        },
+        "runs_per_token": 100,
+        "resident_bytes": 2124396544,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      {
+        "variant": "stream",
+        "decode": {
+          "max_ms": 187.729268,
+          "mean_ms": 178.4138678958333,
+          "min_ms": 176.582033,
+          "p50_ms": 177.817391,
+          "p95_ms": 184.118506,
+          "samples": 192,
+          "tokens_per_second": 5.604945466368391
+        },
+        "runs_per_token": 100,
+        "resident_bytes": 2124396544,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      {
+        "variant": "local",
+        "decode": {
+          "max_ms": 180.820682,
+          "mean_ms": 178.80360709375006,
+          "min_ms": 177.312423,
+          "p50_ms": 178.669296,
+          "p95_ms": 180.13780500000001,
+          "samples": 192,
+          "tokens_per_second": 5.5927283361553295
+        },
+        "runs_per_token": 100,
+        "resident_bytes": 2124396544,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      {
+        "variant": "base",
+        "decode": {
+          "max_ms": 189.115299,
+          "mean_ms": 180.81317048958329,
+          "min_ms": 179.398462,
+          "p50_ms": 180.557447,
+          "p95_ms": 182.385776,
+          "samples": 192,
+          "tokens_per_second": 5.5305705734395625
+        },
+        "runs_per_token": 100,
+        "resident_bytes": 2124396544,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      }
+    ],
+    "mean_ms": {
+      "base": 180.54989359635414,
+      "local": 178.82778614843755,
+      "stream": 178.1524620885417
+    },
+    "stream_vs_base_reduction_percent": 1.3278498591487664,
+    "stream_vs_local_reduction_percent": 0.3776393335962247
+  },
+  "short_direct_w8a16_comparison": {
+    "workload": "8 prompt, 48 decode, 2 trials; stream/W8A16/W8A16/stream",
+    "samples_per_variant": 192,
+    "processes": [
+      {
+        "variant": "stream",
+        "decode": {
+          "max_ms": 181.158711,
+          "mean_ms": 177.82669734375006,
+          "min_ms": 176.782867,
+          "p50_ms": 177.66854600000002,
+          "p95_ms": 179.215529,
+          "samples": 96,
+          "tokens_per_second": 5.623452580165384
+        }
+      },
+      {
+        "variant": "w8a16",
+        "decode": {
+          "max_ms": 185.792934,
+          "mean_ms": 183.73279615625006,
+          "min_ms": 182.615396,
+          "p50_ms": 183.614312,
+          "p95_ms": 185.086242,
+          "samples": 96,
+          "tokens_per_second": 5.442686449672164
+        }
+      },
+      {
+        "variant": "w8a16",
+        "decode": {
+          "max_ms": 186.42383600000002,
+          "mean_ms": 183.71614354166664,
+          "min_ms": 182.60915799999998,
+          "p50_ms": 183.538473,
+          "p95_ms": 185.36583000000002,
+          "samples": 96,
+          "tokens_per_second": 5.4431797920535
+        }
+      },
+      {
+        "variant": "stream",
+        "decode": {
+          "max_ms": 179.097808,
+          "mean_ms": 177.89593841666667,
+          "min_ms": 176.96557700000002,
+          "p50_ms": 177.94300900000002,
+          "p95_ms": 178.648784,
+          "samples": 96,
+          "tokens_per_second": 5.621263806809387
+        }
+      }
+    ],
+    "w8a16_mean_ms": 183.72446984895834,
+    "stream_mean_ms": 177.86131788020836,
+    "latency_reduction_percent": 3.191274397781707
+  },
+  "all_matrix_tiles_trace": {
+    "scope": "Four separate diagnostic binaries/captures, not simultaneous. Windows include FIFO wait and producer-consumer backpressure. Trace changes routing; not untraced bandwidth/compute utilization.",
+    "cores": [
+      {
+        "core": "core_trace for tile3,0",
+        "invocations": 1,
+        "marked_cycles": 1571938,
+        "event_fraction": {
+          "LOCK_STALL": 0.7037376792214451,
+          "INSTR_VECTOR": 0.1192057193095402,
+          "MEMORY_STALL": 4.3894860993245284e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,4",
+        "invocations": 1,
+        "marked_cycles": 1567544,
+        "event_fraction": {
+          "LOCK_STALL": 0.7130224095782958,
+          "MEMORY_STALL": 0.0010187911790673818,
+          "INSTR_VECTOR": 0.11627871370755781
+        }
+      },
+      {
+        "core": "core_trace for tile3,1",
+        "invocations": 1,
+        "marked_cycles": 1492734,
+        "event_fraction": {
+          "LOCK_STALL": 0.6880201027108648,
+          "INSTR_VECTOR": 0.12553073755940442,
+          "MEMORY_STALL": 4.421417345622194e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,5",
+        "invocations": 1,
+        "marked_cycles": 1486087,
+        "event_fraction": {
+          "LOCK_STALL": 0.6972902663168442,
+          "MEMORY_STALL": 0.0010766529819586606,
+          "INSTR_VECTOR": 0.12265230770473061
+        }
+      },
+      {
+        "core": "core_trace for tile3,2",
+        "invocations": 1,
+        "marked_cycles": 1515947,
+        "event_fraction": {
+          "LOCK_STALL": 0.6927920303282371,
+          "INSTR_VECTOR": 0.12360854304273171,
+          "MEMORY_STALL": 4.881437147868626e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,6",
+        "invocations": 1,
+        "marked_cycles": 1506604,
+        "event_fraction": {
+          "LOCK_STALL": 0.70141921832147,
+          "MEMORY_STALL": 0.001055353629752742,
+          "INSTR_VECTOR": 0.12098202314609546
+        }
+      },
+      {
+        "core": "core_trace for tile3,3",
+        "invocations": 1,
+        "marked_cycles": 1582157,
+        "event_fraction": {
+          "LOCK_STALL": 0.7056429924463881,
+          "INSTR_VECTOR": 0.11843578102552402,
+          "MEMORY_STALL": 5.182797914492683e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,7",
+        "invocations": 1,
+        "marked_cycles": 1576725,
+        "event_fraction": {
+          "LOCK_STALL": 0.7146946994561512,
+          "MEMORY_STALL": 0.0010115904802676433,
+          "INSTR_VECTOR": 0.11560164264535668
+        }
+      }
+    ]
+  },
+  "fresh_build": {
+    "measured": {
+      "design.xclbin": "98d93689d876ae18b2df357ae09f49df3411919a4af5bdfd486dfb1eafeab3e5",
+      "instructions.bin": "949e49794793892d3224818026b5ddc2a01869266557ba2968e8cab3920c8e2a",
+      "pdi": "6f29dcdc8138ae737e286104f1af28e7a43484c230f217ea16c1f3b89e2ad073"
+    },
+    "fresh": {
+      "design.xclbin": "98d93689d876ae18b2df357ae09f49df3411919a4af5bdfd486dfb1eafeab3e5",
+      "instructions.bin": "949e49794793892d3224818026b5ddc2a01869266557ba2968e8cab3920c8e2a",
+      "pdi": "6f29dcdc8138ae737e286104f1af28e7a43484c230f217ea16c1f3b89e2ad073"
+    },
+    "same_pdi": true,
+    "same_instructions": true
+  },
+  "fresh_stage": {
+    "status": "passed",
+    "oracle_max_abs": 2.384185791015625e-07
+  },
+  "production_artifacts": {
+    "checked": 84,
+    "changed": []
+  },
+  "final_regressions": {
+    "bf16": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 100
+    },
+    "w8a16-ffn": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 100
+    },
+    "w8a16-output": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 123
+    },
+    "w8a8-base": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 100
+    }
+  },
+  "provenance": {
+    "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "model_sha256": "dfc1fc450641d5e00c5f412b5530a17b2a734ac02bde04d98c57608f5daaf773",
+    "shape": "24 layers, C2048, 32 heads x64, FFN8192, vocab65536",
+    "device": "Ryzen AI 7 H350, RyzenAI-npu6 / XDNA2, 8 columns x4 compute rows",
+    "power_mode": "default",
+    "timing_scope": "Single request; CPU embedding and logits readback included; sampling and explicit state export outside timing. No CPU/GPU model arithmetic fallback."
+  },
+  "stage_profile_median_ms": {
+    "scope": "Tokens 2-8 of one fixed-input diagnostic run per variant; includes dispatch, DMA and waits, not pure compute. Not used instead of repeated model timing.",
+    "ordinary_w8a8": {
+      "attention_projections": 44.7147,
+      "channel_mix": 46.3357,
+      "head": 7.16322,
+      "norm": 0.449113,
+      "norm_mix": 7.98166,
+      "projection_residual": 0.988385,
+      "recurrence_stage": 2.06936,
+      "value_recurrence_projection": 70.3376
+    },
+    "stream": {
+      "attention_projections": 44.8809,
+      "channel_mix": 43.9974,
+      "head": 7.2615,
+      "norm": 0.443844,
+      "norm_mix": 8.21082,
+      "projection_residual": 0.988995,
+      "recurrence_stage": 2.07325,
+      "value_recurrence_projection": 70.4698
+    }
+  },
+  "final_checks": {
+    "cpu_ctest": "3/3 passed",
+    "unknown_weight_layout": "Rejected before dispatch; isolated negative fixture only",
+    "device_health": "No hardware contexts running",
+    "power_mode": "default",
+    "logs": "final-cpu-tests.log, guard-layout.log, final-device-health.log, final-platform.log under logs directory"
+  },
+  "reference_review": {
+    "FastFlowLM_revision": "b0d41a03411470373f849b25e3ce9356d716a483",
+    "files": [
+      "src/include/hrx_cpp/hrx_cpp.hpp",
+      "src/include/modules/gemm.hpp",
+      "src/include/npu_utils/npu_instr_utils.hpp"
+    ],
+    "transferable_ideas": "Persistent buffer ownership; explicit multidimensional DMA sizes/strides and output placement. Closed kernel internals and single-token W8A8 precision are not established by these host interfaces.",
+    "AMD_memory": "https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/group__group__memory.html",
+    "application": "320/1280-byte activation packets and 4160-byte weight tiles preserve 64-byte alignment. Host multidimensional DMA uses IRON TensorAccessPattern, not the AIE tensor_buffer_stream API."
+  },
+  "limitations_and_next_steps": [
+    "W8A8 applies to FFN only; attention/head remain BF16 and recurrent state/update remain FP32. No full-layer 32-Tile graph or FastFlowLM performance ceiling established.",
+    "Eight matrix Tiles show approximately 69-71% lock stall. This combines weight supply and producer-consumer backpressure; incomplete port events cannot establish DDR saturation.",
+    "Trace windows include local quantization and FIFO waits; four captures are not simultaneous and event fractions are not compute utilization.",
+    "No new held-out language-quality certification; 128-step exact comparison establishes structural equivalence to the already screened W8A8 numerical path.",
+    "Next structural priority: distinguish W2 weight starvation from activation backpressure before changing worker count or FIFO depth. Attention/projection-recurrence stages dominate remaining time and need separate measured experiments."
+  ]
+}

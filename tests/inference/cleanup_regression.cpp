@@ -77,28 +77,24 @@ struct Snapshot {
 int main(int argc, char **argv) {
   try {
     if (argc < 5 || argc > 6 ||
-        (argc == 6 && std::string(argv[5]) != "--int8-ffn" &&
-         std::string(argv[5]) != "--int8-ffn-output"))
+        (argc == 6 && std::string(argv[5]) != "--int8-ffn"))
       throw std::runtime_error("Usage: rwkv-cleanup-regression MODEL KERNELS "
-                               "record|verify SNAPSHOT [--int8-ffn|--int8-ffn-output]");
+                               "record|verify SNAPSHOT [--int8-ffn]");
     const bool int8 = argc == 6;
-    const bool output_int8 = int8 && std::string(argv[5]) == "--int8-ffn-output";
     const std::string mode = argv[3];
     if (mode != "record" && mode != "verify")
       throw std::runtime_error("Invalid mode");
     Snapshot snapshot(argv[4], mode == "record");
-    const uint64_t format = output_int8 ? 0x33564b5752474443ULL :
-        int8 ? 0x32564b5752474443ULL : 0x31564b5752474443ULL;
+    const uint64_t format = int8 ? 0x34564b5752474443ULL : 0x31564b5752474443ULL;
     if (snapshot.number(format) != format)
       throw std::runtime_error("Snapshot version/precision mismatch");
     Weights weights(argv[1]);
     auto backend = cpu_backend();
     Model model(weights, *backend);
-    DecodeGraph graph(weights, argv[2], output_int8 ? WeightMode::Int8FFNOutput :
-        int8 ? WeightMode::Int8FFN : WeightMode::BFloat16);
+    DecodeGraph graph(weights, argv[2], int8 ? WeightMode::Int8FFN : WeightMode::BFloat16);
     graph.load_state(model.initial_state());
     auto stats = graph.stats();
-    if (stats.persistent_runs != (output_int8 ? 123 : 100))
+    if (stats.persistent_runs != 100)
       throw std::runtime_error("Unexpected resident run count");
     size_t traced = 0;
     graph.set_trace(
@@ -215,7 +211,7 @@ int main(int argc, char **argv) {
       throw std::runtime_error("Reset mismatch");
     std::cout << nlohmann::json(
                      {{"mode", mode},
-                      {"weights", output_int8 ? "int8-ffn-output" : int8 ? "int8-ffn" : "bf16"},
+                      {"weights", int8 ? "int8-ffn" : "bf16"},
                       {"status", "passed"},
                       {"first_token_nodes", traced},
                       {"vectors_checked", snapshot.checked},

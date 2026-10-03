@@ -1,0 +1,630 @@
+{
+  "date": "2026-10-04",
+  "status": "Validated opt-in ordinary W8A8 FFN; repeatable 1.58-2.00% whole-model improvement over W8A16 FFN. Structural controls not selected; production defaults unchanged.",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "device": "RyzenAI-npu6 XDNA2, default power mode",
+  "graph": "unchanged 4 W1 + 4 W2 workers, 2 converters, norm/mix/residual; single token",
+  "precision": "INT8 weights, per-256 INT8 activations, native INT32 dots, FP32 scale and partial sums; BF16 attention/head; FP32 WKV state and recurrence",
+  "stage": {
+    "activation_precision": "int8_block256",
+    "oracle_max_abs": 2.384185791015625e-07,
+    "scope": "Synthetic ChannelMix; not whole-model accuracy",
+    "status": "passed",
+    "timing_abba": [
+      {
+        "latency": {
+          "mean_ms": 1.832916625,
+          "p50_ms": 1.800364,
+          "p95_ms": 2.043777,
+          "samples": 200
+        },
+        "weights": "bf16"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.0107755499999997,
+          "p50_ms": 0.996118,
+          "p95_ms": 1.123005,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.0175974250000004,
+          "p50_ms": 1.000768,
+          "p95_ms": 1.122203,
+          "samples": 200
+        },
+        "weights": "int8"
+      },
+      {
+        "latency": {
+          "mean_ms": 1.8422173150000003,
+          "p50_ms": 1.804732,
+          "p95_ms": 2.053906,
+          "samples": 200
+        },
+        "weights": "bf16"
+      }
+    ],
+    "trace_capture": false
+  },
+  "model_gate": {
+    "passed": true,
+    "checks": {
+      "complete_128_steps": true,
+      "precision": true,
+      "mean_kl": true,
+      "max_kl": true,
+      "top1_agreement": true,
+      "state_l2": true,
+      "reset_branch": true
+    },
+    "summary": {
+      "baseline_perplexity": null,
+      "baseline_precision": "bf16_fp32_state",
+      "baseline_resident_bytes": 2917120000,
+      "candidate_perplexity": null,
+      "candidate_resident_bytes": 2124396544,
+      "checkpoint_nodes_compared": 960,
+      "first_token_nodes_compared": 960,
+      "max_abs_logits": 3.0209693908691406,
+      "max_kl": 0.019064477154748353,
+      "mean_kl": 0.0006031730484146728,
+      "mean_nll_increase": null,
+      "nll_tokens": 0,
+      "perplexity_ratio": null,
+      "precision": "w8a8_ffn_int32_dot_fp32_partial_others_bf16_fp32_state",
+      "quality_gate": "No language-quality acceptance threshold is implied by this measurement.",
+      "reset_and_branch": "passed",
+      "status": "measured",
+      "steps": 128,
+      "top1_agreement": 1.0,
+      "traced_checkpoints": 1,
+      "type": "summary",
+      "workload": "IDs 1,2,7,9 followed by baseline greedy tokens"
+    },
+    "checkpoint_state_relative_l2": [
+      0.0417280445848064,
+      0.023077959624534683,
+      0.018577969329860045,
+      0.02013380050314225
+    ],
+    "scope": "Experimental screen only; not production quality certification",
+    "worst_layer_checkpoint_l2": {
+      "attention_shift": {
+        "relative_l2": 0.08227679030052455,
+        "step": 1,
+        "layer": 22
+      },
+      "ffn_shift": {
+        "relative_l2": 0.09090510902898268,
+        "step": 1,
+        "layer": 21
+      },
+      "matrix": {
+        "relative_l2": 0.06865051319608845,
+        "step": 1,
+        "layer": 18
+      }
+    }
+  },
+  "whole_model_abba": [
+    {
+      "variant": "int8_ffn_bf16_others_fp32_state",
+      "decode": {
+        "max_ms": 186.565541,
+        "mean_ms": 184.17857795833336,
+        "min_ms": 182.55317200000002,
+        "p50_ms": 184.041628,
+        "p95_ms": 185.458587,
+        "samples": 96,
+        "tokens_per_second": 5.429513090421566
+      },
+      "runs_per_token": 100,
+      "resident_bytes": 2124396544,
+      "host_upload_bytes_per_token": 8192,
+      "host_download_bytes_per_token": 262144
+    },
+    {
+      "variant": "w8a8_ffn_int32_dot_fp32_partial_others_bf16_fp32_state",
+      "decode": {
+        "max_ms": 182.449581,
+        "mean_ms": 180.37467697916665,
+        "min_ms": 179.092521,
+        "p50_ms": 180.291999,
+        "p95_ms": 181.868078,
+        "samples": 96,
+        "tokens_per_second": 5.544015472390842
+      },
+      "runs_per_token": 100,
+      "resident_bytes": 2124396544,
+      "host_upload_bytes_per_token": 8192,
+      "host_download_bytes_per_token": 262144
+    },
+    {
+      "variant": "w8a8_ffn_int32_dot_fp32_partial_others_bf16_fp32_state",
+      "decode": {
+        "max_ms": 183.601789,
+        "mean_ms": 180.4903171354167,
+        "min_ms": 179.175286,
+        "p50_ms": 180.326946,
+        "p95_ms": 182.021259,
+        "samples": 96,
+        "tokens_per_second": 5.5404634213686315
+      },
+      "runs_per_token": 100,
+      "resident_bytes": 2124396544,
+      "host_upload_bytes_per_token": 8192,
+      "host_download_bytes_per_token": 262144
+    },
+    {
+      "variant": "int8_ffn_bf16_others_fp32_state",
+      "decode": {
+        "max_ms": 193.142349,
+        "mean_ms": 184.06977658333327,
+        "min_ms": 182.06450800000002,
+        "p50_ms": 183.641736,
+        "p95_ms": 188.759141,
+        "samples": 96,
+        "tokens_per_second": 5.432722408652859
+      },
+      "runs_per_token": 100,
+      "resident_bytes": 2124396544,
+      "host_upload_bytes_per_token": 8192,
+      "host_download_bytes_per_token": 262144
+    }
+  ],
+  "w8a16_ms": 184.12417727083331,
+  "w8a8_ms": 180.43249705729167,
+  "latency_reduction_percent": 2.0049948183129995,
+  "artifacts": {
+    "design.xclbin": "6b384efdeeeb5b798d3bc20c1e69e1941ed7faddfdd5c462a703f85081bfa0b1",
+    "instructions.bin": "112fa1db29067d50a271a0c09130b0f604088b2972bac1b543a9566ed6c9beb8",
+    "config.json": "5987a533930f9043df804edbd20d65281fd0ef2b67173f1cd13d83717896ac09"
+  },
+  "limitations": [
+    "Only FFN is W8A8; attention/head remain BF16 and recurrent state/updates FP32",
+    "Generated-token and 512-token original smoke text are not held-out language or long-context certification",
+    "No comparable FastFlowLM RWKV workload was available; no speed-limit claim",
+    "Full 32-tile integrated layer graph remains unimplemented; no multi-request batching",
+    "Counter coverage is eight matrix tiles, not all converter/norm/residual workers, and is not simultaneous"
+  ],
+  "logs": "reports/runs/w8a8-2026-10-04",
+  "smoke512": {
+    "summary": {
+      "baseline_perplexity": 3.6260626127528526,
+      "baseline_precision": "bf16_fp32_state",
+      "baseline_resident_bytes": 2917120000,
+      "candidate_perplexity": 3.618840615938314,
+      "candidate_resident_bytes": 2124396544,
+      "checkpoint_nodes_compared": 960,
+      "first_token_nodes_compared": 960,
+      "max_abs_logits": 6.642303466796875,
+      "max_kl": 0.028016662108279054,
+      "mean_kl": 0.003399808074580621,
+      "mean_nll_increase": -0.0019936772041544426,
+      "nll_tokens": 512,
+      "perplexity_ratio": 0.9980083088501731,
+      "precision": "w8a8_ffn_int32_dot_fp32_partial_others_bf16_fp32_state",
+      "quality_gate": "No language-quality acceptance threshold is implied by this measurement.",
+      "reset_and_branch": "passed",
+      "status": "measured",
+      "steps": 512,
+      "top1_agreement": 0.97265625,
+      "traced_checkpoints": 1,
+      "type": "summary",
+      "workload": "supplied UTF-8 text"
+    },
+    "checkpoint_state_relative_l2": [
+      {
+        "step": 1,
+        "relative_l2": 0.03204790546124396
+      },
+      {
+        "step": 8,
+        "relative_l2": 0.013202278659532232
+      },
+      {
+        "step": 32,
+        "relative_l2": 0.019217106469160816
+      },
+      {
+        "step": 512,
+        "relative_l2": 0.01363914846884166
+      }
+    ],
+    "worst_layer_checkpoint_l2": {
+      "attention_shift": {
+        "relative_l2": 0.05552215087620488,
+        "step": 1,
+        "layer": 22
+      },
+      "ffn_shift": {
+        "relative_l2": 0.07517995596563246,
+        "step": 1,
+        "layer": 18
+      },
+      "matrix": {
+        "relative_l2": 0.055899939518048405,
+        "step": 1,
+        "layer": 17
+      }
+    }
+  },
+  "long_model_abccba": [
+    {
+      "variant": "w8a16",
+      "decode": {
+        "max_ms": 187.572167,
+        "mean_ms": 183.64062850000005,
+        "min_ms": 182.328563,
+        "p50_ms": 183.567061,
+        "p95_ms": 184.981479,
+        "samples": 192,
+        "tokens_per_second": 5.445418087316118
+      },
+      "prompt_tokens": 32,
+      "decode_tokens": 96,
+      "trials": 2
+    },
+    {
+      "variant": "w8a8",
+      "decode": {
+        "max_ms": 189.082888,
+        "mean_ms": 180.81742104166662,
+        "min_ms": 178.852811,
+        "p50_ms": 180.16341,
+        "p95_ms": 186.68093299999998,
+        "samples": 192,
+        "tokens_per_second": 5.530440563962945
+      },
+      "prompt_tokens": 32,
+      "decode_tokens": 96,
+      "trials": 2
+    },
+    {
+      "variant": "grouped",
+      "decode": {
+        "max_ms": 186.67858800000002,
+        "mean_ms": 180.56180585416675,
+        "min_ms": 179.126533,
+        "p50_ms": 180.39777800000002,
+        "p95_ms": 182.109595,
+        "samples": 192,
+        "tokens_per_second": 5.538269819962168
+      },
+      "prompt_tokens": 32,
+      "decode_tokens": 96,
+      "trials": 2
+    },
+    {
+      "variant": "grouped",
+      "decode": {
+        "max_ms": 194.375122,
+        "mean_ms": 181.36284290625008,
+        "min_ms": 178.96172900000002,
+        "p50_ms": 180.537486,
+        "p95_ms": 187.462389,
+        "samples": 192,
+        "tokens_per_second": 5.513808583806326
+      },
+      "prompt_tokens": 32,
+      "decode_tokens": 96,
+      "trials": 2
+    },
+    {
+      "variant": "w8a8",
+      "decode": {
+        "max_ms": 187.926135,
+        "mean_ms": 180.8692910572917,
+        "min_ms": 179.370801,
+        "p50_ms": 180.658126,
+        "p95_ms": 182.33633799999998,
+        "samples": 192,
+        "tokens_per_second": 5.5288545344231075
+      },
+      "prompt_tokens": 32,
+      "decode_tokens": 96,
+      "trials": 2
+    },
+    {
+      "variant": "w8a16",
+      "decode": {
+        "max_ms": 185.808647,
+        "mean_ms": 183.8538730520833,
+        "min_ms": 182.532195,
+        "p50_ms": 183.749834,
+        "p95_ms": 185.31218199999998,
+        "samples": 192,
+        "tokens_per_second": 5.439102170650023
+      },
+      "prompt_tokens": 32,
+      "decode_tokens": 96,
+      "trials": 2
+    }
+  ],
+  "long_comparison": {
+    "w8a16_ms": 183.74725077604165,
+    "w8a8_ms": 180.84335604947915,
+    "grouped_ms": 180.96232438020843,
+    "w8a8_reduction_percent": 1.5803745167876748,
+    "grouped_vs_w8a8_change_percent": 0.06578529249188225,
+    "decision": "Retain ordinary W8A8 as explicit experimental mode; grouped rows shows no extra model benefit"
+  },
+  "trace": {
+    "scope": "Eight matrix tiles measured as four separately compiled trace pairs, one invocation each; tracing changes routing, not a performance benchmark",
+    "cores": [
+      {
+        "core": "core_trace for tile3,0",
+        "marked_cycles": 918957,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.5110391454660012,
+          "MEMORY_STALL": 0.0016964885190493134,
+          "INSTR_VECTOR": 0.20113237072028398,
+          "PORT_RUNNING_1": 1.0881901982356084e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,4",
+        "marked_cycles": 938911,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.5227098202066011,
+          "INSTR_VECTOR": 0.19413128613894182,
+          "PORT_RUNNING_1": 1.1715700423149798e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,1",
+        "marked_cycles": 806095,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.44256446200509864,
+          "MEMORY_STALL": 0.001948901804377896,
+          "INSTR_VECTOR": 0.22929307339705618,
+          "PORT_RUNNING_1": 1.3646034276357005e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,5",
+        "marked_cycles": 808785,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.4459182601062087,
+          "INSTR_VECTOR": 0.2253652083062866,
+          "PORT_RUNNING_1": 1.360064788540836e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,2",
+        "marked_cycles": 818846,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.45124480060963845,
+          "MEMORY_STALL": 0.0019185536718748092,
+          "INSTR_VECTOR": 0.2257225412348598,
+          "PORT_RUNNING_1": 1.221230854153284e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,6",
+        "marked_cycles": 820858,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.45406757319780033,
+          "INSTR_VECTOR": 0.22205058609406256,
+          "PORT_RUNNING_1": 1.2182375027105785e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,3",
+        "marked_cycles": 817172,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.45011209390434326,
+          "MEMORY_STALL": 0.0019310500115030862,
+          "INSTR_VECTOR": 0.22618494025737543,
+          "PORT_RUNNING_1": 1.3461058381833934e-05
+        }
+      },
+      {
+        "core": "core_trace for tile3,7",
+        "marked_cycles": 813444,
+        "event_fraction": {
+          "PORT_RUNNING_0": 0.0,
+          "LOCK_STALL": 0.44909176292406117,
+          "INSTR_VECTOR": 0.22407442921700818,
+          "PORT_RUNNING_1": 1.3522750183171798e-05
+        }
+      }
+    ],
+    "interpretation": "44-52% lock stalls and 19-23% vector issue in marked matrix windows. Weight FIFO is the primary lock dependency inside these loops. Counters do not separate DDR/NoC/producer delay or establish peak bandwidth. W2 markers exclude initial activation wait. Ports 0/1 do not measure all DMA traffic."
+  },
+  "production_artifacts": {
+    "checked": 84,
+    "changed": [],
+    "scope": "Previously recorded production artifact manifest; not every optional prefill artifact"
+  },
+  "structural_controls": {
+    "grouped_rows4": {
+      "integer_only_reassociation": true,
+      "exact_regression": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 180.436554496063,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2124396544,
+        "runs_per_token": 100,
+        "status": "passed",
+        "tokens_per_second": 5.542114250590057,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "w8a8-ffn"
+      },
+      "decision": "No extra whole-model benefit; opt-in control only"
+    },
+    "paired_weight_fifo": {
+      "weight_chunk_tiles": 2,
+      "weight_fifo_bytes": 8320,
+      "fifo_depth": 2,
+      "same_weight_layout": true,
+      "same_numerics": true,
+      "stage_oracle_max_abs": 2.384185791015625e-07,
+      "exact_regression": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 180.72131749606297,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2124396544,
+        "runs_per_token": 100,
+        "status": "passed",
+        "tokens_per_second": 5.5333815282847585,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "w8a8-ffn"
+      },
+      "abba_ms": [
+        180.21542472916667,
+        180.64493975000002,
+        180.35493216666666,
+        181.1948970625
+      ],
+      "baseline_ms": 180.70516089583333,
+      "paired_ms": 180.49993595833334,
+      "latency_reduction_percent": 0.1135689409658247,
+      "samples_per_variant": 192,
+      "decision": "0.11% mean change is smaller than process variation; no repeatable whole-model gain established, keep opt-in only"
+    }
+  },
+  "host_profiles": {
+    "scope": "Median tokens 2-8 of 8 fixed input tokens; diagnostic stage wall time includes DMA, program switching and waits; not pure kernel time",
+    "stage_ms": {
+      "int8-ffn": {
+        "attention_projections": 45.0076,
+        "channel_mix": 49.9267,
+        "head": 7.20596,
+        "norm": 0.467127,
+        "norm_mix": 8.19182,
+        "projection_residual": 0.992949,
+        "recurrence_stage": 2.08984,
+        "value_recurrence_projection": 70.1129
+      },
+      "w8a8-ffn": {
+        "attention_projections": 45.0312,
+        "channel_mix": 46.3388,
+        "head": 7.1448,
+        "norm": 0.471343,
+        "norm_mix": 8.04061,
+        "projection_residual": 0.972836,
+        "recurrence_stage": 2.07041,
+        "value_recurrence_projection": 70.4135
+      }
+    }
+  },
+  "final_regressions": {
+    "bf16": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 100
+    },
+    "int8-ffn": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 100
+    },
+    "int8-ffn-output": {
+      "status": "passed",
+      "vectors_checked": 1116,
+      "first_token_nodes": 960,
+      "runs_per_token": 123
+    }
+  },
+  "final_regression_scope": "128 steps, logits and states at 1/8/32/128, reset/branch and all first-token nodes; exact existing snapshots. Regression wall times are not performance evidence.",
+  "fresh_build": {
+    "hashes": {
+      "build/kernels/w8a8-block256/int8-channel-mix/design.xclbin": "6b384efdeeeb5b798d3bc20c1e69e1941ed7faddfdd5c462a703f85081bfa0b1",
+      "build/kernels/w8a8-block256/int8-channel-mix/instructions.bin": "112fa1db29067d50a271a0c09130b0f604088b2972bac1b543a9566ed6c9beb8",
+      "build/kernels/w8a8-final/int8-channel-mix/design.xclbin": "5962253034b27c1edbc682195bb8465f977b95eb05a0b1409b64285168106eea",
+      "build/kernels/w8a8-final/int8-channel-mix/instructions.bin": "112fa1db29067d50a271a0c09130b0f604088b2972bac1b543a9566ed6c9beb8"
+    },
+    "same_xclbin": false,
+    "same_instructions": true,
+    "pdi-old": "d1b537dedd0c231053337e77ca80b9cde07736f059df807f8e395e435884aa07",
+    "pdi-new": "d1b537dedd0c231053337e77ca80b9cde07736f059df807f8e395e435884aa07",
+    "same_pdi": true,
+    "rwkv7_ffn_key_tile.o": {
+      "old": "e4de3857726f028a7e1abdd009160305cb4135dbd6d29ef2d4de62a482f3badf",
+      "new": "e4de3857726f028a7e1abdd009160305cb4135dbd6d29ef2d4de62a482f3badf",
+      "same": true
+    },
+    "rwkv7_channel_convert2048.o": {
+      "old": "2db195084ca9ff6b3e1131d957d96f99acc6fb714bcafac234f22f1984b25cdc",
+      "new": "2db195084ca9ff6b3e1131d957d96f99acc6fb714bcafac234f22f1984b25cdc",
+      "same": true
+    },
+    "interpretation": "Container/PDI UUID changed, actual PDI payload and instructions plus both W8A8 kernel objects identical to measured ordinary W8A8. Fresh C++ stage dispatch and oracle/guards passed.",
+    "stage_oracle_max_abs": 2.384185791015625e-07
+  },
+  "cpu_tests": "ctest --preset test: 3/3 passed",
+  "measurement_scope": "Fixed token stream, sequential single request; replay includes CPU embedding and logits readback; sampling and explicit state export outside timed decode. No CPU/GPU model fallback. All hardware dispatches serial.",
+  "next_steps": [
+    "Do not select grouped rows or paired weight FIFO based on sub-noise model changes. Keep ordinary W8A8 as numerical baseline.",
+    "Use stage profile and eight matrix traces to distinguish weight FIFO supply from NoC/DDR and activation/converter barriers; default port counters do not provide this attribution.",
+    "Evaluate W8A8 producer-consumer FFN against this baseline before adding workers. A 31-core recurrence/output program already exists; a complete layer graph needs an explicit shared tile/memory/DMA resource plan.",
+    "Establish a representative held-out corpus and long-context gates before any production W8A8 promotion; attention/head W8A8 and comparable FastFlowLM speed-limit measurement remain open."
+  ],
+  "guards": {
+    "default-root": {
+      "exit": 1,
+      "last_line": "ValueError: W8A8 requires an isolated RWKV_XDNA_KERNEL_DIR"
+    },
+    "cpu-fallback": {
+      "exit": 1,
+      "last_line": "rwkv-cli: INT8 weights require --backend npu"
+    },
+    "snapshot-precision": {
+      "exit": 1,
+      "last_line": "Snapshot version/precision mismatch"
+    },
+    "prefill": {
+      "exit": 1,
+      "last_line": "rwkv-cli: Experimental W8A8 requires graph/resident decode and --prefill decode"
+    },
+    "reject-w8a16-as-w8a8": {
+      "exit": 1,
+      "last_line": "rwkv-bench: Incompatible production artifact: int8-channel-mix field accumulator_dtype"
+    },
+    "reject-w8a8-as-w8a16": {
+      "exit": 1,
+      "last_line": "rwkv-bench: Incompatible production artifact: int8-channel-mix field accumulator_dtype"
+    }
+  },
+  "reference_hashes": {
+    "/home/alic-li/rwkv_weights/rwkv7-g1k-1.5b-20260930-ctx25600.pth": "dfc1fc450641d5e00c5f412b5530a17b2a734ac02bde04d98c57608f5daaf773",
+    "/home/alic-li/work_space/FastFlowLM/src/lib/hrx/libgemm.so": "348c6fc5a0a8303aa708f7efd9095174223446c7ef1b6ffa4fe0156fabadb17a",
+    "/home/alic-li/work_space/FastFlowLM/src/lib/hrx/libqwen3_npu.so": "21a31a59cef6ec3c0f3252855b4ecbf240971771a2a4e69e840eeedc06970b24"
+  },
+  "fastflowlm_audit": {
+    "revision": "b0d41a03411470373f849b25e3ce9356d716a483",
+    "read": [
+      "src/include/hrx_cpp/hrx_cpp.hpp",
+      "src/include/npu_utils/npu_utils_hrx.hpp",
+      "src/include/modules/gemm.hpp",
+      "src/include/modules/dequant.hpp",
+      "src/include/tensor_utils/q4_npu_eXpress.hpp",
+      "TERMS.md"
+    ],
+    "binary_evidence": "x86-64 host libgemm.so get_m/get_k/get_n return 64/512/128; libqwen3_npu.so exports separate _prefill_with_mm/_prefill_with_mv and dequant_q80_packed_in_q4nx methods",
+    "interpretation": "Learn resource ownership and separate matrix/vector execution. Host interfaces and constants do not reveal the closed NPU decode microkernel or prove W8A8 arithmetic. No closed kernel copied and no cross-model speed comparison claimed.",
+    "amd_reference": "https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/group__group__mmul.html",
+    "native_integer_evidence": "Installed AIE2P API mul_acc32.hpp maps int8 vectors to mul_elem_64_conf/mac_elem_64_conf; compiled tile object disassembly contains integer vmul/vmac and integer vadd. FP32 epilogues remain separate."
+  },
+  "final_device_health": "No hardware contexts running on device"
+}

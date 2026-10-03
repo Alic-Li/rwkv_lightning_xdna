@@ -1,0 +1,11 @@
+{
+  "status": "predeclared experimental gates; not production quality certification",
+  "scope": "single-token FFN W1/W2 only; attention/head BF16; recurrent state and recurrence FP32",
+  "numerics": "signed symmetric INT8 weights and activations, 256-element dynamic activation blocks, round nearest even, INT32 block dot then FP32 scale and partial sum; existing FP16-derived per-output weight scales",
+  "stage_oracle": "2e-5 + 2e-5*abs(reference), unchanged; integer dot independently computed on host for validation only",
+  "model_screen": {"steps": 128, "mean_kl_max": 0.01, "worst_kl_max": 0.1, "top1_agreement_min": 0.9, "checkpoint_state_relative_l2_max": 0.1, "reset_and_branch": "bitwise deterministic"},
+  "promotion": "No default promotion from a synthetic stage or generated-token screen. Held-out language corpus and long-context evaluation remain required.",
+  "performance": "untraced whole-model A/B/B/A versus existing W8A16 FFN using identical workload; no structural graph changes in initial numerical experiment",
+  "overflow": "256*127*127=4129024 fits INT32; FP32 conversion exact for a block dot",
+  "sources": ["FastFlowLM b0d41a03411470373f849b25e3ce9356d716a483 modules/gemm.hpp and dequant.hpp, HRX dirty tracking and runlist", "https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/group__group__mmul.html", "Installed AIE API detail/aie2p/mul_acc32.hpp: signed 8-bit vector mul/mac uses mul_elem_64_conf/mac_elem_64_conf"]
+}

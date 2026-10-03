@@ -1,18 +1,13 @@
 # RWKV Lightning XDNA
 
-面向 Ryzen AI NPU 的 C++17 RWKV-7 推理项目。生产路径使用 BF16 权重/乘法输入，
-FP32 累加、归一化、残差和 WKV 状态；状态跨 token 常驻设备，默认 prefill 复用 decode。
-可显式选择 `--prefill batch2` 或实验性 `--prefill chunk4`；chunk4 在 FFN 中复用四个
-token 的权重流，并按层连续执行同一阶段。构建、实测范围与精度边界见[推理说明](docs/inference.md#实验性四-token-chunked-prefill)。
-支持 PTH 和 safetensors，CPU FP32 后端用于显式参考。
+面向 Ryzen AI NPU 的 C++17 RWKV-7 backend。默认 BF16 resident decode，
+FP32 累加、归一化、残差和 WKV 状态，状态跨 token 常驻设备。
+唯一 INT8 方案是 W8A8 streaming FFN；attention/head 仍为 BF16。
+BF16 支持逐 token、batch2 和 chunk4 prefill；INT8 使用逐 token prefill。
+支持 PTH/safetensors，CPU FP32 后端提供显式参考。
 
-当前优化主线是**单请求、单 token decode 内部的空间并行**：同 token 的独立 projection、
-按 head/channel 切分 WKV、FFN 输出分片及阶段间流水。以重复整模型 ms/token 验收，
-不开展多请求 batching 或 continuous batching；已有 prefill 功能保留。
-见[空间分片实测](reports/rwkv7-spatial-w2-eight-rejected-2026-10-03.json)和
-[W1→activation→W2 流式实验](reports/rwkv7-spatial-stream-2026-10-03.json)。
-
-运行路径：`C++ → XRT → amdxdna → NPU`。Python 仅用于离线编译、测试数据和数值检查。
+运行路径：`C++ → XRT → amdxdna → NPU`。Python 仅用于离线编译和验证。
+接口、数值边界、模块结构和旧产物迁移见[推理说明](docs/inference.md)。
 
 ## 快速开始
 
@@ -30,7 +25,7 @@ cmake --build --preset release-kernels  # 只编译生产 kernel，不提交 NPU
 还必须成功执行 `release-kernels`。也可在 `cmake --preset release` 配置后用
 `cmake --build --preset release-full` 一次构建主机程序与生产 kernel。
 若出现 `Missing production artifact: upstream-norm`，按
-[推理排障](docs/inference.md#缺少生产-kernel) 补齐设备产物。
+[推理排障](docs/inference.md#产物排障与迁移) 补齐设备产物。
 
 默认产物目录为 `build/kernels/rwkv7-bf16`。当前支持的模型形状及 C++ 状态接口见
 [推理说明](docs/inference.md)。
@@ -41,14 +36,14 @@ cmake --build --preset release-kernels  # 只编译生产 kernel，不提交 NPU
 - [环境部署](docs/environment.md)：系统依赖与设备排障。
 - [推理说明](docs/inference.md)：支持范围、CLI、模块边界和状态管理。
 - [验证记录](docs/validation.md)：测试流程、已有证据与数值边界。
-- [执行图](docs/execution-graph.md)：设备提交机制与历史兼容性探针。
+- [执行图](docs/execution-graph.md)：设备提交机制与状态生命周期。
 
 ## 目录
 
 | 目录 | 内容 |
 |---|---|
 | `include/`, `src/`, `apps/` | C++ 公共 API、运行库、推理与 CLI |
-| `kernels/rwkv/` | 生产 BF16 / FP32 设备内核 |
+| `kernels/rwkv/` | 生产 BF16 / FP32 设备内核（含唯一 W8A8 FFN） |
 | `cmake/`, `CMakePresets.json` | 主机、安装、kernel 构建配置 |
 | `tests/`, `tools/validation/` | C++ 测试、离线参考和验证编排 |
 | `tools/compile/` | 生产设计与通用算子测试设计的离线编译 |

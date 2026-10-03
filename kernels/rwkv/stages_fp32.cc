@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "vector_exp_fp32.hpp"
-#ifndef RWKV_PREPARE_TRACE_REGION
-#define RWKV_PREPARE_TRACE_REGION 0
-#endif
 // Per-head fused preparation, [k,a,d,k_k,k_a,a0,w0,pad].
 static void rwkv7_prepare_head(const float *p, float *out) {
-#if RWKV_PREPARE_TRACE_REGION == 1
-  event0();
-#endif
   double ss = 0;
   for (int j = 0; j < 64; ++j) {
     float u = p[j] * p[192 + j];
@@ -16,12 +10,6 @@ static void rwkv7_prepare_head(const float *p, float *out) {
   float den = (float)root(ss);
   if (den < 1e-12f)
     den = 1e-12f;
-#if RWKV_PREPARE_TRACE_REGION == 1
-  event1();
-#endif
-#if RWKV_PREPARE_TRACE_REGION == 2
-  event0();
-#endif
   alignas(32) float gate[64], decay[64];
   sigmoid64(p + 64, p + 320, gate);
   sigmoid64(p + 128, p + 384, decay);
@@ -29,12 +17,6 @@ static void rwkv7_prepare_head(const float *p, float *out) {
     decay[j] = -0.6065306597126334f * decay[j];
   exp_negative32(decay, out + 320);
   exp_negative32(decay + 32, out + 352);
-#if RWKV_PREPARE_TRACE_REGION == 2
-  event1();
-#endif
-#if RWKV_PREPARE_TRACE_REGION == 3
-  event0();
-#endif
   for (int j = 0; j < 64; ++j) {
     float kk = p[j] * p[192 + j] / den, a = gate[j];
     out[j] = kk;
@@ -43,9 +25,6 @@ static void rwkv7_prepare_head(const float *p, float *out) {
     out[192 + j] = kk * a;
     out[256 + j] = p[j] * (1 + (a - 1) * p[256 + j]);
   }
-#if RWKV_PREPARE_TRACE_REGION == 3
-  event1();
-#endif
 }
 // [y,ln_weight,ln_bias,r,k,r_k,v,g] -> norm,residual,sum,gated.
 static void rwkv7_finish_head(const float *p, float *out) {

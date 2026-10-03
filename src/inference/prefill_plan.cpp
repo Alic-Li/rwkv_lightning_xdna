@@ -99,10 +99,9 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
   prefill_logits = remap(device_buffers[logits], true);
   prefill_body.push_back(bind(0, false));
   prefill_body.push_back(bind(0, true));
-  auto &ffn = session(root, weight_mode == WeightMode::BFloat16
-      ? "bf16-prefill-ffn-b2-projection-input" : "int8-prefill-ffn-b2-projection-input");
+  auto &ffn = session(root, "bf16-prefill-ffn-b2-projection-input");
   for (size_t l = 0; l < layers; ++l) {
-    const bool fuse_projection = l > 0 && weight_mode != WeightMode::Int8FFNOutput;
+    const bool fuse_projection = l > 0;
     auto ffn_input = paired_outputs[l];
     for (size_t stage = 0; stage < 4; ++stage) {
       const size_t index = 1 + l * 5 + stage;
@@ -138,7 +137,7 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
         const auto &args = bindings[index].arguments;
         auto input = paired_view(args[0]);
         const size_t stride = input.size() / sizeof(float) - 2048;
-        auto &output = session(root, std::string(weight_mode == WeightMode::Int8FFNOutput ? "int8" : "bf16") +
+        auto &output = session(root, std::string("bf16") +
             "-prefill-output-b2-s" + std::to_string(stride));
         prefill_body.push_back({output.prepare({input, args[1], remap(args[2], false),
             remap(args[2], true), paired_outputs[l]}), Stage::Output, 2});
@@ -148,8 +147,7 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
       }
     }
     const auto &args = bindings[1 + l * 5 + 4].arguments;
-    auto &ffn_stage = fuse_projection ? session(root, weight_mode == WeightMode::BFloat16
-        ? "bf16-prefill-ffn-b2-recurrence-input" : "int8-prefill-ffn-b2-recurrence-input") : ffn;
+    auto &ffn_stage = fuse_projection ? session(root, "bf16-prefill-ffn-b2-recurrence-input") : ffn;
     auto half = initialized(ffn_stage, Vector(10240, 0));
     prefill_body.push_back({ffn_stage.prepare({ffn_input, args[1], args[2], ffn_arenas[l], half}),
                             Stage::FFN, 2});

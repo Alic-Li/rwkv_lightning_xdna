@@ -1,73 +1,21 @@
-# 代码内 decode graph 与 XRT 执行
+# Decode graph 与 XRT 执行
 
-按用户要求，推理使用进程内 `DecodeGraph`，不依赖 `xrt-capture` / `xrt-replay` 命令。
-图在构造时记录算子、buffer 依赖和状态回写；replay 绑定新 token 和 State。
-细节及使用方法见 [inference.md](inference.md)。
+`DecodeGraph` 在进程内记录逻辑节点、buffer 依赖及状态绑定。
+CPU graph 通过参考 backend 执行；NPU graph 将节点映射为固定 resident 阶段。
+运行时不根据目录中的实验产物选择其他计划。
 
-当前使用已验证的 `xrt::run` 复用。它复用对象和参数绑定，但仍逐个提交 run，
-不是整个 decode 的单次硬件图提交。默认 NPU resident 路径使用 BF16 权重、固定 arena、
-阶段融合和阵列并行。通过 `load_state / replay_resident / export_state`，FP32 状态跨
- token 留在设备 BO，稳态只传 embedding/logits；兼容 `replay(token, State&)` 同步完整状态。
-当前24层模型普通 BF16 / INT8 FFN-only decode 为100 runs/token，INT8 FFN+output
-和诊断 trace 为123 runs/token。延迟取决于权重模式和测试条件，生产实现及各次测量见
-[inference.md](inference.md)。
+构造时一次完成 ABI 检查、权重打包、session/BO 分配和 XRT run 参数绑定。
+非首层的 recurrence 与 BF16 output projection 融合，FFN 直接读取融合输出。
+24层正常 decode 为100次提交；诊断 trace 使用保留中间结果的123次提交计划。
+每次仍逐个执行可复用 `xrt::run`，没有启用 runlist 或 HRX。
 
-2026-10-03 补查 FastFlowLM 的 `src/lib/hrx/libllama_npu.so`：其 forward 中存在
-循环调用 `hrx_stream_dispatch` 后统一 `hrx_stream_flush` / `hrx_stream_wait` 的路径，
-随后单独运行输出 head。本地 HRX 包装头文件也提供 executable 缓存和批量 record 接口。
-FastFlowLM 的 `FLM_USE_HRX` 默认关闭，不能把 HRX 与 XRT 库的行为混为一谈。
-这说明应独立验证 HRX 的兼容性及收益；下面的旧 XRT runlist 失败不能排除 HRX 路径。
-统一 flush 也不证明只有一条硬件命令。可复查的二进制地址、哈希及证据边界见
-[FastFlowLM HRX 核查](../reports/amd2026-fastflow-review-2026-10-03.json)。
+`load_state` 建立设备请求状态，`replay_resident` 只同步 embedding/logits，
+`export_state` 显式下载 checkpoint。reset/branch 通过再次 `load_state` 实现。
+执行失败后 graph 不再接受 replay，须重新加载状态。
 
-已进一步用 FastFlowLM 固定的 HRX 包运行现有 `upstream-norm` 产物。16次有前后依赖的
-norm，XRT 逐次等待、HRX 逐次等待、HRX 批量等待分别为1.180、1.167、1.143 ms；
-四类输入结果逐位一致，逐步 FP64、buffer guard 和只读参数检查通过。
-这仅证明单程序控制可用及约3%的微基准收益，尚未验证异构程序切换或完整模型。
-详见 [HRX 调度对照](../reports/rwkv7-hrx-dispatch-control-2026-10-03.json)。
+BF16 prefill 使用同一组权重、session 和 recurrent state：batch2 使用两份 activation
+视图，chunk4 使用四份。WKV 保持 token 顺序；组内只运行最后一次 logits head，
+尾 token 走普通 resident decode。INT8 只使用逐 token 状态转移。
 
-可选测试使用独立 HRX 包，不改变生产后端，也不自动下载依赖：
-
-```bash
-# HRX_PREFIX 指向已校验的 HRX 安装包目录，内含 lib/cmake/hrx。
-cmake --preset test -DRWKV_XDNA_HRX_PROBE=ON -DCMAKE_PREFIX_PATH="$HRX_PREFIX"
-cmake --build --preset test
-./build/test/rwkv-hrx-dispatch-bench build/kernels/rwkv7-bf16/upstream-norm
-./build/test/rwkv-hrx-alternation-bench build/kernels/rwkv7-bf16
-```
-
-异构程序对照进一步让 norm 输出直接作为 projection 输入：独立产物下，XRT 逐次等待、
-HRX 逐次等待、HRX 成对等待分别为1.228、1.219、1.215 ms；共享 PDI 的诊断产物下
-分别为0.350、0.364、0.358 ms。全部结果逐位一致，数值及 guard 检查通过。
-因此当前证据支持继续减少程序切换，并不支持仅替换运行库就能消除该开销。
-共享产物的生成方式见 `tools/compile/rwkv7_shared_program_probe.py`，生成后将上述
-alternation 命令的根目录换为其输出目录即可复测。完整条件及失败的显式 REUSE 探针见
-[异构程序 HRX 对照](../reports/rwkv7-hrx-alternation-control-2026-10-03.json)。
-
-以下是历史 runlist/capture 探针记录，不代表当前接口或本轮重新测试。
-
-## 本机实验记录（2026-10-02，XRT 2.25）
-
-- 普通 run 重复执行并改变输入：通过数值检查。
-- 两条 run 组成的原生 runlist，期望复用两次并改变输入：第一次执行返回
-  `ERT_CMD_STATE_ABORT`。历史探针源码已随实验清理删除；推理没有启用该路径。
-- `xrt-capture --frames 2` 包装已验证的 C++ WKV 测试：应用数值检查通过，
-  产生 `capture_*.bin`，但工具报告没有 `replay.json`。
-- 使用已知 WKV ABI 手动构建 replay 描述后，工具报告指令参数 bank 连接不匹配，
-  随后以 `No host side buffer in destination buffer: Invalid argument` 失败。
-  这是当前安装版本/旧式 xclbin 路径的实测兼容性限制，尚未定位完整根因，
-  不能归纳为所有 XRT/NPU 都不支持图或 runlist。
-
-这些探针之后，普通 NPU 算子、模型和状态测试仍正常通过。没有为此修改驱动配置。
-
-## 参考资料
-
-[XRT 官方 capture/replay 说明](https://github.com/Xilinx/XRT/blob/master/src/runtime_src/core/common/runner/replay.md)
-将 frame 定义为一次 run.start 或 runlist.execute，并记录资源、缓冲区快照和同步点。
-它适合复现和分析，录制内容并不会自动包含采样器和新 token 的状态推进逻辑。
-官方文档的命令名称与本机版本可能不同，实际 CLI 以本机 `--help` 为准。
-
-[XRT Native APIs](https://xilinx.github.io/XRT/master/html/xrt_native_apis.html)
-及 [runlist API 头文件](https://github.com/Xilinx/XRT/blob/master/src/runtime_src/core/include/xrt/experimental/xrt_kernel.h)
-描述原生执行接口。runlist 中的 run 必须关联同一个硬件 context；它与代码内的模型图、
-DMA 数据流和设备缓存布局是不同层次，不能仅换一个命令就把当前模型变成单次硬件提交。
+模块结构与 API 见 [推理说明](inference.md)。历史 runlist、HRX、mode-worker 和共享程序
+探针的结论保留在 `reports/`，探针代码及生产选择分支已移除。

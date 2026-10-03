@@ -2,7 +2,7 @@
 add_library(rwkv_inference
     src/inference/model.cpp src/inference/weights.cpp src/inference/backend.cpp
     src/inference/ops.cpp src/inference/graph.cpp
-    src/inference/resident_plan.cpp src/inference/graph_execution.cpp
+    src/inference/resident_buffers.cpp src/inference/resident_plan.cpp src/inference/graph_execution.cpp
     src/inference/prefill_plan.cpp
     src/inference/chunked_plan.cpp
     src/inference/artifacts.cpp src/inference/weight_layout.cpp src/inference/quantization.cpp

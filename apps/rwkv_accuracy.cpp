@@ -52,17 +52,16 @@ static double nll(const Vector &logits, int target) {
 }
 int main(int argc, char **argv) {
   try {
-    bool text_file = false, checkpoint_nodes = false, output_int8 = false;
+    bool text_file = false, checkpoint_nodes = false;
     while (argc > 1) {
       std::string flag(argv[argc - 1]);
       if (flag == "--text" && !text_file) text_file = true;
       else if (flag == "--checkpoint-nodes" && !checkpoint_nodes) checkpoint_nodes = true;
-      else if (flag == "--int8-ffn-output" && !output_int8) output_int8 = true;
       else break;
       --argc;
     }
     if (argc < 4 || argc > 6)
-      throw std::runtime_error("Usage: rwkv-accuracy MODEL BF16_ROOT INT8_ROOT [STEPS [TOKEN_ID_FILE|TEXT_FILE]] [--text] [--checkpoint-nodes] [--int8-ffn-output]");
+      throw std::runtime_error("Usage: rwkv-accuracy MODEL BF16_ROOT INT8_ROOT [STEPS [TOKEN_ID_FILE|TEXT_FILE]] [--text] [--checkpoint-nodes]");
     if (text_file && argc != 6)
       throw std::runtime_error("--text requires a text file");
     size_t steps = 128;
@@ -129,7 +128,7 @@ int main(int argc, char **argv) {
     // Two complete resident graphs exceed the driver's context limit on this
     // device. Retain host references and release all baseline contexts first.
     baseline.reset();
-    DecodeGraph candidate(weights, argv[3], output_int8 ? WeightMode::Int8FFNOutput : WeightMode::Int8FFN);
+    DecodeGraph candidate(weights, argv[3], WeightMode::Int8FFN);
     candidate.load_state(initial);
     size_t first_token_nodes = 0, checkpoint_nodes_compared = 0, traced_checkpoints = 0;
     Vector first_candidate;
@@ -208,7 +207,7 @@ int main(int argc, char **argv) {
     if (candidate.replay_resident(tokens[0]) != first_candidate)
       throw std::runtime_error("INT8 reset changed first-token logits");
     std::cout << Json({{"type", "summary"}, {"status", "measured"}, {"steps", steps},
-      {"precision", output_int8 ? "int8_ffn_output_bf16_others_fp32_state" : "int8_ffn_bf16_others_fp32_state"},
+      {"precision", "w8a8_ffn_int32_dot_fp32_partial_others_bf16_fp32_state"},
       {"baseline_precision", "bf16_fp32_state"},
       {"top1_agreement", double(top1_matches) / steps}, {"mean_kl", sum_kl / steps},
       {"max_kl", worst_kl}, {"max_abs_logits", worst_abs},

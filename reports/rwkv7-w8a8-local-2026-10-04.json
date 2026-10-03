@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-04",
+  "status": "Validated producer quantization; improvement reproduced in short and long model workloads",
+  "change": "Four W1 workers perform unchanged block256 quantization locally. Raw+activation diagnostics share one output stream with host DMA scatter. Remove the full FP32 gather-to-converter hop and one converter core; full quantized activation gather barrier remains. 12 compute cores instead of 13.",
+  "precision": "Same W8A8 block256 arithmetic, FP32 scaling/partial sums and FP32 WKV state; no quantization rule changes",
+  "stage_oracle_max_abs": 2.384185791015625e-07,
+  "exact_model_regression": {
+    "download_bytes": 262144,
+    "first_token_nodes": 960,
+    "mean_ms": 178.83307585039375,
+    "measured_steps": 127,
+    "mode": "verify",
+    "resident_bytes": 2124396544,
+    "runs_per_token": 100,
+    "status": "passed",
+    "tokens_per_second": 5.591806746289871,
+    "upload_bytes": 8192,
+    "vectors_checked": 1116,
+    "weights": "w8a8-ffn"
+  },
+  "abba_ms": [
+    180.6743938645833,
+    178.55215505208332,
+    178.79461080208333,
+    180.69770954166665
+  ],
+  "baseline_ms": 180.68605170312497,
+  "local_ms": 178.6733829270833,
+  "latency_reduction_percent": 1.1139037889590808,
+  "samples_per_variant": 192,
+  "workload": "8 prompt, 48 decode, 2 trials per process, fixed tokens, default power; single request, C++ NPU dispatch only",
+  "artifacts": {
+    "design.xclbin": "eadc70a0746aa3367e242b22a5ecb0bfc861891dd7f17475eceef405dac03c34",
+    "instructions.bin": "0e85b2535366602ac4dda9b7a4fe532b6a83749ae60882eaee1ca3eb0bec9d2b",
+    "config.json": "0e5b7b7be305ac3758278280d24821a747594a6f6ca7f06b4d21941ce584c59e"
+  },
+  "references": [
+    "FastFlowLM b0d41a0: gemm activation/output offsets and HRX buffer ownership; no inference of closed device kernel internals",
+    "https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/group__group__memory.html"
+  ],
+  "logs": "reports/runs/w8a8-local-2026-10-04",
+  "long_confirmation": {
+    "baseline_ms": 180.54989359635414,
+    "local_ms": 178.82778614843755,
+    "reduction_percent": 0.9538124967088613,
+    "samples_per_variant": 384,
+    "report": "rwkv7-w8a8-stream-2026-10-04.json"
+  }
+}

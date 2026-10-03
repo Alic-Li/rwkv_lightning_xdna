@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Two-token BF16/W8A16 ChannelMix: one submission, shared streamed weight tiles."""
+"""Two-token BF16 ChannelMix: one submission, shared streamed weight tiles."""
+
 import argparse
 import json
 import hashlib
@@ -13,21 +14,32 @@ from aie.iron.device import Tile
 from aie.helpers.taplib import TensorAccessPattern as TAP
 from rwkv7_common import KERNEL_ROOT, typ, external
 
+
 def bt(n):
     return np.ndarray[(n,), np.dtype[bfloat16]]
 
+
 @iron.jit
-def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
-           *, projection_input: CompileTime[bool] = False, quantized: CompileTime[bool] = False,
-           projection_stride: CompileTime[int] = 4096):
+def design(
+    x: In,
+    parameters: In,
+    weights: In,
+    fp32: InOut,
+    bf16: Out,
+    *,
+    projection_input: CompileTime[bool] = False,
+    projection_stride: CompileTime[int] = 4096,
+):
     if projection_stride not in (4096, 61440):
         raise ValueError("Unsupported projection input stride")
-    wt = (lambda n: np.ndarray[(n,), np.dtype[np.uint8]]) if quantized else bt
-    tile = 4160 if quantized else 4096
-    stripe, count = 1024 * tile, 8192 * tile
-    matrix_stack = 18432 if quantized else 12288
+    wt = bt
+    tile = 4096
+    stripe, count = (1024 * tile, 8192 * tile)
+    matrix_stack = 12288
     packed = ObjectFifo(typ(6144), name="norm_input", depth=1)
-    inputs = packed.prod().join([0, 2048, 4096], tile=Tile(0, 1), obj_types=[typ(2048)] * 3)
+    inputs = packed.prod().join(
+        [0, 2048, 4096], tile=Tile(0, 1), obj_types=[typ(2048)] * 3
+    )
     normalized = ObjectFifo(typ(2048), name="normalized", depth=1)
     params = ObjectFifo(typ(4096), name="mix_parameters", depth=1)
     joins = params.prod().join([0, 2048], tile=Tile(1, 1), obj_types=[typ(2048)] * 2)
@@ -35,15 +47,23 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
     mx = mix_out.cons().forward(tile=Tile(2, 1), name="mixed_fanout")
     final_shift = ObjectFifo(typ(2048), name="final_shift", depth=1)
     norm = external("rwkv7_layer_norm", "norm_fp32.cc", [typ(6144), typ(2048)])
-    mix = external("rwkv7_prefill_mix_tokens", "prefill_mix_bf16.cc",
-                   [typ(2048), typ(4096), typ(2048), bt(4096), np.int32], optimization="-O3")
+    mix = external(
+        "rwkv7_prefill_mix_tokens",
+        "prefill_mix_bf16.cc",
+        [typ(2048), typ(4096), typ(2048), bt(4096), np.int32],
+        optimization="-O3",
+    )
     init = mix.object_file.bind("rwkv7_prefill_shift_init", [typ(4096), typ(2048)])
-    key = external("rwkv7_prefill_key_int8" if quantized else "rwkv7_prefill_key",
-                   "prefill_channel_int8.cc" if quantized else "prefill_channel_bf16.cc",
-                   [bt(4096), wt(tile), typ(4096), np.int32, np.int32], optimization="-O3",
-                   stack_size=16384 if quantized else 8192)
-    value = key.object_file.bind("rwkv7_prefill_value_int8" if quantized else "rwkv7_prefill_value",
-                   [bt(16384), wt(tile), typ(1024), np.int32, np.int32])
+    key = external(
+        "rwkv7_prefill_key",
+        "prefill_channel_bf16.cc",
+        [bt(4096), wt(tile), typ(4096), np.int32, np.int32],
+        optimization="-O3",
+        stack_size=8192,
+    )
+    value = key.object_file.bind(
+        "rwkv7_prefill_value", [bt(16384), wt(tile), typ(1024), np.int32, np.int32]
+    )
     zero_key = key.object_file.bind("rwkv7_prefill_zero4096", [typ(4096)])
     zero_value = key.object_file.bind("rwkv7_prefill_zero1024", [typ(1024)])
     relu = key.object_file.bind("rwkv7_prefill_activate4096", [typ(4096), bt(4096)])
@@ -52,26 +72,28 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
     wv = [ObjectFifo(wt(tile), name=f"vw{i}", depth=2) for i in range(4)]
     raw_out = ObjectFifo(typ(16384), name="raw", depth=1)
     act_out = ObjectFifo(bt(16384), name="activated", depth=1)
-    # Contiguous core stripes: [core, token, channel]. Matrix/residual kernels
-    # address that layout directly; diagnostic drains scatter to token-major.
-    kr = raw_out.prod().join([i * 4096 for i in range(4)], tile=Tile(3, 1),
-                           obj_types=[typ(4096)] * 4)
-    ka = act_out.prod().join([i * 4096 for i in range(4)], tile=Tile(4, 1),
-                           obj_types=[bt(4096)] * 4)
+    kr = raw_out.prod().join(
+        [i * 4096 for i in range(4)], tile=Tile(3, 1), obj_types=[typ(4096)] * 4
+    )
+    ka = act_out.prod().join(
+        [i * 4096 for i in range(4)], tile=Tile(4, 1), obj_types=[bt(4096)] * 4
+    )
     proj = ObjectFifo(typ(4096), name="projected", depth=1)
-    vp = proj.prod().join([i * 1024 for i in range(4)], tile=Tile(6, 1),
-                         obj_types=[typ(1024)] * 4)
+    vp = proj.prod().join(
+        [i * 1024 for i in range(4)], tile=Tile(6, 1), obj_types=[typ(1024)] * 4
+    )
     residual_x = ObjectFifo(typ(4096), name="residual_x", depth=1)
     final = ObjectFifo(typ(4096), name="final", depth=1)
 
     def normalize(p, o, f):
         for _ in range_(2):
-            pv, ov = p.acquire(1), o.acquire(1)
+            pv, ov = (p.acquire(1), o.acquire(1))
             f(pv, ov)
             p.release(1)
             o.release(1)
+
     def mixes(x, p, s, o, initialize, f):
-        pv, sv, ov = p.acquire(1), s.acquire(1), o.acquire(1)
+        pv, sv, ov = (p.acquire(1), s.acquire(1), o.acquire(1))
         initialize(pv, sv)
         for token in range_(2):
             xv = x.acquire(1)
@@ -80,8 +102,9 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
         p.release(1)
         s.release(1)
         o.release(1)
+
     def keys(x, w, r, a, f, z, activate):
-        xv, rv, av = x.acquire(1), r.acquire(1), a.acquire(1)
+        xv, rv, av = (x.acquire(1), r.acquire(1), a.acquire(1))
         z(rv)
         for row in range_(128):
             for col in range_(8):
@@ -92,8 +115,9 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
         x.release(1)
         r.release(1)
         a.release(1)
+
     def values(x, w, p, f, z):
-        xv, pv = x.acquire(1), p.acquire(1)
+        xv, pv = (x.acquire(1), p.acquire(1))
         z(pv)
         for row in range_(32):
             for col in range_(32):
@@ -102,81 +126,191 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
                 w.release(1)
         x.release(1)
         p.release(1)
+
     def residual(x, p, o, f):
-        xv, pv, ov = x.acquire(1), p.acquire(1), o.acquire(1)
+        xv, pv, ov = (x.acquire(1), p.acquire(1), o.acquire(1))
         f(xv, pv, ov)
         x.release(1)
         p.release(1)
         o.release(1)
+
     workers = [
-        Worker(normalize, [packed.cons(), normalized.prod(), norm], tile=Tile(0, 2), stack_size=12288),
-        Worker(mixes, [normalized.cons(), params.cons(), final_shift.prod(), mix_out.prod(), init, mix],
-               tile=Tile(1, 2), stack_size=12288),
+        Worker(
+            normalize,
+            [packed.cons(), normalized.prod(), norm],
+            tile=Tile(0, 2),
+            stack_size=12288,
+        ),
+        Worker(
+            mixes,
+            [
+                normalized.cons(),
+                params.cons(),
+                final_shift.prod(),
+                mix_out.prod(),
+                init,
+                mix,
+            ],
+            tile=Tile(1, 2),
+            stack_size=12288,
+        ),
     ]
-    workers += [Worker(keys, [mx.cons(), wk[i].cons(), kr[i].prod(), ka[i].prod(), key, zero_key, relu],
-                       tile=Tile(i, 3), stack_size=matrix_stack) for i in range(4)]
-    workers += [Worker(values, [act_out.cons(), wv[i].cons(), vp[i].prod(), value, zero_value],
-                       tile=Tile(i + 4, 3), stack_size=matrix_stack) for i in range(4)]
-    workers += [Worker(residual, [residual_x.cons(), proj.cons(), final.prod(), add],
-                       tile=Tile(7, 2), stack_size=12288)]
+    workers += [
+        Worker(
+            keys,
+            [mx.cons(), wk[i].cons(), kr[i].prod(), ka[i].prod(), key, zero_key, relu],
+            tile=Tile(i, 3),
+            stack_size=matrix_stack,
+        )
+        for i in range(4)
+    ]
+    workers += [
+        Worker(
+            values,
+            [act_out.cons(), wv[i].cons(), vp[i].prod(), value, zero_value],
+            tile=Tile(i + 4, 3),
+            stack_size=matrix_stack,
+        )
+        for i in range(4)
+    ]
+    workers += [
+        Worker(
+            residual,
+            [residual_x.cons(), proj.cons(), final.prod(), add],
+            tile=Tile(7, 2),
+            stack_size=12288,
+        )
+    ]
+
     def seq(x, p, w, f, h, hx, hw, hb, hc, hs, hkw, hvw, hm, hr, ha, hv, hres, hy, ho):
-        input_tap = (TAP((projection_stride + 4096,), 2048, [2, 1, 1, 2048], [projection_stride, 0, 0, 1])
-                     if projection_input else None)
+        input_tap = (
+            TAP(
+                (projection_stride + 4096,),
+                2048,
+                [2, 1, 1, 2048],
+                [projection_stride, 0, 0, 1],
+            )
+            if projection_input
+            else None
+        )
         hx.fill(x, tap=input_tap)
         for handle, offset in ((hw, 0), (hb, 2048)):
             handle.fill(p, tap=TAP((6144,), offset, [2, 1, 1, 2048], [0, 0, 0, 1]))
         hc.fill(p, tap=TAP((6144,), 4096, [1, 1, 1, 2048], [0, 0, 0, 1]))
         hs.fill(f, tap=TAP((26624,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]))
         for i in range(4):
-            hkw[i].fill(w, tap=TAP((count,), i * stripe, [1, 1, 1, stripe], [0, 0, 0, 1]))
-            hvw[i].fill(w, tap=TAP((count,), count // 2 + i * stripe, [1, 1, 1, stripe], [0, 0, 0, 1]))
+            hkw[i].fill(
+                w, tap=TAP((count,), i * stripe, [1, 1, 1, stripe], [0, 0, 0, 1])
+            )
+            hvw[i].fill(
+                w,
+                tap=TAP(
+                    (count,), count // 2 + i * stripe, [1, 1, 1, stripe], [0, 0, 0, 1]
+                ),
+            )
         hm.drain(h, tap=TAP((20480,), 0, [1, 1, 1, 4096], [0, 0, 0, 1]), wait=True)
-        hr.drain(f, tap=TAP((26624,), 2048, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True)
-        ha.drain(h, tap=TAP((20480,), 4096, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True)
-        hv.drain(f, tap=TAP((26624,), 18432, [4, 2, 1, 512], [512, 2048, 0, 1]), wait=True)
+        hr.drain(
+            f, tap=TAP((26624,), 2048, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True
+        )
+        ha.drain(
+            h, tap=TAP((20480,), 4096, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True
+        )
+        hv.drain(
+            f, tap=TAP((26624,), 18432, [4, 2, 1, 512], [512, 2048, 0, 1]), wait=True
+        )
         hres.fill(x, tap=input_tap)
         hy.drain(f, tap=TAP((26624,), 22528, [1, 1, 1, 4096], [0, 0, 0, 1]), wait=True)
         ho.drain(f, tap=TAP((26624,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]), wait=True)
-    return Program(iron.get_current_device(), Runtime(seq, [
-        typ(projection_stride + 4096 if projection_input else 4096), typ(6144), wt(count), typ(26624), bt(20480),
-        *[f.prod() for f in inputs], *[f.prod() for f in joins],
-        [f.prod() for f in wk], [f.prod() for f in wv],
-        mix_out.cons(), raw_out.cons(), act_out.cons(), proj.cons(),
-        residual_x.prod(), final.cons(), final_shift.cons(),
-    ]), workers=workers).resolve_program()
+
+    return Program(
+        iron.get_current_device(),
+        Runtime(
+            seq,
+            [
+                typ(projection_stride + 4096 if projection_input else 4096),
+                typ(6144),
+                wt(count),
+                typ(26624),
+                bt(20480),
+                *[f.prod() for f in inputs],
+                *[f.prod() for f in joins],
+                [f.prod() for f in wk],
+                [f.prod() for f in wv],
+                mix_out.cons(),
+                raw_out.cons(),
+                act_out.cons(),
+                proj.cons(),
+                residual_x.prod(),
+                final.cons(),
+                final_shift.cons(),
+            ],
+        ),
+        workers=workers,
+    ).resolve_program()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--int8", action="store_true", help="Compile W8A16 variants instead of BF16")
     parser.add_argument("--recurrence-input", action="store_true")
     args = parser.parse_args()
-    quantized = args.int8
-    layouts = ((True, 4096), (True, 61440)) if args.recurrence_input else ((False, 4096), (True, 4096))
+    layouts = (
+        ((True, 4096), (True, 61440))
+        if args.recurrence_input
+        else ((False, 4096), (True, 4096))
+    )
     for projection_input, stride in layouts:
         recurrence_input = stride == 61440
-        suffix = "-recurrence-input" if recurrence_input else "-projection-input" if projection_input else ""
-        path = KERNEL_ROOT / (("int8" if quantized else "bf16") + "-prefill-ffn-b2" + suffix)
+        suffix = (
+            "-recurrence-input"
+            if recurrence_input
+            else "-projection-input" if projection_input else ""
+        )
+        path = KERNEL_ROOT / ("bf16-prefill-ffn-b2" + suffix)
         path.mkdir(parents=True, exist_ok=True)
-        design.specialize(projection_input=projection_input, quantized=quantized, projection_stride=stride).compile(
-            path / "design.xclbin", path / "instructions.bin")
+        design.specialize(
+            projection_input=projection_input, projection_stride=stride
+        ).compile(path / "design.xclbin", path / "instructions.bin")
         pdi = (path / "design.prj/main.pdi").read_bytes()
         if recurrence_input:
-            shared = KERNEL_ROOT / (("int8" if quantized else "bf16") + "-prefill-ffn-b2-projection-input")
+            shared = KERNEL_ROOT / ("bf16-prefill-ffn-b2-projection-input")
             if pdi != (shared / "design.prj/main.pdi").read_bytes():
-                raise RuntimeError("FFN instruction variants have different device programs")
-            # Keep this variant's DMA instructions, but use the byte-identical
-            # xclbin/UUID so C++ sessions can share its hardware context.
+                raise RuntimeError(
+                    "FFN instruction variants have different device programs"
+                )
             shutil.copy2(shared / "design.xclbin", path / "design.xclbin")
-        (path / "config.json").write_text(json.dumps(dict(
-            schema_version=1, batch=2, channels=2048, hidden=8192,
-            pdi_sha256=hashlib.sha256(pdi).hexdigest(),
-            weights="int8" if quantized else "bfloat16", activation="bfloat16", state="float32",
-            layout="token_major", runs_per_batch=1,
-            input_layout="recurrence_projection_pairs" if recurrence_input else "projection_residual_pairs" if projection_input else "token_major",
-            **(dict(input_stride=stride, shared_program=shared.name) if recurrence_input else {}),
-            fp32_arena_floats=26624, bf16_arena_elements=20480,
-            fp32_offsets=dict(shift=0, raw=2048, projected=18432, output=22528),
-            bf16_offsets=dict(mixed=0, activated=4096),
-            **(dict(tile_bytes=4160, scale="fp16_expanded_fp32") if quantized else {}),
-        )) + "\n")
+        (path / "config.json").write_text(
+            json.dumps(
+                dict(
+                    schema_version=1,
+                    batch=2,
+                    channels=2048,
+                    hidden=8192,
+                    pdi_sha256=hashlib.sha256(pdi).hexdigest(),
+                    weights="bfloat16",
+                    activation="bfloat16",
+                    state="float32",
+                    layout="token_major",
+                    runs_per_batch=1,
+                    input_layout=(
+                        "recurrence_projection_pairs"
+                        if recurrence_input
+                        else (
+                            "projection_residual_pairs"
+                            if projection_input
+                            else "token_major"
+                        )
+                    ),
+                    **(
+                        dict(input_stride=stride, shared_program=shared.name)
+                        if recurrence_input
+                        else {}
+                    ),
+                    fp32_arena_floats=26624,
+                    bf16_arena_elements=20480,
+                    fp32_offsets=dict(shift=0, raw=2048, projected=18432, output=22528),
+                    bf16_offsets=dict(mixed=0, activated=4096),
+                )
+            )
+            + "\n"
+        )
         print(path, flush=True)

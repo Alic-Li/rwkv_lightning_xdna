@@ -22,7 +22,7 @@ def design(state: InOut, aux: InOut, first: In, weights: In, residual: In):
     dot = external("rwkv7_recurrence_projection_tile", "prefill_recurrence_projection_bf16.cc",
                    [typ(8192), wt(4096), typ(1024), np.int32, np.int32], optimization="-O3")
     zero = dot.object_file.bind("rwkv7_prefill_output_zero", [typ(1024)])
-    add = dot.object_file.bind("rwkv7_prefill_output_int8_finish", [typ(1024), typ(8192), np.int32])
+    add = dot.object_file.bind("rwkv7_pair_projection_residual", [typ(1024), typ(8192), np.int32])
     copies = [dot.object_file.bind(f"rwkv7_copy{n}", [typ(n), typ(n)]) for n in (2560, 1536)]
     sin = [ObjectFifo(typ(n * 4096), name=f"state_input_group_{i}", depth=1) for i, n in enumerate((4, 3))]
     ain = [ObjectFifo(typ(n * 3840), name=f"aux_input_group_{i}", depth=1) for i, n in enumerate((4, 3))]

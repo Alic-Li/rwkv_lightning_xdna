@@ -62,7 +62,7 @@ struct DecodeGraph::Impl {
   struct MutableAllocation {
     xdna::DeviceBuffer root;
     Vector initial;
-    size_t token_bytes = 0; // Nonzero for two adjacent activation copies.
+    size_t token_bytes = 0; // Stride between adjacent activation copies.
   };
   std::vector<RunBinding> bindings;
   std::vector<MutableAllocation> mutable_allocations;

@@ -32,7 +32,7 @@ Vector projection(const Tensor &logical, bool transposed, size_t first_output,
   append_projection(packed, logical, transposed, first_output, rows, reduction);
   return packed;
 }
-Vector channel_mix(const Tensor &key, const Tensor &value, bool value_k_major) {
+Vector channel_mix(const Tensor &key, const Tensor &value) {
   if (key.shape != std::vector<size_t>{8192, 2048} ||
       value.shape != std::vector<size_t>{2048, 8192})
     throw std::invalid_argument("Invalid ChannelMix weights");
@@ -40,17 +40,6 @@ Vector channel_mix(const Tensor &key, const Tensor &value, bool value_k_major) {
   packed.reserve(33554432);
   append_projection(packed, key, false, 0, 8192, 2048);
   append_projection(packed, value, false, 0, 2048, 8192);
-  if (value_k_major) {
-    Vector reordered(packed);
-    for (size_t worker = 0; worker < 4; ++worker)
-      for (size_t row = 0; row < 32; ++row)
-        for (size_t col = 0; col < 32; ++col) {
-          const size_t base = 16777216 + worker * 4194304;
-          std::copy_n(packed.begin() + base + (row * 32 + col) * 4096, 4096,
-                      reordered.begin() + base + (col * 32 + row) * 4096);
-        }
-    return reordered;
-  }
   return packed;
 }
 Vector rkv(const std::array<const Tensor *, 3> &logical) {

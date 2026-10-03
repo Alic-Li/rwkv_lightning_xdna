@@ -1,17 +1,16 @@
-# Explicit offline targets: ordinary host builds never compile device kernels.
-add_custom_target(kernels-release
-    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
-        --output "${RWKV_XDNA_KERNEL_DIR}"
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+# Host builds never compile kernels or dispatch the device implicitly.
+function(rwkv_kernel_target name)
+    add_custom_target(${name}
+        COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
+            --output "${RWKV_XDNA_KERNEL_DIR}" ${ARGN}
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+endfunction()
+rwkv_kernel_target(kernels-release)
+rwkv_kernel_target(kernels-release-int8-ffn --int8-ffn)
+rwkv_kernel_target(kernels-release-prefill-batch2 --prefill-batch2)
+rwkv_kernel_target(kernels-release-prefill-chunk4 --prefill-chunk4)
 add_custom_target(rwkv-release DEPENDS rwkv-cli kernels-release)
-add_custom_target(kernels-release-int8-ffn
-    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
-        --output "${RWKV_XDNA_KERNEL_DIR}" --int8-ffn
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
-add_custom_target(kernels-release-int8-ffn-output
-    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
-        --output "${RWKV_XDNA_KERNEL_DIR}" --int8-ffn-output
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+
 if(BUILD_TESTING)
     foreach(tier smoke all)
         add_custom_target(kernels-test-${tier}
@@ -21,24 +20,3 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
     endforeach()
 endif()
-
-add_custom_target(kernels-release-prefill-batch2
-    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
-        --output "${RWKV_XDNA_KERNEL_DIR}" --prefill-batch2
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
-
-add_custom_target(kernels-release-int8-prefill
-    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
-        --output "${RWKV_XDNA_KERNEL_DIR}" --int8-ffn-output --prefill-batch2
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
-
-# Opt-in experiment; no change to kernels-release/default decode.
-add_custom_target(kernels-release-prefill-chunk4
-    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
-        --output "${RWKV_XDNA_KERNEL_DIR}" --prefill-chunk4
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)
-
-add_custom_target(kernels-release-int8-prefill-chunk4
-    COMMAND "${RWKV_XDNA_PYTHON}" "${PROJECT_SOURCE_DIR}/tools/compile/rwkv7_optimized.py"
-        --output "${RWKV_XDNA_KERNEL_DIR}" --prefill-chunk4 --int8-ffn-output
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" USES_TERMINAL VERBATIM)

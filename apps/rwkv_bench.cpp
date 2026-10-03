@@ -37,17 +37,16 @@ static Json distribution(std::vector<double> values) {
 }
 int main(int argc, char **argv) {
   try {
-    bool output_int8 = false, int8 = false, batch2 = false, chunk4 = false;
+    bool int8 = false, batch2 = false, chunk4 = false;
     while (argc > 1 && std::string(argv[argc - 1]).rfind("--", 0) == 0) {
       const std::string flag(argv[--argc]);
       if (flag == "--prefill-chunk4") chunk4 = batch2 = true;
       else if (flag == "--prefill-batch2") batch2 = true;
-      else if (flag == "--int8-ffn-output") output_int8 = int8 = true;
       else if (flag == "--int8-ffn") int8 = true;
       else throw std::invalid_argument("Unknown flag: " + flag);
     }
     if (argc != 3 && argc != 6)
-      throw std::invalid_argument("Usage: rwkv-bench MODEL KERNELS [PREFILL_TOKENS DECODE_TOKENS TRIALS] [--int8-ffn|--int8-ffn-output] [--prefill-batch2|--prefill-chunk4]");
+      throw std::invalid_argument("Usage: rwkv-bench MODEL KERNELS [PREFILL_TOKENS DECODE_TOKENS TRIALS] [--int8-ffn] [--prefill-batch2|--prefill-chunk4]");
     if (std::getenv("RWKV_XDNA_PROFILE"))
       throw std::invalid_argument("Unset RWKV_XDNA_PROFILE for uninstrumented benchmarks; use rwkv-cli for stage profiles");
     const size_t prefill = argc == 6 ? count(argv[3]) : 32;
@@ -60,8 +59,7 @@ int main(int argc, char **argv) {
     Model model(weights, *backend);
     auto initial = model.initial_state();
     start = Clock::now();
-    DecodeGraph graph(weights, argv[2], output_int8 ? WeightMode::Int8FFNOutput :
-                     int8 ? WeightMode::Int8FFN : WeightMode::BFloat16,
+    DecodeGraph graph(weights, argv[2], int8 ? WeightMode::Int8FFN : WeightMode::BFloat16,
                      chunk4 ? PrefillMode::Chunked4 : batch2 ? PrefillMode::Batched2 : PrefillMode::Sequential);
     double build_s = seconds(start);
     graph.load_state(initial);
@@ -108,8 +106,7 @@ int main(int argc, char **argv) {
     }
     auto stats = graph.stats();
     Json result = {{"schema_version", 1}, {"model", argv[1]},
-      {"kernels", argv[2]}, {"precision", output_int8 ? "int8_ffn_output_bf16_others_fp32_state" :
-        int8 ? "int8_ffn_bf16_others_fp32_state" : "bf16_weights_inputs_fp32_state"},
+      {"kernels", argv[2]}, {"precision", int8 ? "w8a8_ffn_int32_dot_fp32_partial_others_bf16_fp32_state" : "bf16_weights_inputs_fp32_state"},
       {"workload", "fixed synthetic token IDs"},
       {"prefill_mode", chunk4 ? "chunk4_ffn_final_logits" : batch2 ? "batch2_ffn_final_logits" : "sequential_all_logits"},
       {"prefill_chunk_tokens", stats.prefill_chunk_tokens}, {"prefill_chunk_runs", stats.prefill_chunk_runs},

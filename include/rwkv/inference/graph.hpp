@@ -3,10 +3,10 @@
 #include "rwkv/inference/model.hpp"
 #include <functional>
 namespace rwkv::inference {
-// Int8FFN quantizes ChannelMix key/value weights only. Other matrices retain
-// BF16; accumulation, recurrent state and nonlinear operations remain FP32.
-// Int8FFNOutput also quantizes attention output weights; both modes are W8A16.
-enum class WeightMode { BFloat16, Int8FFN, Int8FFNOutput };
+// Int8FFN uses the fixed W8A8 streaming FFN: per-output INT8 weights,
+// dynamic block-256 INT8 activations, INT32 dots and FP32 scaled partial sums.
+// Other projections stay BF16; recurrent state and nonlinear outputs stay FP32.
+enum class WeightMode { BFloat16, Int8FFN };
 enum class PrefillMode { Sequential, Batched2, Chunked4 };
 struct GraphStats {
   size_t nodes = 0, buffers = 0, replays = 0;
@@ -30,7 +30,7 @@ class DecodeGraph {
 public:
   // Explicit host reference graph.
   DecodeGraph(const Weights &, RecurrentBackend &);
-  // Resident NPU graph; INT8 modes are experimental pending quality validation.
+  // Resident NPU graph; INT8 language quality remains subject to validation.
   // No host arithmetic backend or fallback.
   DecodeGraph(const Weights &, const std::filesystem::path &resident_artifacts,
               WeightMode = WeightMode::BFloat16,
@@ -54,7 +54,7 @@ public:
   void load_state(const State &);
   State export_state() const;
   Vector replay_resident(int token);
-  // Batched2 or experimental Chunked4 constructor required; all NPU weight modes.
+  // BF16 with a Batched2 or Chunked4 constructor required.
   // Returns final-token logits; empty input is a no-op. Incomplete chunks use
   // resident decode transitions. No trace hooks.
   Vector prefill_resident(const std::vector<int> &tokens);

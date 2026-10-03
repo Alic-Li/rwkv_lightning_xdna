@@ -33,7 +33,7 @@ ctest --preset test
 主机构建；首次运行还需 `release-kernels`，或使用 `release-full`。
 
 普通主机构建不会自动编译设备 kernel。`release-full` 编译 CLI 和唯一生产 kernel
-清单，不编译通用测试配置。生产 kernel 由 `rwkv7_optimized.py` 顺序编译八个阶段，
+清单，不编译通用测试配置。生产 kernel 由 `rwkv7_optimized.py` 按显式清单顺序编译 decode/prefill 阶段，
 产物保留在 `build/kernels/rwkv7-bf16/`。
 
 可选 prefill 目标（默认构建不启用这些调度）：
@@ -41,14 +41,19 @@ ctest --preset test
 ```bash
 cmake --build --preset release --target kernels-release-prefill-batch2
 cmake --build --preset release --target kernels-release-prefill-chunk4
-cmake --build --preset release --target kernels-release-int8-prefill-chunk4
 ```
 
-最后一个目标包含 BF16 和两种 W8A16 模式。为保留生产目录，可离线输出到独立目录：
+INT8 只保留 W8A8 streaming FFN，使用逐 token prefill：
 
 ```bash
-.venv/bin/python tools/compile/rwkv7_optimized.py --output build/kernels/chunk4 \
-  --prefill-chunk4 --int8-ffn-output
+cmake --build --preset release-int8-ffn-kernels
+```
+
+需要 BF16 chunk4 和 INT8 decode 的完整目录，可一次离线编译：
+
+```bash
+.venv/bin/python tools/compile/rwkv7_optimized.py --output build/kernels/rwkv7 \
+  --prefill-chunk4 --int8-ffn
 ```
 
 完整编译只证明产物生成；NPU 数值、状态与性能验收见[推理说明](inference.md)。
