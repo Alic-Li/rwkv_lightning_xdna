@@ -83,5 +83,39 @@
     "Current BF16 and INT8-FFN production already fuse seven recurrent lanes plus eight output projection workers into a 31-core graph. INT8-FFN-output uses a different recurrence/output route."
   ],
   "decision": "Keep default production artifacts untouched. Preserve isolated experiments and measurements; do not promote this 8-W2 topology.",
-  "raw_logs": "reports/runs/spatial-decode-2026-10-03"
+  "raw_logs": "reports/runs/spatial-decode-2026-10-03",
+  "four_worker_control": {
+    "order": "A/C/C/A",
+    "workload": "Same 8 prefill / 48 decode / 2 trials / 4 warmup as main comparison",
+    "production": {
+      "decode_process_means_ms": [
+        198.30073663541665,
+        198.38374916666672
+      ],
+      "decode_mean_ms": 198.3422429010417,
+      "samples": 192
+    },
+    "same_local_gather_four_W2": {
+      "decode_process_means_ms": [
+        203.89974676041666,
+        203.3993279270833
+      ],
+      "decode_mean_ms": 203.64953734374998,
+      "samples": 192
+    },
+    "latency_increase_percent": 2.6758265738460185,
+    "stage": "Oracle/shift/replay/guards passed max_abs=2.42144e-07; 400 samples mean1870.53us",
+    "interpretation": "New parameter/local-gather topology itself costs end-to-end time. Across these tested variants production 4+4 remains best; not a universal parallelism limit."
+  },
+  "unsupported_followups": [
+    "All twelve matrix-core trace: col0 has no free S2MM; egress7 fails routing. Pair traces with egress2/3 and single last-W2 trace egress3 also fail routing. No candidate device stall percentages inferred.",
+    "Residual forwarded by norm to two gathers exceeds producer DMA output budget (3 > 2), even with norm/mix pinned adjacent because norm_pair also has diagnostic consumer. Single residual stream split to separate residual inputs avoids that explicit problem but hits compute-peer placement, then an input S2MM capacity error with added activation memory fanout. Not dispatched; abandoned code stays out of retained compiler."
+  ],
+  "reproduce": {
+    "compile": "PATH=\"$PWD/.venv/bin:$PATH\" MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie RWKV_XDNA_FFN_VALUE_CORES=8 RWKV_XDNA_KERNEL_DIR=\"$PWD/build/kernels/spatial-w2-eight\" .venv/bin/python tools/compile/rwkv7_channel_mix_spatial.py",
+    "stage": "./build/test/rwkv-channel-mix-test build/kernels/spatial-w2-eight 400",
+    "model_root": "Symlink unchanged production subdirectories into the candidate root; never replace or compile through production symlinks. Set VALUE_CORES=4 for control.",
+    "bench": "./build/release/rwkv-bench MODEL CANDIDATE_ROOT 8 48 2",
+    "regression": "./build/test/rwkv-cleanup-regression MODEL CANDIDATE_ROOT verify build/channel-key-cache-baseline.bin"
+  }
 }

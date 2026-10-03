@@ -59,15 +59,27 @@ void validate_resident_artifacts(const std::filesystem::path &root,
                     {"quantization", "symmetric_per_output_127"},
                     {"scale", "fp16_expanded_fp32"},
                     {"activation_dtype", "bfloat16"}, {"accumulator_dtype", "float32"}});
-  else
+  else {
+    // A separately compiled, ABI-compatible single-token spatial experiment.
+    // Never reinterpret an arbitrary core count as a supported artifact.
+    std::ifstream input(root / "bf16-channel-mix/config.json");
+    nlohmann::json config;
+    if (!input)
+      throw std::runtime_error("Missing production artifact: bf16-channel-mix");
+    input >> config;
+    const bool spatial = config.value("value_cores", 0) == 8;
+    if (spatial)
+      check_artifact(root, "bf16-channel-mix",
+                     {{"experimental", "spatial_w2_8_local_gather"}});
     check_artifact(root, "bf16-channel-mix",
                  {{"schema_version", 1},
                   {"dtype", "bfloat16"},
                   {"channels", 2048},
                   {"hidden", 8192},
                   {"key_cores", 4},
-                  {"value_cores", 4},
+                  {"value_cores", spatial ? 8 : 4},
                   {"exact_fp32", false}});
+  }
   if (mode == WeightMode::Int8FFNOutput)
     check_artifact(root, "int8-projection-residual",
                  {{"schema_version", 1}, {"dtype", "int8"},
