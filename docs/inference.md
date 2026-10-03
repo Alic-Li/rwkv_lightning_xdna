@@ -16,7 +16,8 @@ FP16。该能力核查不代表整个性能目标已完成，见
 embedding 查表、tokenizer、sampler、权重加载和调度在 CPU；模型算术全部在 NPU。
 没有 CPU 算子回退。NPU 纯 FP32、hybrid、逐节点 NPU eager 和独立 sequence prefill
 已删除。CPU FP32 后端仅作为显式参考实现，继续支持 eager/graph 和分层 prefill。
-NPU prefill 与 decode 复用同一个逐 token 状态转移。
+NPU 默认 prefill 与 decode 复用逐 token 状态转移；显式 `--prefill batch2` 使用
+分层两-token 调度，在 FFN 内共享矩阵权重流，attention/WKV 仍按 token 更新。
 
 当前支持 C=2048、32×64 heads、FFN=8192、词表65536、低秩维度不超过256的模型。
 已验证 checkpoint 为 `rwkv7-g1k-1.5b-20260930-ctx25600.pth`，24层、123 runs/token。
@@ -80,6 +81,33 @@ uch as PyTorch and TensorFlow."\n\nChinese:' \
 `--tokens 1,2,7,9 --dump-logits FILE` 用于导出每个输入 token 后的 FP32 logits。
 CLI 单独报告建图、prefill、TTFT 和后续 decode 时间。生成32个 token 时，首 token 来自
 prefill，后续只有31次 decode forward。
+
+BF16 两-token prefill（可选，默认不变）：
+
+```bash
+cmake --build --preset release --target kernels-release-prefill-batch2
+./build/release/rwkv-cli --model "$MODEL" --prompt 'Hello world' \
+  --prefill batch2 --top-k 1 --max-tokens 32
+./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 32 24 2 --prefill-batch2
+```
+
+`batch2` 每层先顺序完成两个 token 的 attention/WKV，再用一次 FFN 提交处理两行，
+共享已打包权重、session 和 FP32 recurrent state。仅增加 activation BO，奇数尾 token
+使用原 resident decode。只计算并下载最后一个 prompt token 的 logits，因此不兼容
+逐 token `--dump-logits`、trace/profile 或 INT8 weights。CPU 不支持此模式。
+C++ API 使用 `DecodeGraph(weights, root, WeightMode::BFloat16, PrefillMode::Batched2)`，
+先 `load_state`，再 `prefill_resident(tokens)`；空输入返回空向量且不改变状态。
+返回后可直接 `replay_resident`，也可 export/reset/branch。
+
+24层模型的 pair body 为218次提交，最后 logits 再加2次；32-token prompt 共3490次
+（109.0625/token），原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
+262144字节 logits。Benchmark JSON 分开报告 prefill 提交/host BO流量和 decode 指标；
+这些数值不包含设备内部 DMA，也不等于硬件带宽计数。
+2026-10-03 A/B/B/A 中，32-token prefill 平均6.532→4.009 s（1.63倍吞吐），
+decode 203.599→203.689 ms/token；额外常驻30,193,664字节、122个 root BO。
+加速同时包含 FFN batching 和跳过中间 logits head，不能归因于单一 kernel。
+完整 bitwise 回归、guard/oracle 和 A/B/B/A 性能见
+[整模型 prefill 验证](../reports/rwkv7-model-prefill-2026-10-03.json)。
 
 ## 缺少生产 kernel
 
@@ -183,7 +211,7 @@ FP32 state 使用 `[head,key,value]` 固定布局。`HOST_ONLY` BO 是 NPU 可�
 
 `rwkv-bench` 使用固定 token ID，先预热4步，再对每轮重新加载零状态。
 计时不含权重加载、建图、reset、采样和状态导出；这些阶段单独报告或在计时区外。
-当前 prefill 仍为逐 token resident replay，不能将其吞吐称为批量 GEMM prefill。
+默认 prefill 为逐 token resident replay；BF16 可显式开启下述 `batch2` FFN batching。
 
 ```bash
 cmake --build --preset release
@@ -222,9 +250,8 @@ cmake --build --preset test
 2026-10-03 的孤立阶段 A/B/B/A 中，key 每 token 从932.75降至469.96 µs，value
 从920.91降至461.81 µs。三个输入 pass（含 zero token / zero weight row）通过
 FP64 oracle、batch=1/2 逐位比较、输入/权重不可变性和 BO guard 检查。
-该 primitive 尚未接入整模型：NPU prefill 仍使用逐 token resident replay，不能将
-上述约2倍阶段吞吐作为整模型加速。接入还需要 batched norm/mix、attention projections、
-顺序 WKV state 更新和 prefill→decode 状态交接。详见
+上述约2倍是孤立阶段吞吐，不能直接作为整模型加速。后续 FFN 融合和整模型接入
+见下文及本文前面的 batch2 用法；attention projections 仍未 batch。详见
 [batched projection 证据](../reports/rwkv7-prefill-projection-2026-10-03.json)。
 
 在此基础上，`rwkv7_prefill_channel_mix.py` 将两个 token 的 norm/mix、key、ReLU²、
@@ -246,7 +273,7 @@ ReLU² BF16、residual 和 final shift 均逐位检查，另做 FP64 oracle、�
 reset/branch、不可变输入和 BO guard 检查。先前五次提交的分离方案未加速，已删除；
 最终300样本/组 A/B/B/A 中，每两个 token 为3.960→2.016 ms，阶段吞吐提升1.96倍。
 共享 ReLU² helper 的提取也通过 BF16 / INT8 FFN+output 的128步整模型回归。
-它尚未接入整模型 prefill，也未实现 INT8 batch；完整结果、
+该阶段现已通过上述 BF16 batch2 模式接入整模型；尚未实现 INT8 batch。阶段结果、
 驱动参数接口限制和未完成工作见 [fused FFN 证据](../reports/rwkv7-prefill-ffn-2026-10-03.json)。
 
 2026-10-03 首轮调优将 ChannelMix value 权重 FIFO 改为双缓冲，A/B/B/A 整模型

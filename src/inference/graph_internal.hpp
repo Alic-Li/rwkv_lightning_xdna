@@ -32,6 +32,7 @@ struct DecodeGraph::Impl {
   const Weights &weights;
   RecurrentBackend *backend;
   WeightMode weight_mode;
+  bool capture_prefill = false;
   std::vector<Buffer> buffers;
   std::vector<Node> nodes;
   int recording_layer = -1;
@@ -47,10 +48,26 @@ struct DecodeGraph::Impl {
   std::map<std::string, std::unique_ptr<xdna::Session>> sessions;
   std::vector<xdna::DeviceBuffer> device_buffers;
   std::vector<xdna::DeviceRun> runs;
+  enum class Stage { Norm, Mix, Attention, Recurrence, Output, FFN, Head };
+  struct RunBinding {
+    xdna::Session *session;
+    std::vector<xdna::DeviceBuffer> arguments;
+    Stage stage;
+  };
+  struct MutableAllocation {
+    xdna::DeviceBuffer root;
+    Vector initial;
+  };
+  std::vector<RunBinding> bindings;
+  std::vector<MutableAllocation> mutable_allocations;
+  std::vector<xdna::DeviceRun> prefill_body, prefill_head;
+  xdna::DeviceBuffer prefill_embedding, prefill_logits;
+  size_t prefill_run_count = 0;
   size_t resident_bytes = 0, upload_bytes = 0, download_bytes = 0, root_bos = 0;
   xdna::Session &session(const std::filesystem::path &root,
                          const std::string &name);
-  xdna::DeviceBuffer initialized(xdna::Session &s, const Vector &v);
+  xdna::DeviceBuffer initialized(xdna::Session &s, const Vector &v, bool shared = false);
+  void append_run(xdna::Session &, std::vector<xdna::DeviceBuffer>, Stage);
   xdna::DeviceBuffer initialized_bf16(xdna::Session &s, const Vector &v);
   struct ResidentLayout {
     std::map<size_t, std::vector<xdna::DeviceBuffer>> value_args;
@@ -59,6 +76,8 @@ struct DecodeGraph::Impl {
   void prepare_resident_arenas(const std::filesystem::path &, ResidentLayout &);
   void prepare_resident_runs(const std::filesystem::path &, ResidentLayout &);
   void prepare_resident(const std::filesystem::path &root);
+  void prepare_prefill(const std::filesystem::path &root);
+  Vector prefill(const std::vector<int> &tokens);
   Id allocate(size_t size);
   Id constant(const Vector &v);
   const Vector &read(Id id) const;
@@ -68,7 +87,8 @@ struct DecodeGraph::Impl {
   Id linear(Id x, const Tensor &w, bool transpose = false);
   Id recurrent(Id state, Id r, Id d, Id k, Id v, Id a, Id b);
   Impl(const Weights &w, RecurrentBackend *b,
-       const std::filesystem::path &resident, WeightMode = WeightMode::BFloat16);
+       const std::filesystem::path &resident, WeightMode = WeightMode::BFloat16,
+       PrefillMode = PrefillMode::Sequential);
   void validate_state(const State &state) const;
   void load_state(const State &state);
   State export_state() const;

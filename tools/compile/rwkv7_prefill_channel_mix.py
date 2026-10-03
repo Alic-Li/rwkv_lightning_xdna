@@ -4,7 +4,7 @@ import json
 import numpy as np
 from ml_dtypes import bfloat16
 import aie.iron as iron
-from aie.iron import In, InOut, Out, ObjectFifo, Worker, Runtime, Program
+from aie.iron import CompileTime, In, InOut, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.iron.device import Tile
 from aie.helpers.taplib import TensorAccessPattern as TAP
@@ -14,7 +14,8 @@ def bt(n):
     return np.ndarray[(n,), np.dtype[bfloat16]]
 
 @iron.jit
-def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out):
+def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
+           *, projection_input: CompileTime[bool] = False):
     packed = ObjectFifo(typ(6144), name="norm_input", depth=1)
     inputs = packed.prod().join([0, 2048, 4096], tile=Tile(0, 1), obj_types=[typ(2048)] * 3)
     normalized = ObjectFifo(typ(2048), name="normalized", depth=1)
@@ -107,7 +108,9 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out):
     workers += [Worker(residual, [residual_x.cons(), proj.cons(), final.prod(), add],
                        tile=Tile(7, 2), stack_size=12288)]
     def seq(x, p, w, f, h, hx, hw, hb, hc, hs, hkw, hvw, hm, hr, ha, hv, hres, hy, ho):
-        hx.fill(x)
+        input_tap = (TAP((8192,), 2048, [2, 1, 1, 2048], [4096, 0, 0, 1])
+                     if projection_input else None)
+        hx.fill(x, tap=input_tap)
         for handle, offset in ((hw, 0), (hb, 2048)):
             handle.fill(p, tap=TAP((6144,), offset, [2, 1, 1, 2048], [0, 0, 0, 1]))
         hc.fill(p, tap=TAP((6144,), 4096, [1, 1, 1, 2048], [0, 0, 0, 1]))
@@ -119,11 +122,11 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out):
         hr.drain(f, tap=TAP((26624,), 2048, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True)
         ha.drain(h, tap=TAP((20480,), 4096, [4, 2, 4, 512], [2048, 8192, 512, 1]), wait=True)
         hv.drain(f, tap=TAP((26624,), 18432, [4, 2, 1, 512], [512, 2048, 0, 1]), wait=True)
-        hres.fill(x)
+        hres.fill(x, tap=input_tap)
         hy.drain(f, tap=TAP((26624,), 22528, [1, 1, 1, 4096], [0, 0, 0, 1]), wait=True)
         ho.drain(f, tap=TAP((26624,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]), wait=True)
     return Program(iron.get_current_device(), Runtime(seq, [
-        typ(4096), typ(6144), bt(33554432), typ(26624), bt(20480),
+        typ(8192 if projection_input else 4096), typ(6144), bt(33554432), typ(26624), bt(20480),
         *[f.prod() for f in inputs], *[f.prod() for f in joins],
         [f.prod() for f in wk], [f.prod() for f in wv],
         mix_out.cons(), raw_out.cons(), act_out.cons(), proj.cons(),
@@ -131,15 +134,19 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out):
     ]), workers=workers).resolve_program()
 
 if __name__ == "__main__":
-    path = KERNEL_ROOT / "bf16-prefill-ffn-b2"
-    path.mkdir(parents=True, exist_ok=True)
-    design.compile(path / "design.xclbin", path / "instructions.bin")
-    (path / "config.json").write_text(json.dumps(dict(
-        schema_version=1, batch=2, channels=2048, hidden=8192,
-        weights="bfloat16", activation="bfloat16", state="float32",
-        layout="token_major", runs_per_batch=1,
-        fp32_arena_floats=26624, bf16_arena_elements=20480,
-        fp32_offsets=dict(shift=0, raw=2048, projected=18432, output=22528),
-        bf16_offsets=dict(mixed=0, activated=4096),
-    )) + "\n")
-    print(path, flush=True)
+    for projection_input in (False, True):
+        suffix = "-projection-input" if projection_input else ""
+        path = KERNEL_ROOT / ("bf16-prefill-ffn-b2" + suffix)
+        path.mkdir(parents=True, exist_ok=True)
+        design.specialize(projection_input=projection_input).compile(
+            path / "design.xclbin", path / "instructions.bin")
+        (path / "config.json").write_text(json.dumps(dict(
+            schema_version=1, batch=2, channels=2048, hidden=8192,
+            weights="bfloat16", activation="bfloat16", state="float32",
+            layout="token_major", runs_per_batch=1,
+            input_layout="projection_residual_pairs" if projection_input else "token_major",
+            fp32_arena_floats=26624, bf16_arena_elements=20480,
+            fp32_offsets=dict(shift=0, raw=2048, projected=18432, output=22528),
+            bf16_offsets=dict(mixed=0, activated=4096),
+        )) + "\n")
+        print(path, flush=True)

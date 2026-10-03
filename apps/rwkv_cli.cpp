@@ -38,8 +38,8 @@ void usage() {
          "  --decode graph|resident|eager  default resident on NPU, graph on "
          "CPU; resident keeps "
          "intermediates in NPU BOs\n"
-         "  --prefill sequence|decode  default decode; sequence available on "
-         "CPU\n"
+         "  --prefill sequence|decode|batch2  default decode; sequence available on "
+         "CPU; batch2 requires NPU BF16 and returns final prompt logits\n"
          "  --threads N             CPU threads, default 8\n"
          "  --tokens 1,2,3 --dump-logits FILE  diagnostic: dump FP32 logits "
          "after every input token\n";
@@ -178,9 +178,14 @@ int main(int argc, char **argv) {
     if (opts["--backend"] == "cpu" && !seen["--decode"])
       opts["--decode"] = "graph";
     if (opts["--backend"] == "npu" &&
-        (opts["--decode"] != "resident" || opts["--prefill"] != "decode"))
+        (opts["--decode"] != "resident" ||
+         (opts["--prefill"] != "decode" && opts["--prefill"] != "batch2")))
       throw std::runtime_error(
-          "NPU inference requires --decode resident --prefill decode");
+          "NPU inference requires --decode resident and --prefill decode or batch2");
+    if (opts["--prefill"] == "batch2" &&
+        (opts["--backend"] != "npu" || opts["--weights"] != "bf16" ||
+         !opts["--dump-logits"].empty()))
+      throw std::runtime_error("batch2 requires NPU BF16 and cannot dump per-token logits");
     rwkv::inference::Model model(weights, *backend);
     auto state = model.initial_state();
     if (opts["--decode"] != "graph" && opts["--decode"] != "resident" &&
@@ -202,7 +207,9 @@ int main(int argc, char **argv) {
                 ? rwkv::inference::WeightMode::Int8FFNOutput
                 : opts["--weights"] == "int8-ffn"
                 ? rwkv::inference::WeightMode::Int8FFN
-                : rwkv::inference::WeightMode::BFloat16);
+                : rwkv::inference::WeightMode::BFloat16,
+            opts["--prefill"] == "batch2" ? rwkv::inference::PrefillMode::Batched2
+                                         : rwkv::inference::PrefillMode::Sequential);
       else
         graph =
             std::make_unique<rwkv::inference::DecodeGraph>(weights, *backend);
@@ -240,8 +247,9 @@ int main(int argc, char **argv) {
     auto start = std::chrono::steady_clock::now();
     const double setup_before_prefill = graph_setup_seconds;
     rwkv::inference::Vector logits;
-    if (opts["--prefill"] != "sequence" && opts["--prefill"] != "decode")
-      throw std::runtime_error("--prefill must be sequence or decode");
+    if (opts["--prefill"] != "sequence" && opts["--prefill"] != "decode" &&
+        opts["--prefill"] != "batch2")
+      throw std::runtime_error("--prefill must be sequence, decode or batch2");
     auto save_logits = [&](const rwkv::inference::Vector &row) {
       if (dump.is_open()) {
         dump.write(reinterpret_cast<const char *>(row.data()),
@@ -250,7 +258,12 @@ int main(int argc, char **argv) {
           throw std::runtime_error("Logits write failed");
       }
     };
-    if (opts["--prefill"] == "sequence") {
+    if (opts["--prefill"] == "batch2") {
+      prepare_graph();
+      graph->load_state(state);
+      state_on_device = true;
+      logits = graph->prefill_resident(tokens);
+    } else if (opts["--prefill"] == "sequence") {
       for (size_t start = 0; start < tokens.size(); start += 16) {
         const size_t end = std::min(tokens.size(), start + 16);
         auto rows = model.prefill(

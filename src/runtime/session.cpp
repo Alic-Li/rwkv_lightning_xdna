@@ -74,6 +74,15 @@ struct DeviceBuffer::Impl {
       : root(std::move(allocation)), offset(start), bo(*root, bytes, start) {}
 };
 size_t DeviceBuffer::size() const { return impl_ ? impl_->bo.size() : 0; }
+std::optional<size_t> DeviceBuffer::offset_within(const DeviceBuffer &other) const {
+  if (!impl_ || !other.impl_ || impl_->root != other.impl_->root ||
+      impl_->offset < other.impl_->offset)
+    return std::nullopt;
+  const size_t offset = impl_->offset - other.impl_->offset;
+  if (offset > other.size() || size() > other.size() - offset)
+    return std::nullopt;
+  return offset;
+}
 DeviceBuffer DeviceBuffer::slice(size_t offset, size_t bytes) const {
   if (!bytes || offset > size() || bytes > size() - offset)
     throw std::invalid_argument("Device buffer slice out of bounds");

@@ -37,11 +37,17 @@ static Json distribution(std::vector<double> values) {
 }
 int main(int argc, char **argv) {
   try {
-    const bool output_int8 = argc > 1 && std::string(argv[argc - 1]) == "--int8-ffn-output";
-    const bool int8 = output_int8 || (argc > 1 && std::string(argv[argc - 1]) == "--int8-ffn");
-    if (int8) --argc;
+    bool output_int8 = false, int8 = false, batch2 = false;
+    while (argc > 1 && std::string(argv[argc - 1]).rfind("--", 0) == 0) {
+      const std::string flag(argv[--argc]);
+      if (flag == "--prefill-batch2") batch2 = true;
+      else if (flag == "--int8-ffn-output") output_int8 = int8 = true;
+      else if (flag == "--int8-ffn") int8 = true;
+      else throw std::invalid_argument("Unknown flag: " + flag);
+    }
+    if (batch2 && int8) throw std::invalid_argument("Batched prefill requires BF16 weights");
     if (argc != 3 && argc != 6)
-      throw std::invalid_argument("Usage: rwkv-bench MODEL KERNELS [PREFILL_TOKENS DECODE_TOKENS TRIALS] [--int8-ffn|--int8-ffn-output]");
+      throw std::invalid_argument("Usage: rwkv-bench MODEL KERNELS [PREFILL_TOKENS DECODE_TOKENS TRIALS] [--int8-ffn|--int8-ffn-output] [--prefill-batch2]");
     if (std::getenv("RWKV_XDNA_PROFILE"))
       throw std::invalid_argument("Unset RWKV_XDNA_PROFILE for uninstrumented benchmarks; use rwkv-cli for stage profiles");
     const size_t prefill = argc == 6 ? count(argv[3]) : 32;
@@ -55,7 +61,8 @@ int main(int argc, char **argv) {
     auto initial = model.initial_state();
     start = Clock::now();
     DecodeGraph graph(weights, argv[2], output_int8 ? WeightMode::Int8FFNOutput :
-                     int8 ? WeightMode::Int8FFN : WeightMode::BFloat16);
+                     int8 ? WeightMode::Int8FFN : WeightMode::BFloat16,
+                     batch2 ? PrefillMode::Batched2 : PrefillMode::Sequential);
     double build_s = seconds(start);
     graph.load_state(initial);
     for (int i = 0; i < 4; ++i)
@@ -64,14 +71,20 @@ int main(int argc, char **argv) {
     latencies.reserve(trials * decode);
     Json trial_results = Json::array();
     Vector logits;
+    std::vector<int> prompt;
+    for (size_t t = 0; t < prefill; ++t)
+      prompt.push_back((t * 17 + 1) % weights.vocabulary());
     for (size_t trial = 0; trial < trials; ++trial) {
       start = Clock::now();
       graph.load_state(initial);
       const double reset_s = seconds(start);
+      const auto runs_before = graph.stats().prefill_runs;
       start = Clock::now();
-      for (size_t t = 0; t < prefill; ++t)
-        logits = graph.replay_resident((t * 17 + 1) % weights.vocabulary());
+      if (batch2) logits = graph.prefill_resident(prompt);
+      else for (int token : prompt) logits = graph.replay_resident(token);
       double prefill_s = seconds(start);
+      const auto prefill_runs = batch2 ? graph.stats().prefill_runs - runs_before
+                                      : prefill * graph.stats().persistent_runs;
       std::vector<double> sample;
       sample.reserve(decode);
       for (size_t t = 0; t < decode; ++t) {
@@ -85,6 +98,10 @@ int main(int argc, char **argv) {
       latencies.insert(latencies.end(), sample.begin(), sample.end());
       trial_results.push_back({{"state_reset_seconds", reset_s},
           {"prefill_seconds", prefill_s},
+          {"prefill_runs", prefill_runs},
+          {"prefill_runs_per_token", double(prefill_runs) / prefill},
+          {"prefill_host_upload_bytes", prefill * graph.stats().persistent_upload_bytes},
+          {"prefill_host_download_bytes", (batch2 ? 1 : prefill) * graph.stats().persistent_download_bytes},
           {"prefill_tokens_per_second", prefill / prefill_s},
           {"decode_samples_ms", sample},
           {"decode", distribution(sample)}});
@@ -93,7 +110,8 @@ int main(int argc, char **argv) {
     Json result = {{"schema_version", 1}, {"model", argv[1]},
       {"kernels", argv[2]}, {"precision", output_int8 ? "int8_ffn_output_bf16_others_fp32_state" :
         int8 ? "int8_ffn_bf16_others_fp32_state" : "bf16_weights_inputs_fp32_state"},
-      {"workload", "fixed synthetic token IDs; sequential resident prefill"},
+      {"workload", "fixed synthetic token IDs"},
+      {"prefill_mode", batch2 ? "batch2_ffn_final_logits" : "sequential_all_logits"},
       {"prefill_tokens", prefill}, {"decode_tokens", decode},
       {"warmup_tokens", 4}, {"weight_load_seconds", load_s},
       {"graph_build_seconds", build_s}, {"trials", trial_results},

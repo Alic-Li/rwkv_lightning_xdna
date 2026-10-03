@@ -1,0 +1,189 @@
+{
+  "date": "2026-10-03",
+  "status": "opt_in_BF16_model_prefill_verified; hardware_limit_objective_incomplete",
+  "baseline_commit": "6d9606ed61b0abea6359567274dfaad7a0ac4626",
+  "hardware_software": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano; power mode not reverified",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Layer-wise paired prefill shares packed weights, sessions and FP32 state with resident decode; attention/WKV remain sequential per token, FFN streams each weight tile once for both tokens",
+    "Strided DMA reads residual halves directly from paired attention-output projection arenas; no CPU intermediate copies or model arithmetic",
+    "Final prompt logits only; intermediate heads omitted; odd tail uses the original decode transition",
+    "Explicit C++ PrefillMode::Batched2, CLI --prefill batch2, benchmark --prefill-batch2, offline optional compilation target; defaults unchanged",
+    "Setup-only typed run binding capture remaps activation aliases, then releases host snapshots; no extra capture on the default decode path"
+  ],
+  "validation": {
+    "host_builds": "release and test presets passed",
+    "host_tests": "3/3 CTest passed",
+    "full_model": {
+      "mode": "verify",
+      "prefill_pair_runs": 220,
+      "prefill_runs": 8455,
+      "resident_bytes": 2947313664,
+      "root_bos": 413,
+      "status": "passed",
+      "vectors": 1533
+    },
+    "full_model_scope": "1533 vectors compared by memcmp: final logits and every layer attention shift, FFN shift, matrix state. Prompt lengths 0,1,2,3,8,17,32; zero and nonzero initial state; decode handoff, reload/branch, repeated calls, invalid token and trace rejection before mutation.",
+    "projection_input_stage": {
+      "input_layout": "projection_residual_pairs",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 3.5762786865234375e-07,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete two-token BF16 FFN stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "timing_abba": [
+        {
+          "mean_us_per_two_tokens": 3824.8802000000014,
+          "p95_us_per_two_tokens": 4205.075,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 1921.97011,
+          "p95_us_per_two_tokens": 2116.96,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 1926.66143,
+          "p95_us_per_two_tokens": 2138.431,
+          "path": "batched_ffn",
+          "runs_per_two_tokens": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_two_tokens": 3868.7048099999997,
+          "p95_us_per_two_tokens": 4223.71,
+          "path": "production_decode",
+          "runs_per_two_tokens": 2,
+          "samples": 100
+        }
+      ]
+    },
+    "legacy_regression": {
+      "bf16": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 203.8286832047244,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2917120000,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 4.906080853182011,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "bf16"
+      },
+      "int8": {
+        "download_bytes": 262144,
+        "first_token_nodes": 960,
+        "mean_ms": 186.09234721259847,
+        "measured_steps": 127,
+        "mode": "verify",
+        "resident_bytes": 2025306112,
+        "runs_per_token": 123,
+        "status": "passed",
+        "tokens_per_second": 5.373676107473483,
+        "upload_bytes": 8192,
+        "vectors_checked": 1116,
+        "weights": "int8-ffn-output"
+      }
+    },
+    "cli": "Greedy 3-token generation for The capital of France is: sequential and batch2 stdout identical; both exit 0"
+  },
+  "benchmark": {
+    "order": "A/B/B/A, serial NPU, 2 trials per block, 32 prefill / 24 decode tokens, 4 warmup decode tokens",
+    "blocks": [
+      {
+        "block": "a1",
+        "mode": "sequential_all_logits",
+        "prefill_seconds": [
+          6.521722059,
+          6.515843034
+        ],
+        "decode_mean_ms": 203.73334872916655,
+        "graph_build_seconds": 4.037249927,
+        "resident_bytes": 2917120000,
+        "root_bos": 291,
+        "prefill_runs": 3936
+      },
+      {
+        "block": "b1",
+        "mode": "batch2_ffn_final_logits",
+        "prefill_seconds": [
+          4.01994239,
+          4.004759469
+        ],
+        "decode_mean_ms": 203.5335682916667,
+        "graph_build_seconds": 3.904191995,
+        "resident_bytes": 2947313664,
+        "root_bos": 413,
+        "prefill_runs": 3490
+      },
+      {
+        "block": "b2",
+        "mode": "batch2_ffn_final_logits",
+        "prefill_seconds": [
+          4.010035493,
+          4.003165866
+        ],
+        "decode_mean_ms": 203.84532775000002,
+        "graph_build_seconds": 3.909733845,
+        "resident_bytes": 2947313664,
+        "root_bos": 413,
+        "prefill_runs": 3490
+      },
+      {
+        "block": "a2",
+        "mode": "sequential_all_logits",
+        "prefill_seconds": [
+          6.517277226,
+          6.574788182
+        ],
+        "decode_mean_ms": 203.46379222916661,
+        "graph_build_seconds": 3.853870333,
+        "resident_bytes": 2917120000,
+        "root_bos": 291,
+        "prefill_runs": 3936
+      }
+    ],
+    "baseline_prefill_seconds": 6.53240762525,
+    "batch2_prefill_seconds": 4.0094758045,
+    "latency_reduction_percent": 38.62177569871791,
+    "throughput_ratio": 1.629242310907179,
+    "baseline_tokens_per_second": 4.898653273918334,
+    "batch2_tokens_per_second": 7.981093180331723,
+    "extra_resident_bytes": 30193664,
+    "graph_nodes_per_decode": 960,
+    "pair_body_runs": 218,
+    "final_head_runs": 2,
+    "decode_runs": 123,
+    "prefill_host_upload_bytes": 262144,
+    "prefill_host_download_bytes": {
+      "sequential": 8388608,
+      "batch2": 262144
+    },
+    "limits": "Combined gain from FFN batching and omitting intermediate logits heads; not isolated FFN speedup. Synthetic token IDs, not a quality corpus. Setup/reset excluded, wall time includes submit/wait/host transfers. No measured device bandwidth or utilization; no hardware-limit claim."
+  },
+  "remaining_work": [
+    "Batch attention projections and output matrices across prompt tokens",
+    "Implement and validate INT8 batched FFN with current W8A16 scaling and BF16 activation semantics",
+    "Reduce paired activation BO count and submissions if benchmarks support it",
+    "Profile remaining prefill/decode bottlenecks and demonstrate actual hardware limits"
+  ],
+  "raw_logs": "reports/runs/model-prefill-2026-10-03",
+  "sha256": {
+    "src/inference/prefill_plan.cpp": "dbae6afde5faac79d72574ff03250b024a7ed1962445a3aff903b119f25af348",
+    "tests/inference/prefill_model_test.cpp": "fb329f21c992a8fef25ba1fbccf9579d344576b721e90fc3fc709c8b20d87439",
+    "tests/inference/prefill_ffn_test.cpp": "9e19aa13e2977eb4fc786d63f1385617660c3777a1ea86327d927232562574f8",
+    "tools/compile/rwkv7_prefill_channel_mix.py": "f9f61f31df576bb8d5269b5e4b8432554975b8fb21014dcee68ad42f54be8f01",
+    "build/kernels/model-prefill/bf16-prefill-ffn-b2-projection-input/config.json": "b108269db31f91ec519cd6d8b7389b81aaa12c7bda70cc6be4636bfa5274ea89",
+    "build/kernels/model-prefill/bf16-prefill-ffn-b2-projection-input/design.xclbin": "2516339eb4523c6d4e9a106e6809a9e249430500861942b2e421161b53245d6c",
+    "build/kernels/model-prefill/bf16-prefill-ffn-b2-projection-input/instructions.bin": "c909fa2d412560deb501f50db5372f8e7a60ec7a3d1f97d8dd07d3f7e34c4dfc"
+  },
+  "runtime_artifacts": "Two tested optional prefill directories copied to build/kernels/rwkv7-bf16; existing decode artifacts unchanged"
+}

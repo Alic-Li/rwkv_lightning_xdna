@@ -22,12 +22,19 @@ xdna::Session &DecodeGraph::Impl::session(const std::filesystem::path &root,
   return *s;
 }
 xdna::DeviceBuffer DecodeGraph::Impl::initialized(xdna::Session &s,
-                                                  const Vector &v) {
+                                                  const Vector &v, bool shared) {
   auto b = s.allocate(v.size() * sizeof(float));
   b.upload(v.data(), v.size() * sizeof(float));
   resident_bytes += b.size();
   ++root_bos;
+  if (capture_prefill && !shared)
+    mutable_allocations.push_back({b, v});
   return b;
+}
+void DecodeGraph::Impl::append_run(xdna::Session &s,
+    std::vector<xdna::DeviceBuffer> arguments, Stage stage) {
+  runs.push_back(s.prepare(arguments));
+  if (capture_prefill) bindings.push_back({&s, std::move(arguments), stage});
 }
 xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
                                                        const Vector &v) {
@@ -40,9 +47,18 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
 }
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
+  if (capture_prefill)
+    check_artifact(root, "bf16-prefill-ffn-b2-projection-input",
+        {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"hidden", 8192},
+         {"weights", "bfloat16"}, {"activation", "bfloat16"}, {"state", "float32"},
+         {"layout", "token_major"}, {"input_layout", "projection_residual_pairs"},
+         {"fp32_arena_floats", 26624}, {"bf16_arena_elements", 20480},
+         {"fp32_offsets", {{"shift", 0}, {"raw", 2048}, {"projected", 18432}, {"output", 22528}}},
+         {"bf16_offsets", {{"mixed", 0}, {"activated", 4096}}}});
   ResidentLayout layout;
   prepare_resident_arenas(root, layout);
   prepare_resident_runs(root, layout);
+  if (capture_prefill) prepare_prefill(root);
   upload_bytes = weights.channels() * 4;
   download_bytes = weights.vocabulary() * 4;
   for (const auto &s : states) {
@@ -277,7 +293,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
           packed_weights = initialized_bf16(stage,
               weight_layout::channel_mix(*n[2].weight, *n[4].weight));
         }
-        auto diagnostic = initialized(stage, Vector(22528, 0));
+        auto diagnostic = initialized(stage, Vector(capture_prefill ? 26624 : 22528, 0));
         auto result = initialized(stage, Vector(4096, 0));
         device_buffers[old] = diagnostic.slice(0, 2048 * 4);
         device_buffers[n[0].output] = device_buffers[old];
@@ -286,9 +302,9 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         device_buffers[n[3].output] = diagnostic.slice(14336 * 4, 8192 * 4);
         device_buffers[n[4].output] = result.slice(0, 2048 * 4);
         device_buffers[n[5].output] = result.slice(2048 * 4, 2048 * 4);
-        runs.push_back(stage.prepare(
-            {device_buffers[a[0]], initialized(stage, parameters),
-             packed_weights, diagnostic, result}));
+        append_run(stage,
+            {device_buffers[a[0]], initialized(stage, parameters, true),
+             packed_weights, diagnostic, result}, Stage::FFN);
         for (size_t j = 0; j < 6; ++j)
           node_run_ends.push_back(runs.size());
         node_index += 5;
@@ -317,9 +333,8 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
               mixed.slice(j * 2048 * 4, 2048 * 4);
         mixed_inputs.emplace(nodes[node_index + 1].output, mixed);
         mixed_inputs.emplace(nodes[node_index + 2].output, mixed);
-        runs.push_back(
-            stage.prepare({device_buffers[a[0]], initialized(stage, parameters),
-                           device_buffers[old], pair, mixed}));
+        append_run(stage, {device_buffers[a[0]], initialized(stage, parameters, true),
+                           device_buffers[old], pair, mixed}, Stage::Mix);
         for (size_t j = 0; j <= count; ++j)
           node_run_ends.push_back(runs.size());
         node_index += count;
@@ -345,13 +360,14 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         packed_weights = initialized_bf16(stage,
             weight_layout::projection(*node.weight, false, 0, 2048, 2048));
       }
-      auto result = initialized(stage, Vector(4096, 0));
+      auto result_root = initialized(stage, Vector(capture_prefill ? 8192 : 4096, 0));
+      auto result = capture_prefill ? result_root.slice(0, 4096 * 4) : result_root;
       device_buffers[node.output] = result.slice(0, 2048 * 4);
       device_buffers[nodes[node_index + 1].output] =
           result.slice(2048 * 4, 2048 * 4);
-      runs.push_back(stage.prepare(
+      append_run(stage,
           {device_buffers[a[0]], packed_weights,
-           device_buffers[nodes[node_index + 1].inputs[0]], result}));
+           device_buffers[nodes[node_index + 1].inputs[0]], result}, Stage::Output);
       node_run_ends.push_back(runs.size());
       node_run_ends.push_back(runs.size());
       ++node_index;
@@ -394,9 +410,9 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         packed.insert(packed.end(), ranks.begin(), ranks.end());
         auto value_aux = count == 4 ? value_args.at(cursor)[0]
                                     : initialized(stage, Vector(6144, 0));
-        runs.push_back(stage.prepare(
+        append_run(stage,
             {mixed_inputs.at(a[0]), initialized_bf16(stage, packed),
-             recurrence_stages.at(prepare_index), value_aux, auxiliary}));
+             recurrence_stages.at(prepare_index), value_aux, auxiliary}, Stage::Attention);
         for (size_t j = node_index; j < cursor; ++j)
           node_run_ends.push_back(runs.size());
         node_index = cursor - 1;
@@ -409,9 +425,9 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
           nodes.at(prepare + 6).inputs[4] != node.output)
         throw std::runtime_error("Value residual not adjacent to recurrence");
       auto &stage = session(root, "fused-value-recurrence-stage");
-      runs.push_back(stage.prepare(
+      append_run(stage,
           {device_buffers[nodes[prepare + 6].inputs[0]],
-           recurrence_stages.at(prepare), value_args.at(node_index)[1]}));
+           recurrence_stages.at(prepare), value_args.at(node_index)[1]}, Stage::Recurrence);
       for (size_t j = 0; j < 12; ++j)
         node_run_ends.push_back(runs.size());
       node_index += 11;
@@ -419,9 +435,8 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
     }
     if (recurrence_stages.count(node_index)) {
       auto &stage = session(root, "fused-recurrence-stage");
-      runs.push_back(
-          stage.prepare({device_buffers[nodes[node_index + 6].inputs[0]],
-                         recurrence_stages.at(node_index)}));
+      append_run(stage, {device_buffers[nodes[node_index + 6].inputs[0]],
+                         recurrence_stages.at(node_index)}, Stage::Recurrence);
       for (size_t j = 0; j < 11; ++j)
         node_run_ends.push_back(runs.size());
       node_index += 10;
@@ -430,9 +445,8 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
     if (node.kind == Kind::Element && node.op == Op::Norm &&
                node.group == 2048 && node.epsilon == 1e-5f) {
       auto &norm = session(root, "upstream-norm");
-      runs.push_back(
-          norm.prepare({device_buffers[a[0]], device_buffers[a[1]],
-                        device_buffers[a[2]], device_buffers[node.output]}));
+      append_run(norm, {device_buffers[a[0]], device_buffers[a[1]],
+                        device_buffers[a[2]], device_buffers[node.output]}, Stage::Norm);
     } else if (node.kind == Kind::Element) {
       throw std::runtime_error("Element not covered by the production plan");
     } else if (node.kind == Kind::Linear) {
@@ -443,9 +457,8 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
       auto &head = session(root, "bf16-array-gemv-2048-65536");
       auto packed =
           weight_layout::projection(*node.weight, false, 0, 65536, 2048);
-      runs.push_back(
-          head.prepare({device_buffers[a[0]], initialized_bf16(head, packed),
-                        device_buffers[node.output]}));
+      append_run(head, {device_buffers[a[0]], initialized_bf16(head, packed),
+                        device_buffers[node.output]}, Stage::Head);
     } else {
       throw std::runtime_error("Recurrence not covered by the production plan");
     }

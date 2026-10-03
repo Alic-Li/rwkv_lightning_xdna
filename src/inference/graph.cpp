@@ -70,8 +70,14 @@ DecodeGraph::Impl::Id DecodeGraph::Impl::recurrent(Id state, Id r, Id d, Id k,
   return node.output;
 }
 DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
-                        const std::filesystem::path &resident, WeightMode mode)
-    : weights(w), backend(b), weight_mode(mode) {
+                        const std::filesystem::path &resident, WeightMode mode,
+                        PrefillMode prefill)
+    : weights(w), backend(b), weight_mode(mode),
+      capture_prefill(prefill == PrefillMode::Batched2) {
+  if (prefill != PrefillMode::Sequential && prefill != PrefillMode::Batched2)
+    throw std::invalid_argument("Invalid prefill mode");
+  if (capture_prefill && (resident.empty() || mode != WeightMode::BFloat16))
+    throw std::invalid_argument("Batched2 prefill currently requires BF16 NPU weights");
   if (mode != WeightMode::BFloat16 && mode != WeightMode::Int8FFN &&
       mode != WeightMode::Int8FFNOutput)
     throw std::invalid_argument("Invalid weight mode");
@@ -149,8 +155,9 @@ DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
 DecodeGraph::DecodeGraph(const Weights &w, RecurrentBackend &b)
     : impl_(std::make_unique<Impl>(w, &b, std::filesystem::path{})) {}
 DecodeGraph::DecodeGraph(const Weights &w,
-                         const std::filesystem::path &resident, WeightMode mode)
-    : impl_(std::make_unique<Impl>(w, nullptr, resident, mode)) {
+                         const std::filesystem::path &resident, WeightMode mode,
+                         PrefillMode prefill)
+    : impl_(std::make_unique<Impl>(w, nullptr, resident, mode, prefill)) {
   if (resident.empty())
     throw std::invalid_argument("NPU artifact directory is required");
 }
@@ -163,6 +170,9 @@ State DecodeGraph::export_state() const { return impl_->export_state(); }
 Vector DecodeGraph::replay_resident(int token) {
   State unused;
   return impl_->replay(token, unused, true);
+}
+Vector DecodeGraph::prefill_resident(const std::vector<int> &tokens) {
+  return impl_->prefill(tokens);
 }
 void DecodeGraph::set_trace(Trace trace) { impl_->trace = std::move(trace); }
 void DecodeGraph::set_projection_trace(ProjectionTrace trace) {
@@ -179,6 +189,8 @@ GraphStats DecodeGraph::stats() const {
           impl_->root_bos,
           impl_->runs.size(),
           impl_->weights.channels() * 4,
-          impl_->weights.vocabulary() * 4};
+          impl_->weights.vocabulary() * 4,
+          impl_->prefill_body.size() + impl_->prefill_head.size(),
+          impl_->prefill_run_count};
 }
 } // namespace rwkv::inference

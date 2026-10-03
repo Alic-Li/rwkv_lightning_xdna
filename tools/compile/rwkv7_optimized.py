@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "build/kernels/rwkv7-bf16")
     parser.add_argument("--int8-ffn", action="store_true", help="Also compile experimental W8A16 ChannelMix")
     parser.add_argument("--int8-ffn-output", action="store_true", help="Also compile W8A16 ChannelMix and attention output")
+    parser.add_argument("--prefill-batch2", action="store_true", help="Also compile two-token BF16 ChannelMix prefill")
     args = parser.parse_args()
     env = dict(os.environ, MLIR_AIE_KERNEL_SOURCES=str(ROOT / "third_party/mlir-aie"),
                RWKV_XDNA_KERNEL_DIR=str(args.output.resolve()))
@@ -20,6 +21,9 @@ def main():
     for stage in ("norm", "norm_mix", "attention_projections",
                   "value_recurrence", "recurrence_stage", "projection_residual", "channel_mix", "head"):
         subprocess.run([sys.executable, str(ROOT / "tools/compile" / f"rwkv7_{stage}.py")],
+                       cwd=ROOT, env=env, check=True)
+    if args.prefill_batch2:
+        subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_prefill_channel_mix.py")],
                        cwd=ROOT, env=env, check=True)
     if args.int8_ffn or args.int8_ffn_output:
         subprocess.run([sys.executable, str(ROOT / "tools/compile/rwkv7_channel_mix_int8.py")],

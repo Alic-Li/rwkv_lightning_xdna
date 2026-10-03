@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,6 +34,9 @@ public:
   void upload(const void *data, size_t bytes, size_t offset = 0);
   void download(void *data, size_t bytes, size_t offset = 0) const;
   size_t size() const;
+  // Byte offset when this view is wholly contained in another view of the same
+  // allocation. No device access, copies, or XRT handles escape this query.
+  std::optional<size_t> offset_within(const DeviceBuffer &) const;
 
 private:
   struct Impl;

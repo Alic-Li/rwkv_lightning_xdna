@@ -3,6 +3,7 @@ add_library(rwkv_inference
     src/inference/model.cpp src/inference/weights.cpp src/inference/backend.cpp
     src/inference/ops.cpp src/inference/graph.cpp
     src/inference/resident_plan.cpp src/inference/graph_execution.cpp
+    src/inference/prefill_plan.cpp
     src/inference/artifacts.cpp src/inference/weight_layout.cpp src/inference/quantization.cpp
     third_party/rwkv_cuda_io/src/pth_archive.cpp third_party/rwkv_cuda_io/src/pth_tensor.cpp)
 add_library(rwkv::inference ALIAS rwkv_inference)

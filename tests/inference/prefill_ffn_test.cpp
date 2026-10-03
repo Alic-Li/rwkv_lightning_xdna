@@ -23,8 +23,10 @@ static void same(const float *a, const float *b, size_t n, const char *name) {
 }
 int main(int argc, char **argv) {
   try {
+    const bool projection_input = argc > 1 && std::string(argv[argc - 1]) == "--projection-input";
+    if (projection_input) --argc;
     if (argc < 3 || argc > 4)
-      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS]");
+      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS] [--projection-input]");
     size_t iterations = 100;
     if (argc == 4) {
       std::string count(argv[3]);
@@ -37,9 +39,10 @@ int main(int argc, char **argv) {
     auto session = [](std::filesystem::path root, const char *name) {
       return Session(root / name / "design.xclbin", root / name / "instructions.bin");
     };
-    auto fused = session(argv[1], "bf16-prefill-ffn-b2");
+    auto fused = session(argv[1], projection_input ? "bf16-prefill-ffn-b2-projection-input" : "bf16-prefill-ffn-b2");
+    auto input_offset = [&](size_t t) { return projection_input ? t * 4096 + 2048 : t * 2048; };
     auto decode = session(argv[2], "bf16-channel-mix");
-    Guarded x(fused, 4096 * 4), parameters(fused, 6144 * 4),
+    Guarded x(fused, (projection_input ? 8192 : 4096) * 4), parameters(fused, 6144 * 4),
         weights(fused, 33554432 * 2), fp32(fused, 26624 * 4), half(fused, 20480 * 2),
         diag(decode, 22528 * 4), reference(decode, 4096 * 4);
     auto shift = fp32.data.slice(0, 2048 * 4);
@@ -51,7 +54,7 @@ int main(int argc, char **argv) {
     auto fused_run = fused.prepare({x.data, parameters.data, weights.data, fp32.data, half.data});
     std::vector<DeviceRun> singles;
     for (size_t t = 0; t < 2; ++t)
-      singles.push_back(decode.prepare({x.data.slice(t * 2048 * 4, 2048 * 4),
+      singles.push_back(decode.prepare({x.data.slice(input_offset(t) * 4, 2048 * 4),
           parameters.data, weights.data, diag.data, reference.data}));
     auto batch = [&] { fused_run.execute(); };
     std::mt19937 rng(730);
@@ -70,6 +73,7 @@ int main(int argc, char **argv) {
       previous = state;
     };
     reset(initial);
+    V packed_input(x.bytes / 4, 123.25f); // Nonzero unused projection lanes catch wrong gathers.
     V first_input, first_output, branch_input, branch_output, branch_state;
     double worst = 0;
     auto check = [&](float actual, double expected) {
@@ -88,7 +92,9 @@ int main(int argc, char **argv) {
         else { std::fill(input.begin(), input.begin() + 2048, 0); branch_input = input; }
       } else if (pass == 2) { reset(initial); input = first_input; }
       else { reset(branch_state); input = branch_input; }
-      x.data.upload(input.data(), x.bytes);
+      for (size_t t = 0; t < 2; ++t)
+        std::copy_n(input.data() + t * 2048, 2048, packed_input.data() + input_offset(t));
+      x.data.upload(packed_input.data(), x.bytes);
       std::fill(actual.begin(), actual.end(), std::nanf(""));
       output.upload(actual.data(), output.size());
       batch();
@@ -148,12 +154,12 @@ int main(int argc, char **argv) {
       if (pass == 3) same(actual.data(), branch_output.data(), 4096, "branch");
       for (auto *b : {&x, &parameters, &weights, &fp32, &half, &diag, &reference}) b->guard();
     }
-    V unchanged_x(4096), unchanged_parameters(6144);
+    V unchanged_x(packed_input.size()), unchanged_parameters(6144);
     std::vector<uint16_t> unchanged_w(w.size());
     x.data.download(unchanged_x.data(), x.bytes);
     parameters.data.download(unchanged_parameters.data(), parameters.bytes);
     weights.data.download(unchanged_w.data(), weights.bytes);
-    if (unchanged_x != input || unchanged_parameters != params || unchanged_w != w)
+    if (unchanged_x != packed_input || unchanged_parameters != params || unchanged_w != w)
       throw std::runtime_error("Immutable input changed");
     Json timings = Json::array();
     for (bool batched : {false, true, true, false}) {
@@ -175,6 +181,7 @@ int main(int argc, char **argv) {
     }
     for (auto *b : {&x, &parameters, &weights, &fp32, &half, &diag, &reference}) b->guard();
     std::cout << Json({{"status", "passed"}, {"input_passes", 4},
+        {"input_layout", projection_input ? "projection_residual_pairs" : "token_major"},
         {"oracle_max_abs", worst}, {"intermediates_output_shift_bitwise", "passed"},
         {"reset_branch_guards_immutable_inputs", "passed"}, {"timing_abba", timings},
         {"scope", "Complete two-token BF16 FFN stage; model attention/WKV and prefill integration not included."}}).dump() << '\n';
