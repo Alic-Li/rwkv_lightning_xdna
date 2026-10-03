@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-03",
+  "scope": "Single request, single token decode. No batching or prefill change.",
+  "status": "W2-eight local-gather candidate rejected for production after repeated model regression in performance; numerics passed",
+  "baseline_commit": "807e7cb",
+  "device": "RyzenAI-npu6 / XDNA2 AIE2P, eight columns, default power mode; XRT 2.25.00 firmware 1.0.0.63",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "model_sha256": "dfc1fc450641d5e00c5f412b5530a17b2a734ac02bde04d98c57608f5daaf773",
+  "precision": "BF16 weights and GEMV operands, unchanged FP32 sums/residual/norm and WKV state; output-row partition does not change per-row reduction order",
+  "topology": {
+    "production": "4 W1 + 4 W2 + norm/mix/residual = 11 compute workers",
+    "candidate": "4 W1 + 8 W2 + norm/mix + 2 local residual + parameter copy + 2 residual copies = 19 compute workers",
+    "weight_supply": "Twelve independent contiguous weight stripes, no weight repack or interleaved runtime descriptors",
+    "gather": "Two five-input groups, then two-way final join; host DMA scatter preserves original projection/residual ABI",
+    "parameter_supply": "One 6144-float parameter transfer, split to coefficients and copy4096; three input streams plus residual and twelve weights use all sixteen shim MM2S channels"
+  },
+  "benchmark": {
+    "order": "A/B/B/A",
+    "prefill_tokens": 8,
+    "decode_tokens_per_trial": 48,
+    "trials_per_process": 2,
+    "warmup_tokens": 4,
+    "baseline": {
+      "decode_process_means_ms": [
+        199.43171969791663,
+        199.76761962499998
+      ],
+      "decode_mean_ms": 199.5996696614583,
+      "samples": 192
+    },
+    "candidate": {
+      "decode_process_means_ms": [
+        209.1641527395834,
+        209.52882693749999
+      ],
+      "decode_mean_ms": 209.3464898385417,
+      "samples": 192
+    },
+    "candidate_latency_increase_percent": 4.883184523108186,
+    "runs_per_token": 100,
+    "compilation_overlap": false,
+    "workload": "fixed synthetic token IDs, sequential prefill, no sampling"
+  },
+  "validation": {
+    "stage": "Independent FP64 oracle, shift/replay, immutable inputs and BO guards passed; max_abs=2.42144e-07",
+    "whole_model": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 210.49190877165356,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 100,
+      "status": "passed",
+      "tokens_per_second": 4.750776435234966,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16"
+    },
+    "logits_state_max_abs": 0,
+    "snapshot": "build/channel-key-cache-baseline.bin"
+  },
+  "stage_initial_us": {
+    "baseline": [
+      1851.05,
+      1828.2
+    ],
+    "candidate": [
+      1820.82,
+      1824.75
+    ],
+    "samples_per_process": 400,
+    "scope": "Same-program repeated dispatch, cannot stand in for alternating production execution. Conservatively preliminary; use model comparison for decision."
+  },
+  "artifact_sha256": {
+    "config.json": "68b03e218cdc7015ca7775e6da7b610b0fdef0219345f392a0fadc45bca1a8ae",
+    "design.xclbin": "39e9503dc0843cdd3432be5409f190310e97d49eb1ba6f33befda75dcd282e17",
+    "instructions.bin": "461ce52501504bf97a20c93c076ca7cf096703e3c1eef1ed19351676f4cf3cb6"
+  },
+  "limitations": [
+    "Whole-model slowdown is established for this topology; it does not prove a universal 4-worker optimum or DDR saturation.",
+    "Compute, FIFO and DMA attribution still being investigated; no all-tile utilization claim.",
+    "Current BF16 and INT8-FFN production already fuse seven recurrent lanes plus eight output projection workers into a 31-core graph. INT8-FFN-output uses a different recurrence/output route."
+  ],
+  "decision": "Keep default production artifacts untouched. Preserve isolated experiments and measurements; do not promote this 8-W2 topology.",
+  "raw_logs": "reports/runs/spatial-decode-2026-10-03"
+}
