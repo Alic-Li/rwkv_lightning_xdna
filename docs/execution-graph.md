@@ -33,7 +33,16 @@ norm，XRT 逐次等待、HRX 逐次等待、HRX 批量等待分别为1.180、1.
 cmake --preset test -DRWKV_XDNA_HRX_PROBE=ON -DCMAKE_PREFIX_PATH="$HRX_PREFIX"
 cmake --build --preset test
 ./build/test/rwkv-hrx-dispatch-bench build/kernels/rwkv7-bf16/upstream-norm
+./build/test/rwkv-hrx-alternation-bench build/kernels/rwkv7-bf16
 ```
+
+异构程序对照进一步让 norm 输出直接作为 projection 输入：独立产物下，XRT 逐次等待、
+HRX 逐次等待、HRX 成对等待分别为1.228、1.219、1.215 ms；共享 PDI 的诊断产物下
+分别为0.350、0.364、0.358 ms。全部结果逐位一致，数值及 guard 检查通过。
+因此当前证据支持继续减少程序切换，并不支持仅替换运行库就能消除该开销。
+共享产物的生成方式见 `tools/compile/rwkv7_shared_program_probe.py`，生成后将上述
+alternation 命令的根目录换为其输出目录即可复测。完整条件及失败的显式 REUSE 探针见
+[异构程序 HRX 对照](../reports/rwkv7-hrx-alternation-control-2026-10-03.json)。
 
 以下是历史 runlist/capture 探针记录，不代表当前接口或本轮重新测试。
 

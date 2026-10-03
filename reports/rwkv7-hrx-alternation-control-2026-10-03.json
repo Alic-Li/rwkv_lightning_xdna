@@ -1,0 +1,329 @@
+{
+  "date": "2026-10-03",
+  "status": "Validated heterogeneous dispatch control; no production backend replacement justified",
+  "provenance": {
+    "reference": "FastFlowLM HRX libllama_npu.so dispatch/flush/wait analysis in amd2026-fastflow-review-2026-10-03.json",
+    "hrx_commit": "c023c3e7d564267ee622f174a3f493a0f1db19e2",
+    "package_sha256": "0a3437af76f6e2b5dcf0df52f26505c9f318d583328fd141c7f377170d14fe5b",
+    "hardware": "Ryzen AI 7 H 350 XDNA2/AIE2P, BDF 0000:66:00.1",
+    "xrt": "2.25.00",
+    "linux": "7.0.0-38-generic"
+  },
+  "protocol": {
+    "executable": "rwkv-hrx-alternation-bench",
+    "separate_root": "build/kernels/rwkv7-bf16",
+    "shared_root": "build/kernels/shared-program-bf16",
+    "dataflow": "FP32 norm output feeds BF16 projection on device; 2048x2048 BF16 weights, FP32 accumulation and residual; no host handoff between stages",
+    "trials": 4,
+    "samples_per_mode_per_trial": 64,
+    "warm_samples": 4,
+    "order": "XRT, HRX individual, HRX pair; reversed each alternate trial",
+    "fixtures": "constant, near-constant, two sinusoidal inputs; changing every sample; nonuniform gamma/beta and residual",
+    "timing": "Host wall time of norm and projection submit/wait; excludes upload, setup, readback and validation",
+    "hrx": "Two CREATE executables, one shared dispatch stream; individual flush/wait after each operation versus once after pair",
+    "guards": "256-byte prefix/suffix on all allocations; immutable input/parameters checked each sample and 8MiB weights checked after each mode"
+  },
+  "mean_pair_us": {
+    "separate": {
+      "hrx_individual": 1218.8808828124997,
+      "hrx_pair": 1215.2671015625,
+      "xrt_individual": 1227.5901718750001
+    },
+    "shared": {
+      "hrx_individual": 363.53633984375,
+      "hrx_pair": 357.5078046875,
+      "xrt_individual": 350.23832031250004
+    }
+  },
+  "validation": {
+    "norm_and_projection_bitwise_xrt": true,
+    "max_norm_fp64": 2.437736839056015e-06,
+    "max_projection_fp64": 4.0046870708465576e-08,
+    "norm_tolerance_abs": 2e-05,
+    "projection_tolerance_abs_plus_rel": [
+      2e-05,
+      2e-05
+    ],
+    "guards_and_immutable_buffers": "passed",
+    "release_and_test_build": "passed, no warnings",
+    "ctest": "3/3 passed",
+    "single_program_regression": "HRX/XRT norm chain repeated after extracting common helpers; all checks passed"
+  },
+  "interpretation": [
+    "Changing runtime and batching one norm/projection pair leaves separate-program latency around 1.2 ms; it does not eliminate the measured transition cost.",
+    "Co-resident norm/projection artifacts reduce both XRT and HRX timings to about 0.35 ms. Shared placement/context remains the useful direction; runtime replacement alone is not supported by these results.",
+    "This is a small BF16 control, not a model performance result, INT8 validation, or proof of a hardware limit."
+  ],
+  "unsupported_probe": {
+    "configuration": "One executable with norm CREATE entry and projection REUSE entry, same shared xclbin",
+    "result": "INVALID_ARGUMENT: control-packet context cache requires context PDI or xclbin data",
+    "scope": "This specific public API descriptor failed; not a universal HRX reuse limitation. Two CREATE executables with identical shared artifact passed.",
+    "log": "shared-stderr.log"
+  },
+  "source_cross_check": {
+    "url": "https://raw.githubusercontent.com/jtuyls/hrx/c023c3e7d564267ee622f174a3f493a0f1db19e2/runtime/src/iree/hal/drivers/amdxdna/context_cache.c",
+    "observation": "context_cache_key_equal compares PDI bytes, xclbin bytes and kernel name. This explains how CREATE can use the runtime cache; live context count was not sampled in this experiment."
+  },
+  "next": "Complete numerical and full-model gates for the existing mode-selected norm/attention candidate; preserve FP32 recurrence and current BF16/INT8 contracts.",
+  "artifacts": {
+    "separate": {
+      "upstream-norm/design.xclbin": "51bd2e3f09232b65195319c70be8795b5fa312845e214a2ed8e625a50fc7a65a",
+      "upstream-norm/instructions.bin": "643cdd1497b474b0e3af3a69a69218fd4a2565f3d44737a5fb1ab9db19d9aa3b",
+      "bf16-projection-residual/design.xclbin": "09fd897acf735b89f40c3bfebfab583067778109bcb29300e365c874de84b601",
+      "bf16-projection-residual/instructions.bin": "1b96334591a1bb28cfd2d66ef384d1e5bda8582c888444a9e4157a8dba92dcd5"
+    },
+    "shared": {
+      "upstream-norm/design.xclbin": "55564368e7e95e933a75318cff03e9b14271daca937bcafb4dca603bdc8c1a33",
+      "upstream-norm/instructions.bin": "bd7827379cb6a531c5f8ca02f90bb3f0bedea43147149b70045c690181047931",
+      "bf16-projection-residual/design.xclbin": "55564368e7e95e933a75318cff03e9b14271daca937bcafb4dca603bdc8c1a33",
+      "bf16-projection-residual/instructions.bin": "35153210c6ff8fd1142ed5e0ff8031c12c7d6bbc997d862b2a603ad2e558c151"
+    }
+  },
+  "raw_results": {
+    "separate": [
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 1191.8126250000003,
+        "samples": 64,
+        "trial": 0
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 1189.7327343749998,
+        "samples": 64,
+        "trial": 0
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 1191.5652656250002,
+        "samples": 64,
+        "trial": 0
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 1217.0346874999998,
+        "samples": 64,
+        "trial": 1
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 1180.2095156249998,
+        "samples": 64,
+        "trial": 1
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 1188.841875,
+        "samples": 64,
+        "trial": 1
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 1209.26409375,
+        "samples": 64,
+        "trial": 2
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 1221.61403125,
+        "samples": 64,
+        "trial": 2
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 1205.0363125,
+        "samples": 64,
+        "trial": 2
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 1247.432140625,
+        "samples": 64,
+        "trial": 3
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 1283.9672499999997,
+        "samples": 64,
+        "trial": 3
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 1320.4420937499997,
+        "samples": 64,
+        "trial": 3
+      }
+    ],
+    "shared": [
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 354.16465625,
+        "samples": 64,
+        "trial": 0
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 370.792921875,
+        "samples": 64,
+        "trial": 0
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 372.58312500000005,
+        "samples": 64,
+        "trial": 0
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 361.305296875,
+        "samples": 64,
+        "trial": 1
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 384.6359687499999,
+        "samples": 64,
+        "trial": 1
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 345.67796875000005,
+        "samples": 64,
+        "trial": 1
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 350.8472812500001,
+        "samples": 64,
+        "trial": 2
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 352.0273750000001,
+        "samples": 64,
+        "trial": 2
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 349.17099999999994,
+        "samples": 64,
+        "trial": 2
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_pair",
+        "pair_us": 346.97179687500005,
+        "samples": 64,
+        "trial": 3
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "hrx_individual",
+        "pair_us": 346.68909375,
+        "samples": 64,
+        "trial": 3
+      },
+      {
+        "bitwise_xrt": true,
+        "guards": "pass",
+        "max_norm_fp64": 2.437736839056015e-06,
+        "max_proj_fp64": 4.0046870708465576e-08,
+        "mode": "xrt_individual",
+        "pair_us": 350.263375,
+        "samples": 64,
+        "trial": 3
+      }
+    ]
+  },
+  "logs": "reports/runs/hrx-alternation-2026-10-03"
+}
