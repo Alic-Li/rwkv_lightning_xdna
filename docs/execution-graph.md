@@ -20,6 +20,21 @@ FastFlowLM 的 `FLM_USE_HRX` 默认关闭，不能把 HRX 与 XRT 库的行为�
 统一 flush 也不证明只有一条硬件命令。可复查的二进制地址、哈希及证据边界见
 [FastFlowLM HRX 核查](../reports/amd2026-fastflow-review-2026-10-03.json)。
 
+已进一步用 FastFlowLM 固定的 HRX 包运行现有 `upstream-norm` 产物。16次有前后依赖的
+norm，XRT 逐次等待、HRX 逐次等待、HRX 批量等待分别为1.180、1.167、1.143 ms；
+四类输入结果逐位一致，逐步 FP64、buffer guard 和只读参数检查通过。
+这仅证明单程序控制可用及约3%的微基准收益，尚未验证异构程序切换或完整模型。
+详见 [HRX 调度对照](../reports/rwkv7-hrx-dispatch-control-2026-10-03.json)。
+
+可选测试使用独立 HRX 包，不改变生产后端，也不自动下载依赖：
+
+```bash
+# HRX_PREFIX 指向已校验的 HRX 安装包目录，内含 lib/cmake/hrx。
+cmake --preset test -DRWKV_XDNA_HRX_PROBE=ON -DCMAKE_PREFIX_PATH="$HRX_PREFIX"
+cmake --build --preset test
+./build/test/rwkv-hrx-dispatch-bench build/kernels/rwkv7-bf16/upstream-norm
+```
+
 以下是历史 runlist/capture 探针记录，不代表当前接口或本轮重新测试。
 
 ## 本机实验记录（2026-10-02，XRT 2.25）

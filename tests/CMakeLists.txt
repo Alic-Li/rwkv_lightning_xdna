@@ -1,5 +1,14 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+option(RWKV_XDNA_HRX_PROBE "Build optional HRX/XRT dispatch benchmark" OFF)
+if(RWKV_XDNA_HRX_PROBE)
+    find_package(hrx CONFIG REQUIRED)
+    add_executable(rwkv-hrx-dispatch-bench inference/hrx_dispatch_bench.cpp)
+    target_link_libraries(rwkv-hrx-dispatch-bench PRIVATE rwkv::xdna hrx::hrx)
+    target_include_directories(rwkv-hrx-dispatch-bench PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+    target_compile_options(rwkv-hrx-dispatch-bench PRIVATE -Wall -Wextra -ffp-contract=off)
+endif()
+
 add_executable(xdna-run "${PROJECT_SOURCE_DIR}/apps/xdna_run.cpp")
 target_include_directories(xdna-run PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 target_link_libraries(xdna-run PRIVATE rwkv::xdna)

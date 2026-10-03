@@ -1,0 +1,165 @@
+{
+  "date": "2026-10-03",
+  "status": "Validated single-program dispatch control; no production runtime change",
+  "reference": "FastFlowLM src/lib/hrx/libllama_npu.so disassembly documented in amd2026-fastflow-review-2026-10-03.json",
+  "hardware": "Ryzen AI 7 H 350, XDNA2/AIE2P, 0000:66:00.1",
+  "runtime": {
+    "xrt": "2.25.00",
+    "hrx_commit": "c023c3e7d564267ee622f174a3f493a0f1db19e2",
+    "hrx_tag": "flm-hrx-amdxdna-v2026.09.15",
+    "package_sha256": "0a3437af76f6e2b5dcf0df52f26505c9f318d583328fd141c7f377170d14fe5b",
+    "retrieval": "FastFlowLM pinned fetch-hrx-release.sh verified archive and remote checksum; package in ignored build/hrx-release"
+  },
+  "protocol": {
+    "artifact": "build/kernels/rwkv7-bf16/upstream-norm",
+    "steps": 16,
+    "dependency": "Each output is the next input, ping-pong device-resident buffers",
+    "timed_scope": "Host wall time for record/submit and waits; excludes initial upload, validation downloads, allocation, executable creation",
+    "trials": 4,
+    "samples_per_trial_per_mode": 128,
+    "warm_samples": 4,
+    "order": "XRT, HRX individual, HRX batch16; reversed on alternate trials",
+    "fixtures": "constant, near-constant, two sinusoidal inputs; nonuniform gamma/beta; changed input every sample",
+    "buffer_guards": "256 bytes before and after each binding, identical XRT/HRX allocation sizes and offsets",
+    "dispatch": "C++ only, serial hardware access"
+  },
+  "mean_chain16_us": {
+    "hrx_batch16": 1143.327646484375,
+    "hrx_individual": 1166.806494140625,
+    "xrt_individual": 1179.7439453124998
+  },
+  "hrx_batch_gain_vs_xrt_percent": 3.086796840349837,
+  "hrx_batch_gain_vs_hrx_individual_percent": 2.0122314860393953,
+  "validation": {
+    "bitwise_xrt": true,
+    "guards_and_immutable_parameters": "passed every sample",
+    "max_abs_fp64_per_step": 2.437736839056015e-06,
+    "fp64_per_step_tolerance": 2e-05,
+    "release_build": "passed",
+    "test_build": "passed",
+    "ctest": "3/3 passed"
+  },
+  "reference_contract_note": "An initial independently evolved 16-step FP64 trajectory exceeded 2e-4 on near-constant input (first reported error 0.000210). Replaced this ill-conditioned aggregate check with per-transition FP64 validation using actual FP32 inputs, at tighter 2e-5 tolerance, plus bitwise equality of every backend final output to the validated XRT trajectory. No kernel or production tolerance changed. Original failure log retained.",
+  "limitations": [
+    "One resident norm program only; not a model speedup or a hardware-limit result.",
+    "No heterogeneous program transitions, large weights, recurrence state, or model prefill validated through HRX yet.",
+    "No proof of one hardware command per flush; HRX may submit multiple commands internally.",
+    "The small gain does not justify a production backend replacement by itself."
+  ],
+  "next": "Measure alternating actual norm/projection programs and context reuse with this HRX API before deciding on runtime integration.",
+  "artifacts_sha256": {
+    "design.xclbin": "51bd2e3f09232b65195319c70be8795b5fa312845e214a2ed8e625a50fc7a65a",
+    "instructions.bin": "643cdd1497b474b0e3af3a69a69218fd4a2565f3d44737a5fb1ab9db19d9aa3b"
+  },
+  "raw_results": [
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1172.1690781249997,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "xrt_individual",
+      "samples": 128,
+      "trial": 0
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1173.2426406250001,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_individual",
+      "samples": 128,
+      "trial": 0
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1136.93725,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_batch16",
+      "samples": 128,
+      "trial": 0
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1146.7616796874995,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_batch16",
+      "samples": 128,
+      "trial": 1
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1143.99675,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_individual",
+      "samples": 128,
+      "trial": 1
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1169.2160937499998,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "xrt_individual",
+      "samples": 128,
+      "trial": 1
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1169.8721875000003,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "xrt_individual",
+      "samples": 128,
+      "trial": 2
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1187.0198984375004,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_individual",
+      "samples": 128,
+      "trial": 2
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1144.5829296875004,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_batch16",
+      "samples": 128,
+      "trial": 2
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1145.0287265625002,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_batch16",
+      "samples": 128,
+      "trial": 3
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1162.9666875,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "hrx_individual",
+      "samples": 128,
+      "trial": 3
+    },
+    {
+      "bitwise_xrt": true,
+      "chain16_us": 1207.7184218749994,
+      "guards": "pass",
+      "max_abs_fp64_per_step": 2.437736839056015e-06,
+      "mode": "xrt_individual",
+      "samples": 128,
+      "trial": 3
+    }
+  ],
+  "logs": "reports/runs/hrx-probe-2026-10-03"
+}
