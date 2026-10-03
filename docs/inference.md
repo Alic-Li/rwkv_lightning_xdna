@@ -259,6 +259,13 @@ decode 分别183.82→184.11、184.20→184.31 ms/token，没有确立 decode �
 两种模式各2,628个 logits/state 向量逐位通过；既有 INT8 语料质量限制不变。
 见[INT8 chunk4 整模型验证](../reports/rwkv7-chunk4-model-int8-2026-10-03.json)。
 
+完整重编译目录及原默认路径已分别回归：三种精度各2,628个 chunk4、1,533个
+batch2、1,116个128-step decode 检查向量逐位通过，另验证四-token 完整零状态 chunk。
+原生产产物哈希保持不变。见[最终回归与设备 PDI 核对](../reports/rwkv7-chunk4-regression-2026-10-03.json)。
+`RWKV_XDNA_PROFILE=1` 也支持 chunk4：`chunk_tokens`/`chunks` 描述批次，
+`tail_runs` 包括所有尾 token；单-token stage 的 slot 为0–3，paired stage 为0/2，
+四-token FFN 为4。耗时仍包括程序切换、DMA、等待和计算，不能当作独立硬件计数器。
+
 ## 缺少生产 kernel
 
 若 CLI 报：

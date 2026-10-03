@@ -69,7 +69,8 @@ struct DecodeGraph::Impl {
   struct PrefillRun {
     xdna::DeviceRun run;
     Stage stage;
-    // 0/1 are the sequential token slots; 2 is a fused pair.
+    // Batch2: 0/1 sequential slots, 2 fused pair. Chunk4: 0..3 slots,
+    // 0/2 pair start slots for paired stages, 4 for four-token FFN.
     int token_slot;
   };
   std::vector<PrefillRun> prefill_body, prefill_head;

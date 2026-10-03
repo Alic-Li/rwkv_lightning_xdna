@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-03",
+  "status": "passed; default production artifacts unchanged",
+  "build": "release/test CMake presets passed; 3/3 host CTest passed",
+  "modes": {
+    "bf16": {
+      "rebuilt-chunk": {
+        "status": "passed",
+        "bitwise_vectors": 2628,
+        "additional_full_chunk_zero_state": "passed against four resident NPU decodes on the same graph"
+      },
+      "default-batch2": {
+        "status": "passed",
+        "bitwise_vectors": 1533
+      },
+      "default-decode": {
+        "status": "passed",
+        "bitwise_vectors": 1116,
+        "steps": 128
+      }
+    },
+    "int8-ffn": {
+      "rebuilt-chunk": {
+        "status": "passed",
+        "bitwise_vectors": 2628,
+        "additional_full_chunk_zero_state": "passed against four resident NPU decodes on the same graph"
+      },
+      "default-batch2": {
+        "status": "passed",
+        "bitwise_vectors": 1533
+      },
+      "default-decode": {
+        "status": "passed",
+        "bitwise_vectors": 1116,
+        "steps": 128
+      }
+    },
+    "int8-output": {
+      "rebuilt-chunk": {
+        "status": "passed",
+        "bitwise_vectors": 2628,
+        "additional_full_chunk_zero_state": "passed against four resident NPU decodes on the same graph"
+      },
+      "default-batch2": {
+        "status": "passed",
+        "bitwise_vectors": 1533
+      },
+      "default-decode": {
+        "status": "passed",
+        "bitwise_vectors": 1116,
+        "steps": 128
+      }
+    }
+  },
+  "artifact_audit": {
+    "production": {
+      "checked_artifacts": 84,
+      "changed_artifacts": []
+    },
+    "extracted_xclbin_programs_compared": 31,
+    "rebuild_pdi_differences": [
+      "bf16-prefill-ffn-b2"
+    ],
+    "rebuild_instruction_differences": [
+      "bf16-attention-projections-3/instructions.bin",
+      "bf16-attention-projections-4/instructions.bin"
+    ],
+    "interpretation": "All programs used by model chunk4 have identical extracted PDI in measured and full-rebuild roots. The different token-major bf16-prefill-ffn-b2 is not a model dependency (model uses projection/recurrence-input variants). Attention DMA instruction rebuild differences already arise from pre-existing compiler refactor; fresh-root numerical verification above covers them. Xclbin containers/UUIDs may differ, so container byte equality was not claimed."
+  },
+  "logs": "reports/runs/throughput-resume-2026-10-03",
+  "scope": "Numerical regression timings are excluded from performance conclusions. Snapshot comparison is same precision, not INT8-vs-BF16 quality validation."
+}

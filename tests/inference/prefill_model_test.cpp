@@ -83,6 +83,18 @@ int main(int argc, char **argv) {
     };
     if (!record) rejected([&] { graph.prefill_resident({1, 2}); });
     auto zero = model.initial_state();
+    if (!record && chunk4) {
+      // A full chunk from zero state must agree, not only the warm-state
+      // snapshots and short tails. Both reference and candidate execute on NPU.
+      graph.load_state(zero);
+      Vector expected;
+      for (int token : {1,18,35,52}) expected = graph.replay_resident(token);
+      auto expected_state = graph.export_state();
+      graph.load_state(zero);
+      equal(graph.prefill_resident({1,18,35,52}), expected);
+      equal(graph.export_state(), expected_state);
+      std::cout << Json({{"zero_state_chunk_bitwise", "passed"}}).dump() << std::endl;
+    }
     graph.load_state(zero);
     for (int token : {1, 2, 7}) graph.replay_resident(token);
     const auto warm = graph.export_state();

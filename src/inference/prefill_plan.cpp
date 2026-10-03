@@ -164,7 +164,7 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
 }
 
 Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
-  if (prefill_body.empty()) throw std::runtime_error("Construct graph with Batched2 prefill enabled");
+  if (prefill_body.empty()) throw std::runtime_error("Construct graph with batched prefill enabled");
   if (tokens.empty()) return {};
   if (!resident_state_valid || device_failed) throw std::runtime_error("No valid resident state");
   if (trace || projection_trace)
@@ -253,10 +253,12 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
     std::cerr << "prefill_profile " << nlohmann::json({
         {"prompt_tokens", tokens.size()}, {"pairs", prefill_chunk_tokens == 2 ? tokens.size() / 2 : 0},
         {"chunk_tokens", prefill_chunk_tokens}, {"chunks", tokens.size() / prefill_chunk_tokens},
-        {"odd_tail_runs", (tokens.size() % prefill_chunk_tokens) * decode_run_count()},
+        {"odd_tail_runs", prefill_chunk_tokens == 2 ? (tokens.size() % 2) * decode_run_count() : 0},
+        {"tail_runs", (tokens.size() % prefill_chunk_tokens) * decode_run_count()},
+        {"chunk_upload_us", upload_us}, {"final_chunk_download_us", download_us},
         {"pair_upload_us", upload_us}, {"final_pair_download_us", download_us},
         {"stages", rows},
-        {"scope", "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output."}
+        {"scope", "Host stage wall time including scheduling, program switches, DMA and compute; tail tokens have separate decode_profile output."}
     }).dump() << '\n';
   }
   return result;
