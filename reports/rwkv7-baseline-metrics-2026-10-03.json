@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-03",
+  "status": "benchmark milestone complete; overall optimization goal in progress",
+  "baseline_commit": "0ba4cc408f79b701fd936bf613b1d5ed65d3630a",
+  "hardware_software": "Ryzen AI 7 H 350 / RyzenAI-npu6 / AIE2P 6x8 topology / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic; power mode not reverified",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Report logical graph_nodes and graph_buffers separately from root_bos",
+    "Preserve ordered per-trial decode_samples_ms and separately time state resets",
+    "Report total replays including warmup; reserve latency storage before timed loops"
+  ],
+  "validation": {
+    "builds": "release and test presets passed",
+    "host_tests": "3/3 CTest passed",
+    "benchmark_output": "Both candidate runs in BF16 and INT8 output mode: sample count, means, total replays and graph counts verified; first pair also p95 and positive reset time verified",
+    "argument_rejections": "Missing arguments, zero, nonnumeric and out-of-range counts rejected",
+    "stage_oracles": "BF16 ChannelMix and INT8 ChannelMix/output projection numerical, replay and BO guard checks passed",
+    "inference_change": "None; runtime, kernels and model arithmetic unchanged"
+  },
+  "benchmarks": {
+    "bf16": {
+      "order": "A/B/B/A per precision; two trials of 8 prefill and 24 decode tokens per process",
+      "process_decode_mean_ms": [
+        203.29442802083338,
+        205.89624847916664,
+        203.66162714583334,
+        203.42688329166663
+      ],
+      "before_mean_ms": 203.36065565625,
+      "after_mean_ms": 204.77893781249998,
+      "latency_change_percent": 0.697422100490952,
+      "resident_bytes": 2917120000
+    },
+    "int8": {
+      "order": "A/B/B/A per precision; two trials of 8 prefill and 24 decode tokens per process",
+      "process_decode_mean_ms": [
+        185.7113342708333,
+        185.493656,
+        186.12220766666667,
+        185.40322825000007
+      ],
+      "before_mean_ms": 185.5572812604167,
+      "after_mean_ms": 185.80793183333333,
+      "latency_change_percent": 0.13507989081003036,
+      "resident_bytes": 2025306112
+    }
+  },
+  "graph": {
+    "nodes": 960,
+    "logical_buffers": 1492,
+    "root_bos": 291,
+    "runs_per_token": 123,
+    "host_upload_bytes_per_token": 8192,
+    "host_download_bytes_per_token": 262144
+  },
+  "bf16_stage_median_ms_excluding_first_token": {
+    "attention_projections": 45.628,
+    "channel_mix": 65.0979,
+    "head": 7.65902,
+    "norm": 0.448888,
+    "norm_mix": 8.23076,
+    "projection_residual": 24.067,
+    "recurrence_stage": 2.16156,
+    "value_recurrence_stage": 51.1447
+  },
+  "limits": [
+    "This is measurement infrastructure, not a speedup claim. Process variation includes a slower BF16 candidate process; no inference runtime or kernel code changed.",
+    "Host stage time includes scheduling, DMA and program switching; it is not kernel cycles or hardware utilization.",
+    "Sequential prefill and W8A16 remain; native INT8 throughput, batched prefill and the hardware-limit objective are not achieved.",
+    "Stage synthetic accuracy checks do not establish long-context language quality."
+  ],
+  "raw_logs": "reports/runs/baseline-metrics-2026-10-03"
+}

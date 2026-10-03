@@ -61,15 +61,19 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 4; ++i)
       graph.replay_resident(i % weights.vocabulary());
     std::vector<double> latencies;
+    latencies.reserve(trials * decode);
     Json trial_results = Json::array();
     Vector logits;
     for (size_t trial = 0; trial < trials; ++trial) {
+      start = Clock::now();
       graph.load_state(initial);
+      const double reset_s = seconds(start);
       start = Clock::now();
       for (size_t t = 0; t < prefill; ++t)
         logits = graph.replay_resident((t * 17 + 1) % weights.vocabulary());
       double prefill_s = seconds(start);
       std::vector<double> sample;
+      sample.reserve(decode);
       for (size_t t = 0; t < decode; ++t) {
         start = Clock::now();
         logits = graph.replay_resident(((prefill + t) * 17 + 1) % weights.vocabulary());
@@ -79,8 +83,10 @@ int main(int argc, char **argv) {
         if (!std::isfinite(x))
           throw std::runtime_error("Nonfinite final logits");
       latencies.insert(latencies.end(), sample.begin(), sample.end());
-      trial_results.push_back({{"prefill_seconds", prefill_s},
+      trial_results.push_back({{"state_reset_seconds", reset_s},
+          {"prefill_seconds", prefill_s},
           {"prefill_tokens_per_second", prefill / prefill_s},
+          {"decode_samples_ms", sample},
           {"decode", distribution(sample)}});
     }
     auto stats = graph.stats();
@@ -92,6 +98,8 @@ int main(int argc, char **argv) {
       {"warmup_tokens", 4}, {"weight_load_seconds", load_s},
       {"graph_build_seconds", build_s}, {"trials", trial_results},
       {"decode", distribution(latencies)}, {"runs_per_token", stats.persistent_runs},
+      {"graph_nodes", stats.nodes}, {"graph_buffers", stats.buffers},
+      {"replays", stats.replays},
       {"resident_bytes", stats.resident_bytes}, {"root_bos", stats.root_bos},
       {"host_upload_bytes_per_token", stats.persistent_upload_bytes},
       {"host_download_bytes_per_token", stats.persistent_download_bytes},

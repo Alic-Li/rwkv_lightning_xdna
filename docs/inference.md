@@ -192,7 +192,11 @@ cmake --build --preset release
 ```
 
 输出包含每轮 prefill tokens/s、decode mean/p50/p95、runs/token、常驻字节和
-host BO 传输字节。禁止同时开启 `RWKV_XDNA_PROFILE`；阶段 profiling 使用 CLI
+host BO 传输字节。`graph_nodes` / `graph_buffers` 为逻辑图节点与缓冲区数量，
+`root_bos` 为实际根 BO 数，不能互相替代。每轮 `decode_samples_ms` 按执行顺序保留
+原始延迟，可用于复核分位数和观察漂移；`state_reset_seconds` 单独记录状态重置，
+不计入 prefill/decode。`replays` 包含预热和全部测量轮次。
+禁止同时开启 `RWKV_XDNA_PROFILE`；阶段 profiling 使用 CLI
 单独执行。基准期间避免并行编译或其他 NPU 任务；比较优化前后采用 A/B/B/A 顺序，
 保留每轮分布。固定合成 token 是性能负载，不是语言质量验收。
 
