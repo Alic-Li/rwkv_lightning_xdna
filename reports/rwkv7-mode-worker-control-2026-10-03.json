@@ -1,0 +1,112 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "c908d58",
+  "decision": "Retain the core-reuse diagnostic and C++ entry-cost comparison. No production model artifact promotion; extend the approach to a real model stage next.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "design": {
+    "cores": 11,
+    "matrix_workers": 8,
+    "description": "Each matrix worker reads an opcode from a common input FIFO and executes either original BF16 projection arithmetic or original FP32 LayerNorm plus its assigned output slice. Two copy workers and one residual worker retain the same output graph. Norm and projection use separate instruction streams with identical PDI and one xclbin UUID.",
+    "input_abi": "6160 FP32 words: x[2048], gamma[2048], beta[2048], opcode, padding[15]. Opcode zero selects norm instructions, one selects projection instructions. Residual is zero for norm. Output is [result, result+residual].",
+    "device_switching": "scf.if in the eight worker loops with dynamic object-FIFO lowering. Norm does not consume weight FIFO objects or schedule weight DMA; consecutive unequal runs of each opcode are supported.",
+    "constraint_found": "A separate control FIFO would require three inputs per matrix core, exceeding its two input DMA channels. Putting the opcode in the common data packet avoids the extra channel.",
+    "limitations": [
+      "Norm is redundantly computed by all eight workers, each retaining 256 outputs; this is a reuse mechanism experiment, not a final normalization implementation.",
+      "Packed projection input is 24640 bytes instead of 8192; host fixture packing is outside timed loops and is not a proposed production host arithmetic path.",
+      "BF16 only. No new INT8 path, full-model integration, prefill result or hardware-limit claim."
+    ]
+  },
+  "protocol": {
+    "dispatch": "Serial C++ only; Python compiles offline.",
+    "arms": [
+      "Existing independent norm and projection programs",
+      "Previous twelve-core independently co-resident norm/projection",
+      "Eleven-core opcode-selected reuse of projection workers"
+    ],
+    "order": "For each entry condition: A/reused/reused/A, then A/independent-shared/independent-shared/A. Sixteen warmups and 256 measured pairs per block. Baseline has four blocks per condition; each candidate has two.",
+    "entry_condition": "Immediately before each timed pair, execute/wait the distinct production fused-norm-mix-6 program; its duration is excluded. Compare with direct repeated norm/projection cycles.",
+    "timing": "Host execute/wait time for norm, projection, and their sum; no allocation, host transfers, packing or validation inside timed loops. Same nonuniform gamma/beta, input vector, residual and weight matrix for all arms.",
+    "scope": "The projection uses the same fixed source x in all arms, not the preceding normalization result. This controls program entry and switching; it is not an end-to-end layer pipeline."
+  },
+  "results_us": {
+    "already_resident_cycle": {
+      "separate_programs": {
+        "norm_mean_us": 205.15111718750006,
+        "projection_mean_us": 988.6338066406252,
+        "pair_mean_us": 1193.784923828125,
+        "samples": 1024
+      },
+      "independent_shared_workers": {
+        "norm_mean_us": 77.57219140624997,
+        "projection_mean_us": 274.32467968749995,
+        "pair_mean_us": 351.8968710937499,
+        "samples": 512
+      },
+      "reused_workers": {
+        "norm_mean_us": 77.51332421875003,
+        "projection_mean_us": 272.63117187500006,
+        "pair_mean_us": 350.1444960937501,
+        "samples": 512
+      }
+    },
+    "after_third_program": {
+      "separate_programs": {
+        "norm_mean_us": 204.75201562500004,
+        "projection_mean_us": 988.8302626953122,
+        "pair_mean_us": 1193.582278320312,
+        "samples": 1024
+      },
+      "independent_shared_workers": {
+        "norm_mean_us": 885.3733886718751,
+        "projection_mean_us": 271.395640625,
+        "pair_mean_us": 1156.769029296875,
+        "samples": 512
+      },
+      "reused_workers": {
+        "norm_mean_us": 797.0653730468749,
+        "projection_mean_us": 272.97080859375,
+        "pair_mean_us": 1070.0361816406248,
+        "samples": 512
+      }
+    }
+  },
+  "artifacts": {
+    "reused_workers": {
+      "pdi_bytes": 51792,
+      "pdi_sha256": "b9a7bbc98ce9722596ac0b7c3583b2e6cc1f563ed9b33a4f510098e7e6609e5c"
+    },
+    "independent_shared_workers": {
+      "pdi_bytes": 39312,
+      "pdi_sha256": "d5083bb513ac77cd88c54942d99a0cc7a1a3906d4101a0eddd21b988efec2bdc"
+    }
+  },
+  "validation": {
+    "hardware": {
+      "exact_modes_replay_immutable_guards": "passed",
+      "fp64_projection_max_abs": 4.0736631490290165e-07,
+      "status": "passed"
+    },
+    "coverage": [
+      "FP64 projection oracle with original BF16 rounding and residual, and independent FP64 affine normalization oracle.",
+      "Exact float output comparison with production programs for random input, constant input, large-amplitude random input and near-constant input; nonuniform gamma and beta.",
+      "Unequal consecutive norm/project opcode runs and many alternating runs, including interruption by a third program.",
+      "Third-program final recurrent shift and six mixed vectors compared with expected normalized input.",
+      "All BO guards checked; input, affine parameters, residual, zeros and all weight bytes checked immutable."
+    ],
+    "host": "Release/test builds and 3/3 CTest passed."
+  },
+  "interpretation": [
+    "Core reuse retains a benefit after entry from a third program in this controlled BF16 stage experiment. The remaining entry penalty is still substantial.",
+    "The reused-worker PDI is larger than the independently co-resident one, yet its measured entry-inclusive pair is faster. PDI byte count alone is not a sufficient explanation of cost.",
+    "Per-core binary inspection of the production attention R/K/V worker shows only the called R/K/V, zero and GEMV functions retained, so blindly adding function-section flags is not justified by unused-function evidence."
+  ],
+  "next_action": "Apply operation selection and shared DMA endpoints to model norm/mix and attention workers, preserving NPU-only arithmetic and the existing numerical contract. Use entry-inclusive stage controls, full-model golden regression and full-model A/B timing before promotion.",
+  "logs": "reports/runs/mode-worker-2026-10-03"
+}

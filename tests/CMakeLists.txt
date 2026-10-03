@@ -103,3 +103,8 @@ add_executable(rwkv-working-set-bench inference/working_set_bench.cpp)
 target_link_libraries(rwkv-working-set-bench PRIVATE rwkv::xdna)
 target_include_directories(rwkv-working-set-bench PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 target_compile_options(rwkv-working-set-bench PRIVATE -Wall -Wextra -ffp-contract=off)
+
+add_executable(rwkv-mode-worker-test inference/mode_worker_test.cpp)
+target_link_libraries(rwkv-mode-worker-test PRIVATE rwkv::xdna)
+target_include_directories(rwkv-mode-worker-test PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+target_compile_options(rwkv-mode-worker-test PRIVATE -Wall -Wextra -ffp-contract=off)

@@ -329,6 +329,28 @@ FP64 oracle、重复输出与缓冲区保护检查；独立运行时查询确认
 下一步研究在不同操作间复用计算核心和 DMA 通道，并同时测量从第三个程序切入的开销。
 详见[被拒绝的 attention 共驻实验](../reports/rwkv7-shared-attention-rejected-2026-10-03.json)。
 
+### 在同一计算核心上选择操作
+
+诊断原型把操作码放入公共输入包，让八个投影核心选择 LayerNorm 或投影分支，
+复用 DMA 与输出图；共11核。独立操作码 FIFO 会超出每个核心的两个输入 DMA 通道，
+因此控制字与数据共用通道。该原型的输入格式与生产模型不同，仅用于验证核心复用。
+
+```bash
+MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie .venv/bin/python \
+  tools/compile/rwkv7_mode_worker_probe.py --output-root build/kernels/mode-worker
+cmake --build --preset test --target rwkv-mode-worker-test
+# shared-program-bf16 用上一节的共驻程序编译器生成。
+./build/test/rwkv-mode-worker-test build/kernels/mode-worker \
+  build/kernels/rwkv7-bf16 build/kernels/shared-program-bf16
+```
+
+测试分别覆盖连续操作和每次先执行第三个程序再切入，并计时 norm 与 projection 的总和。
+2026-10-03 复用核心在后者约1.07 ms，独立核心共驻约1.16 ms，分开程序约1.19 ms。
+四种输入、非均匀 affine 参数、连续不等次数的操作码切换、FP64 oracle、原程序输出比较、
+不可变数据与缓冲区保护检查均通过。这里投影使用固定输入，不以 norm 输出作为输入，
+因此这是程序进入与切换的对照，不代表整层或整模型加速。
+详见[核心复用对照记录](../reports/rwkv7-mode-worker-control-2026-10-03.json)。
+
 ## C++ 接口和状态
 
 ```cpp
