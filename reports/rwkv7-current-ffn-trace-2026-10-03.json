@@ -1,0 +1,198 @@
+{
+  "date": "2026-10-03",
+  "status": "two independent captures per precision, numerical oracle/shift/replay/guards passed",
+  "scope": "Fresh diagnostic builds of current production decode FFN; selected key0/value0 only. Initial activation acquire is outside markers. Instrumented wall times are not model performance. Event fractions can overlap; vector issue is not peak utilization.",
+  "captures": {
+    "bf16": [
+      {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile3,0",
+            "invocations": 1,
+            "marked_cycles": 1548988,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 920532,
+              "INSTR_VECTOR": 113152,
+              "MEMORY_STALL": 457,
+              "PORT_RUNNING_1": 10
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.5942796199841445,
+              "INSTR_VECTOR": 0.07304898424003285,
+              "MEMORY_STALL": 0.00029503133658879217,
+              "PORT_RUNNING_1": 6.455827934109238e-06
+            }
+          },
+          {
+            "core": "core_trace for tile5,0",
+            "invocations": 1,
+            "marked_cycles": 1576888,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 930560,
+              "INSTR_VECTOR": 110592,
+              "MEMORY_STALL": 17971,
+              "PORT_RUNNING_1": 10
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.5901243461805784,
+              "INSTR_VECTOR": 0.07013307222833835,
+              "MEMORY_STALL": 0.011396497405015448,
+              "PORT_RUNNING_1": 6.341604476665432e-06
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      },
+      {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile3,0",
+            "invocations": 1,
+            "marked_cycles": 1628370,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 999918,
+              "INSTR_VECTOR": 113152,
+              "MEMORY_STALL": 453,
+              "PORT_RUNNING_1": 10
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.6140606864533245,
+              "INSTR_VECTOR": 0.06948789280077623,
+              "MEMORY_STALL": 0.00027819230273218006,
+              "PORT_RUNNING_1": 6.141110435588963e-06
+            }
+          },
+          {
+            "core": "core_trace for tile5,0",
+            "invocations": 1,
+            "marked_cycles": 1694482,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 1049894,
+              "INSTR_VECTOR": 110592,
+              "MEMORY_STALL": 16231,
+              "PORT_RUNNING_1": 10
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.6195958410888991,
+              "INSTR_VECTOR": 0.06526596328553505,
+              "MEMORY_STALL": 0.009578738517139751,
+              "PORT_RUNNING_1": 5.901508543613919e-06
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      }
+    ],
+    "int8": [
+      {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile3,0",
+            "invocations": 1,
+            "marked_cycles": 954483,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 12116,
+              "INSTR_VECTOR": 246912,
+              "MEMORY_STALL": 768,
+              "PORT_RUNNING_1": 11
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.012693782917034668,
+              "INSTR_VECTOR": 0.25868663978300294,
+              "MEMORY_STALL": 0.0008046240739751258,
+              "PORT_RUNNING_1": 1.1524563559539562e-05
+            }
+          },
+          {
+            "core": "core_trace for tile3,4",
+            "invocations": 1,
+            "marked_cycles": 951096,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 15416,
+              "INSTR_VECTOR": 242336,
+              "MEMORY_STALL": 59,
+              "PORT_RUNNING_1": 10
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.016208668735858422,
+              "INSTR_VECTOR": 0.2547965715343141,
+              "MEMORY_STALL": 6.203369586245763e-05,
+              "PORT_RUNNING_1": 1.0514185739399597e-05
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      },
+      {
+        "schema_version": 1,
+        "cores": [
+          {
+            "core": "core_trace for tile3,0",
+            "invocations": 1,
+            "marked_cycles": 951678,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 9321,
+              "INSTR_VECTOR": 246912,
+              "MEMORY_STALL": 758,
+              "PORT_RUNNING_1": 11
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.009794279157446111,
+              "INSTR_VECTOR": 0.25944909938025257,
+              "MEMORY_STALL": 0.0007964878877099187,
+              "PORT_RUNNING_1": 1.1558531351990905e-05
+            }
+          },
+          {
+            "core": "core_trace for tile3,4",
+            "invocations": 1,
+            "marked_cycles": 947412,
+            "event_cycles": {
+              "PORT_RUNNING_0": 0,
+              "LOCK_STALL": 11760,
+              "INSTR_VECTOR": 242336,
+              "MEMORY_STALL": 31,
+              "PORT_RUNNING_1": 10
+            },
+            "event_fraction": {
+              "PORT_RUNNING_0": 0.0,
+              "LOCK_STALL": 0.012412762346265404,
+              "INSTR_VECTOR": 0.255787344893246,
+              "MEMORY_STALL": 3.2720717069237035e-05,
+              "PORT_RUNNING_1": 1.0555070022334529e-05
+            }
+          }
+        ],
+        "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+      }
+    ]
+  },
+  "interpretation": [
+    "BF16 sampled windows show approximately 59-62% LOCK_STALL. Within these source markers repeated weight-FIFO acquire/release dominates FIFO operations; this is evidence to investigate supply/dataflow, not proof of a DDR bandwidth limit.",
+    "INT8 sampled windows show approximately 1-1.6% LOCK_STALL and approximately 25-26% vector issue. Its placement, conversion work and dataflow differ from BF16, so the gap cannot be attributed to weight bytes alone.",
+    "Do not call the unclassified remainder compute time, or sum overlapping stall categories. No full-array utilization estimate."
+  ],
+  "source_sha256": {
+    "tools/compile/rwkv7_channel_mix.py": "f535d60154d8d832ee41475a00f715e2fed73dba192cec5b5b405b5d3d663bf6",
+    "kernels/rwkv/ffn_pipeline_bf16.cc": "62851297e175efbeb9eac3d84dbf6d69a1a1f254f08863f902dc3bbc6ff79d0a",
+    "kernels/rwkv/channel_mix_int8.cc": "07e3c37e9b2ec5367b5074de9f2816f3115151e1b072a59854e3284d02f7fa57"
+  },
+  "logs": "reports/runs/throughput-resume-2026-10-03"
+}

@@ -1,0 +1,153 @@
+{
+  "date": "2026-10-03",
+  "status": "round completed with reproducible full-model prefill gains; hardware performance ceiling and decode optimization remain open",
+  "baseline_commit": "2cd50a1",
+  "accepted": {
+    "entry": "--prefill chunk4; explicit opt-in, BF16 and both W8A16 weight modes",
+    "architecture": "Layer-major four-token activation slots, stage-contiguous paired attention and FP32 WKV, four-token FFN. FFN has 4 key, 4 collect/activation, 4 value and 3 norm/mix/residual workers. Value activation blocks are read from device-written DDR after an explicit device DMA completion boundary.",
+    "reuse": "One FFN weight stream serves four tokens; BF16 67108864 bytes/chunk, INT8 34078720 bytes/chunk. Value activation rereads 2097152 bytes/chunk. These are scheduled payloads, not bandwidth counters.",
+    "state_and_precision": "Original per-token MAC/reduction order, FP32 WKV/shift/state, original double statistics and special math. INT8 remains W8A16 BF16 MAC with FP32 accumulation, not native INT8 MAC. No activation quantization, fast-math or CPU/GPU arithmetic fallback.",
+    "buffers": "Additional 60977152 bytes vs batch2; CPU embedding/sampling boundary unchanged. No host activation round trip.",
+    "contexts": "Output-stride PDI bytes are checked before xclbin/context sharing. Existing runtime unchanged."
+  },
+  "performance": {
+    "bf16_prompt32": {
+      "A": {
+        "prefill_s": 3.437049251,
+        "prefill_tokens_s": 9.310311742169446,
+        "decode_ms": 198.73217131250001
+      },
+      "B": {
+        "prefill_s": 2.59011447375,
+        "prefill_tokens_s": 12.354666299235031,
+        "decode_ms": 200.81065432291666
+      }
+    },
+    "bf16_prompt128": {
+      "A": {
+        "prefill_s": 13.70153396325,
+        "prefill_tokens_s": 9.342019685045427,
+        "decode_ms": 198.83699654687499,
+        "decode_samples": 384
+      },
+      "B": {
+        "prefill_s": 10.25728899425,
+        "prefill_tokens_s": 12.478930843398665,
+        "decode_ms": 198.73007771875004,
+        "decode_samples": 384
+      },
+      "prefill_throughput_gain_percent": 33.57851154365217,
+      "decode_latency_change_percent": -0.05377209975093722
+    },
+    "int8_ffn_prompt32": {
+      "A": {
+        "prefill_s": 3.411682006,
+        "prefill_tokens_s": 9.37953770126371,
+        "decode_ms": 183.82255087500002
+      },
+      "B": {
+        "prefill_s": 2.646975147,
+        "prefill_tokens_s": 12.089271044447777,
+        "decode_ms": 184.1090611145833
+      },
+      "prefill_throughput_gain_percent": 28.889839024997844,
+      "decode_latency_change_percent": 0.15586240002627427
+    },
+    "int8_ffn_output_prompt32": {
+      "A": {
+        "prefill_s": 3.3866056647500002,
+        "prefill_tokens_s": 9.44898909639137,
+        "decode_ms": 184.19877413541664
+      },
+      "B": {
+        "prefill_s": 2.558648113,
+        "prefill_tokens_s": 12.506604498451406,
+        "decode_ms": 184.30507853125
+      },
+      "prefill_throughput_gain_percent": 32.35918012888553,
+      "decode_latency_change_percent": 0.05771178246560815
+    },
+    "conclusion": "Prefill improved approximately 29-34%. No stable decode improvement established. Initial BF16 short-run ~1% decode slowdown was not reproduced by the longer counterbalanced run.",
+    "method": "Full 24-layer model, fixed synthetic tokens, serial NPU, A/B/B/A for 32 tokens and B/A/A/B for 128-token BF16. Two trials/process; all samples retained. Stage/profile/trace timings excluded."
+  },
+  "validation": {
+    "report": "rwkv7-chunk4-regression-2026-10-03.json",
+    "per_precision": "2628 fresh-build chunk4 bitwise snapshot vectors plus full zero-state chunk check; 1533 original batch2 vectors; 1116 original decode vectors across 128 steps. All three modes pass.",
+    "stage": "BF16/W8A16 FP64 oracles, bitwise intermediate/output/shift checks, guards, reset/branch and immutable inputs pass.",
+    "host": "release/test builds and 3/3 CTest pass.",
+    "artifact_rebuild": "Full offline compiler succeeds; fresh-root C++ dispatch and snapshots pass. Extracted PDI audited separately from container UUID/metadata."
+  },
+  "restoration": {
+    "checked_artifacts": 84,
+    "changed_artifacts": [],
+    "default_prefill": "sequential; existing batch2 remains available",
+    "final_device": "Production FFN oracle/shift/replay/guards passed after both trace rounds; no hardware contexts running at end"
+  },
+  "diagnostics": {
+    "baseline": "rwkv7-throughput-rebaseline-2026-10-03.json",
+    "current_ffn_trace": "rwkv7-current-ffn-trace-2026-10-03.json",
+    "numerical_audit": "rwkv7-numerical-cost-audit-2026-10-03.json",
+    "chunk4_stage_ms_per_token": {
+      "bf16": {
+        "norm": 0.158558625,
+        "norm_mix": 4.2052358750000005,
+        "attention_projections": 18.0337265,
+        "recurrence": 28.529969124999994,
+        "projection_residual": 8.942759125,
+        "channel_mix": 22.086481375,
+        "head": 0.9675865
+      },
+      "int8-ffn": {
+        "norm": 0.14935025,
+        "norm_mix": 4.274932124999999,
+        "attention_projections": 17.9847505,
+        "recurrence": 28.464455624999992,
+        "projection_residual": 8.941646625,
+        "channel_mix": 24.731285749999998,
+        "head": 0.942189125
+      },
+      "int8-ffn-output": {
+        "norm": 0.148945,
+        "norm_mix": 4.31964125,
+        "attention_projections": 18.072779,
+        "recurrence": 28.466609625000004,
+        "projection_residual": 5.9557502499999995,
+        "channel_mix": 24.618593249999996,
+        "head": 0.9076989999999999
+      }
+    }
+  },
+  "rejected": {
+    "paired_local_weight_loads": "BF16 full-model mean prefill change only ~0.02%; INT8 stage screen slower. Candidate reverted, production never overwritten; rwkv7-ffn-pair-load-rejected-2026-10-03.json.",
+    "prior_unfinished_worker_experiments": "Audited existing eight-worker DMA/fan-in failures and historical device-recovery logs. No unchanged retry or claim of success; recorded in rebaseline report."
+  },
+  "remaining_and_next": [
+    "Decode ms/token has not materially improved in this round. Investigate BF16 weight-FIFO supply/routing using the fresh trace before increasing workers; account for MemTile fan-in/local storage and previously failed layouts.",
+    "For larger chunks, redesign bounded activation storage and producer/consumer overlap; do not assume a large CLI chunk equals an on-chip matrix dimension. Current chunk4 recurrence still uses paired FP32 updates.",
+    "Current chunk4 instrumented recurrence is approximately 28.5 ms/token and FFN approximately 22.1 BF16 / 24.6-24.7 W8A16 ms/token. These host stage times include switching/DMA/waits and are not pure compute.",
+    "Keep FP64-to-FP32, approximate math, reduction reordering and activation quantization separate numerical experiments with predeclared thresholds. None adopted here.",
+    "Chunk4 bitwise prompt coverage reaches 64 tokens; performance coverage reaches 128. No 25600-context quality validation or architecture roofline proof. Small prompts with 1-3-token tails may have different tradeoffs."
+  ],
+  "reproduce": {
+    "build": "PATH=\"$PWD/.venv/bin:$PATH\" .venv/bin/python tools/compile/rwkv7_optimized.py --output build/kernels/chunk4 --prefill-chunk4 --int8-ffn-output",
+    "benchmark": "./build/release/rwkv-bench \"$MODEL\" build/kernels/chunk4 32 24 2 --prefill-chunk4 [--int8-ffn|--int8-ffn-output]; compare --prefill-batch2 in A/B/B/A order. Use 128 96 2 and B/A/A/B for longer BF16.",
+    "docs": "docs/inference.md, docs/build.md"
+  },
+  "provenance": {
+    "hardware": "AMD Ryzen AI 7 H 350 / RyzenAI-npu6, aie2p, topology 6x8",
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "default, rechecked at end; historical performance-mode results are not paired controls",
+    "toolchain": {
+      "mlir-aie": "1.4.4.dev53+gd53582d",
+      "numpy": "2.5.3",
+      "cmake": "4.1.0",
+      "llvm-aie": "22.0.0.2026091701+773413fb",
+      "kernel": "7.0.0-38-generic"
+    },
+    "checkpoint_sha256": "dfc1fc450641d5e00c5f412b5530a17b2a734ac02bde04d98c57608f5daaf773",
+    "checkpoint": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+    "model": "24 layers, C=2048, heads=32x64, FFN=8192, vocab=65536"
+  },
+  "raw_logs": "reports/runs/throughput-resume-2026-10-03"
+}

@@ -266,6 +266,13 @@ batch2、1,116个128-step decode 检查向量逐位通过，另验证四-token �
 `tail_runs` 包括所有尾 token；单-token stage 的 slot 为0–3，paired stage 为0/2，
 四-token FFN 为4。耗时仍包括程序切换、DMA、等待和计算，不能当作独立硬件计数器。
 
+本轮[交接报告](../reports/rwkv7-throughput-handoff-2026-10-03.json)汇总复现命令、
+产物核对、失败候选和后续边界。当前生产 FFN 的两次独立 trace 中，被采样 BF16
+key/value 核在标记窗口内约59–62%为 lock stall，INT8 约1–1.6%。
+窗口内含权重 FIFO 等待，但这不能单独证明 DDR 带宽已达上限；两图布局和转换开销也不同。
+详见[当前 FFN trace](../reports/rwkv7-current-ffn-trace-2026-10-03.json)。
+后续并行优化应同时设计存储、DMA、广播/汇聚和阶段节拍，再用整模型验收。
+
 ## 缺少生产 kernel
 
 若 CLI 报：
