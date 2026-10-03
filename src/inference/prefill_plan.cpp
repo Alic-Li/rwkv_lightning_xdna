@@ -221,7 +221,7 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
     if (tokens.size() % 2) {
       State unused;
       result = replay(tokens.back(), unused, true);
-      prefill_run_count += runs.size();
+      prefill_run_count += decode_run_count();
     }
   } catch (...) {
     resident_state_valid = false;
@@ -249,7 +249,7 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
           {"submit_us", t.submit}, {"wait_us", t.wait}});
     std::cerr << "prefill_profile " << nlohmann::json({
         {"prompt_tokens", tokens.size()}, {"pairs", tokens.size() / 2},
-        {"odd_tail_runs", tokens.size() % 2 ? runs.size() : 0},
+        {"odd_tail_runs", tokens.size() % 2 ? decode_run_count() : 0},
         {"pair_upload_us", upload_us}, {"final_pair_download_us", download_us},
         {"stages", rows},
         {"scope", "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output."}

@@ -2,6 +2,8 @@
 """Two-token BF16/W8A16 ChannelMix: one submission, shared streamed weight tiles."""
 import argparse
 import json
+import hashlib
+import shutil
 import numpy as np
 from ml_dtypes import bfloat16
 import aie.iron as iron
@@ -149,19 +151,29 @@ if __name__ == "__main__":
     parser.add_argument("--recurrence-input", action="store_true")
     args = parser.parse_args()
     quantized = args.int8
-    stride = 61440 if args.recurrence_input else 4096
-    for projection_input in ((True,) if args.recurrence_input else (False, True)):
-        suffix = "-recurrence-input" if args.recurrence_input else "-projection-input" if projection_input else ""
+    layouts = ((True, 4096), (True, 61440)) if args.recurrence_input else ((False, 4096), (True, 4096))
+    for projection_input, stride in layouts:
+        recurrence_input = stride == 61440
+        suffix = "-recurrence-input" if recurrence_input else "-projection-input" if projection_input else ""
         path = KERNEL_ROOT / (("int8" if quantized else "bf16") + "-prefill-ffn-b2" + suffix)
         path.mkdir(parents=True, exist_ok=True)
         design.specialize(projection_input=projection_input, quantized=quantized, projection_stride=stride).compile(
             path / "design.xclbin", path / "instructions.bin")
+        pdi = (path / "design.prj/main.pdi").read_bytes()
+        if recurrence_input:
+            shared = KERNEL_ROOT / (("int8" if quantized else "bf16") + "-prefill-ffn-b2-projection-input")
+            if pdi != (shared / "design.prj/main.pdi").read_bytes():
+                raise RuntimeError("FFN instruction variants have different device programs")
+            # Keep this variant's DMA instructions, but use the byte-identical
+            # xclbin/UUID so C++ sessions can share its hardware context.
+            shutil.copy2(shared / "design.xclbin", path / "design.xclbin")
         (path / "config.json").write_text(json.dumps(dict(
             schema_version=1, batch=2, channels=2048, hidden=8192,
+            pdi_sha256=hashlib.sha256(pdi).hexdigest(),
             weights="int8" if quantized else "bfloat16", activation="bfloat16", state="float32",
             layout="token_major", runs_per_batch=1,
-            input_layout="recurrence_projection_pairs" if args.recurrence_input else "projection_residual_pairs" if projection_input else "token_major",
-            **(dict(input_stride=stride) if args.recurrence_input else {}),
+            input_layout="recurrence_projection_pairs" if recurrence_input else "projection_residual_pairs" if projection_input else "token_major",
+            **(dict(input_stride=stride, shared_program=shared.name) if recurrence_input else {}),
             fp32_arena_floats=26624, bf16_arena_elements=20480,
             fp32_offsets=dict(shift=0, raw=2048, projected=18432, output=22528),
             bf16_offsets=dict(mixed=0, activated=4096),

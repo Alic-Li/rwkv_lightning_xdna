@@ -20,7 +20,8 @@ NPU 默认 prefill 与 decode 复用逐 token 状态转移；显式 `--prefill b
 分层两-token 调度，在 attention projections 和 FFN 内共享矩阵权重流；WKV 仍按 token 顺序更新。
 
 当前支持 C=2048、32×64 heads、FFN=8192、词表65536、低秩维度不超过256的模型。
-已验证 checkpoint 为 `rwkv7-g1k-1.5b-20260930-ctx25600.pth`，24层、123 runs/token。
+已验证 checkpoint 为 `rwkv7-g1k-1.5b-20260930-ctx25600.pth`，24层。BF16 / INT8 FFN-only
+普通 decode 为100 runs/token；INT8 FFN+output 和诊断 trace 为123 runs/token。
 其他形状会报错，不会选择旧实现。先前性能实验和跨精度漂移记录保留在 `reports/`；
 其中的历史命令不再代表当前接口。
 
@@ -103,7 +104,7 @@ C++ API 使用 `DecodeGraph(weights, root, WeightMode::BFloat16, PrefillMode::Ba
 
 24层模型的 BF16 / INT8 FFN-only pair body 为123次提交，最后 logits 再加2次；
 32-token prompt 共1970次（61.5625/token）。INT8 FFN+output 的 pair body 为146次，
-32-token prompt 共2338次（73.0625/token）；原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
+32-token prompt 共2338次（73.0625/token）；融合前逐步路径为3936次；当前 BF16 / INT8 FFN-only 逐步路径为3200次。每 token 上传8192字节，整个 prompt 仅下载
 262144字节 logits。Benchmark JSON 分开报告 prefill 提交/host BO流量和 decode 指标；
 这些数值不包含设备内部 DMA，也不等于硬件带宽计数。
 2026-10-03 首版仅 FFN batching 的 BF16 A/B/B/A 中，32-token prefill 平均6.532→4.009 s（1.63倍吞吐），
@@ -255,19 +256,30 @@ LayerNorm，由 `rwkv7_norm.py` 生成，包含在 `release-kernels` 的编译�
 | `tools/compile/rwkv7_optimized.py` | 按固定清单编译生产程序 |
 
 默认设备计划为：输入 LayerNorm；每层 attention norm/mix → BF16 attention
-projections → fused value residual / FP32 recurrence stage（首层仅 recurrence）→ BF16 output
-projection/residual → BF16 ChannelMix；最后 LayerNorm → BF16 vocabulary head。
-每次 replay 复用全部 BO 和 run，不重新排布权重或构造 command。
-960个逻辑节点仍用于依赖与逐节点诊断，实际提交123个 run；没有原生 runlist。
-非首层将 value residual 融入 recurrence prepare，使用7条 lane 分配32个 head，
-first-layer value 只从 DDR 读取一次并广播。三组 value 输入位于30-vector arena 的尾部，
-保留原始 projection 诊断值；下游只传递/写回原有27个 recurrent vector，避免重复写入
-不变的输入。删除独立 value run 和23个独立 value BO，不改变 FP32 state 或运算顺序。
-新的 `fused-value-recurrence-stage` 产物是必需项；旧产物需通过生产 kernel preset 重编译。
+projections → FP32 recurrence 与 BF16 output projection/residual 融合 → ChannelMix；
+最后 LayerNorm → BF16 vocabulary head。首层保持独立 recurrence 和 output 提交；
+INT8 FFN+output 暂不使用 decode 融合。每次 replay 复用 BO 和 run，不重新排布权重。
+
+BF16 / INT8 FFN-only 非首层使用31核 `bf16-decode-recurrence-projection`，7条 lane
+处理32个 head，first-layer value 广播一次。最终 projection/residual 写入辅助 arena
+的向量25/26，FFN 直接读取，无额外常驻 BO 或 host copy。24层普通 decode 从123降到
+100次提交，960个逻辑节点保留用于依赖与诊断；仍没有原生 runlist。
+启用 node/projection trace 时使用原逐阶段计划，恢复123次提交并输出完整中间张量；
+`stats()` 反映当前计划。两种计划共享权重和请求状态，支持切换与 reset/branch。
+
+生产 kernel preset 现包含 `bf16-decode-recurrence-projection`；独立编译入口为
+`rwkv7_decode_recurrence_projection.py`。旧产物需要重新编译，包括 batch2 FFN：
+两种输入 stride 的设备 PDI 经逐字节比较相同后使用同一 xclbin/UUID，各自保留 DMA
+指令。C++ Session 共享同设备、UUID、kernel 的硬件 context，以避免增加 decode 程序后
+batch2 初始化失败。共享缓存只持有弱引用，不延长程序生命周期。
+32-token batch2 后的 decode A/B/B/A：BF16 204.667→202.220 ms/token（降低1.20%），
+INT8 FFN-only 189.157→186.493 ms/token（降低1.41%）；prefill 基本持平。
+两种 decode 精度各1,116个向量、三种 prefill 精度各1,533个向量精确回归通过。
+阶段与整模型验证见[decode 融合记录](../reports/rwkv7-decode-recurrence-projection-2026-10-03.json)。
 
 已测试进一步合并 attention norm/mix 与 projections 的17核图：虽然提交数从123降到99、
 BO 数从291降到242，且128步逐位回归通过，整模型 A/B/B/A 仍比原图慢约0.7%。
-因此未采用该融合，生产计划保持123次提交；孤立 warm-stage 加速不能代替整模型测量。
+因此未采用该 attention 融合，当时保留123次提交；孤立 warm-stage 加速不能代替整模型测量。
 布局、调度失败和对比数据见 [被拒绝的 attention 融合](../reports/rwkv7-attention-fusion-rejected-2026-10-03.json)。
 
 ## C++ 接口和状态

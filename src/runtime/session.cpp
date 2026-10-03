@@ -12,6 +12,9 @@
 #include <chrono>
 #include <fstream>
 #include <limits>
+#include <map>
+#include <mutex>
+#include <tuple>
 #include <stdexcept>
 
 namespace rwkv::xdna {
@@ -34,12 +37,39 @@ using Clock = std::chrono::steady_clock;
 double micros(Clock::time_point start, Clock::time_point end) {
   return std::chrono::duration<double, std::micro>(end - start).count();
 }
-} // namespace
-
-struct Session::Impl {
+// Instruction variants of an identical xclbin use one hardware context.
+// Weak entries do not extend device-program lifetime beyond the owning sessions.
+struct Program {
   xrt::device device;
   xrt::hw_context context;
   xrt::kernel kernel;
+  Program(const xrt::xclbin &binary, const std::string &name, unsigned index)
+      : device(index), context(device, device.register_xclbin(binary)), kernel(context, name) {}
+};
+std::shared_ptr<Program> program(const std::filesystem::path &binary,
+                                 const std::string &name, unsigned index) {
+  xrt::xclbin image(binary.string());
+  using Key = std::tuple<unsigned, std::string, std::string>;
+  static std::mutex mutex;
+  static std::map<Key, std::weak_ptr<Program>> cache;
+  std::lock_guard<std::mutex> lock(mutex);
+  for (auto it = cache.begin(); it != cache.end();)
+    if (it->second.expired()) it = cache.erase(it); else ++it;
+  const auto uuid = image.get_uuid();
+  const auto &bytes = uuid.get();
+  const std::string uuid_key(reinterpret_cast<const char *>(bytes), sizeof(bytes));
+  auto &entry = cache[{index, uuid_key, name}];
+  if (auto existing = entry.lock()) return existing;
+  auto created = std::make_shared<Program>(image, name, index);
+  entry = created;
+  return created;
+}
+} // namespace
+
+struct Session::Impl {
+  std::shared_ptr<Program> shared_program;
+  xrt::device &device;
+  xrt::kernel &kernel;
   std::vector<uint32_t> instructions;
   xrt::bo instruction_buffer;
   std::vector<xrt::bo> buffers;
@@ -48,9 +78,9 @@ struct Session::Impl {
 
   Impl(const std::filesystem::path &binary, const std::filesystem::path &inst,
        const std::string &name, unsigned index)
-      : device(index),
-        context(device, device.register_xclbin(xrt::xclbin(binary.string()))),
-        kernel(context, name), instructions(read_instructions(inst)),
+      : shared_program(program(binary, name, index)),
+        device(shared_program->device), kernel(shared_program->kernel),
+        instructions(read_instructions(inst)),
         instruction_buffer(device, instructions.size() * 4,
                            XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1)) {
     instruction_buffer.write(instructions.data());

@@ -95,3 +95,6 @@ target_link_libraries(rwkv-prefill-recurrence-test PRIVATE rwkv_xdna)
 
 add_executable(rwkv-recurrence-projection-test inference/recurrence_projection_test.cpp)
 target_link_libraries(rwkv-recurrence-projection-test PRIVATE rwkv_xdna)
+
+add_executable(rwkv-decode-recurrence-projection-test inference/decode_recurrence_projection_test.cpp)
+target_link_libraries(rwkv-decode-recurrence-projection-test PRIVATE rwkv_xdna)

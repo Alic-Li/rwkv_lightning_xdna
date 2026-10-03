@@ -15,7 +15,7 @@ xdna::Session &DecodeGraph::Impl::session(const std::filesystem::path &root,
       s = std::make_unique<xdna::Session>(root / name / "design.xclbin",
                                           root / name / "instructions.bin");
     } catch (const std::exception &e) {
-      throw std::runtime_error("Create resident session " + name + ": " +
+      throw std::runtime_error("Create resident session " + name + " (" + std::to_string(sessions.size()) + " programs): " +
                                e.what());
     }
   }
@@ -42,7 +42,7 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_pair(xdna::Session &s, const V
 void DecodeGraph::Impl::append_run(xdna::Session &s,
     std::vector<xdna::DeviceBuffer> arguments, Stage stage) {
   runs.push_back(s.prepare(arguments));
-  if (capture_prefill) bindings.push_back({&s, std::move(arguments), stage});
+  bindings.push_back({&s, std::move(arguments), stage});
 }
 xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
                                                        const Vector &v) {
@@ -52,6 +52,48 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
   resident_bytes += b.size();
   ++root_bos;
   return b;
+}
+// Keep the original plan for node/projection tracing. Normal execution reuses
+// its runs and BOs, replacing only value-recurrence/output and the following
+// FFN input binding. No additional resident data allocation or transfer.
+void DecodeGraph::Impl::prepare_decode_fusion(const std::filesystem::path &root) {
+  if (weight_mode == WeightMode::Int8FFNOutput || states.size() < 2) return;
+  check_artifact(root, "bf16-decode-recurrence-projection",
+      {{"schema_version", 1}, {"batch", 1}, {"channels", 2048}, {"head_size", 64},
+       {"arena_vectors", 30}, {"lanes", 7}, {"cores", 31}, {"output_vectors", {25, 26}},
+       {"dtype", "bfloat16"}, {"state_dtype", "float32"}});
+  auto &fused = session(root, "bf16-decode-recurrence-projection");
+  decode_runs.reserve(runs.size());
+  decode_run_ends.reserve(node_run_ends.size());
+  std::vector<size_t> ends(runs.size() + 1);
+  xdna::DeviceBuffer ffn_input;
+  for (size_t i = 0; i < bindings.size(); ++i) {
+    const auto &binding = bindings[i];
+    const auto &args = binding.arguments;
+    if (binding.stage == Stage::Recurrence && args.size() == 3) {
+      if (i + 2 >= bindings.size() || bindings[i + 1].stage != Stage::Output ||
+          bindings[i + 2].stage != Stage::FFN)
+        throw std::runtime_error("Unsupported decode fusion schedule");
+      const auto &projection = bindings[i + 1].arguments;
+      const auto offset = projection[0].offset_within(args[1]);
+      if (!offset || *offset != 24 * 2048 * 4 || args[1].size() != 30 * 2048 * 4)
+        throw std::runtime_error("Unsupported decode fusion arena");
+      decode_runs.push_back(fused.prepare({args[0], args[1], args[2], projection[1], projection[2]}));
+      ffn_input = args[1].slice(26 * 2048 * 4, 2048 * 4);
+      ends[i + 1] = ends[i + 2] = decode_runs.size();
+      ++i;
+    } else {
+      if (ffn_input.size()) {
+        if (binding.stage != Stage::FFN) throw std::runtime_error("Missing fused decode FFN");
+        auto remapped = args;
+        remapped[0] = ffn_input;
+        decode_runs.push_back(binding.session->prepare(remapped));
+        ffn_input = {};
+      } else decode_runs.push_back(runs[i]);
+      ends[i + 1] = decode_runs.size();
+    }
+  }
+  for (size_t end : node_run_ends) decode_run_ends.push_back(ends.at(end));
 }
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   validate_resident_artifacts(root, weights, weight_mode);
@@ -99,6 +141,7 @@ void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
           {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"hidden", 8192},
            {"weights", int8 ? "int8" : "bfloat16"}, {"activation", "bfloat16"}, {"state", "float32"},
            {"input_layout", "recurrence_projection_pairs"}, {"input_stride", 61440},
+           {"shared_program", int8 ? "int8-prefill-ffn-b2-projection-input" : "bf16-prefill-ffn-b2-projection-input"},
            {"fp32_arena_floats", 26624}, {"bf16_arena_elements", 20480}});
       if (int8) check_artifact(root, fused_ffn, {{"tile_bytes", 4160}, {"scale", "fp16_expanded_fp32"}});
     }
@@ -108,7 +151,10 @@ void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   ResidentLayout layout;
   prepare_resident_arenas(root, layout);
   prepare_resident_runs(root, layout);
+  prepare_decode_fusion(root);
   if (capture_prefill) prepare_prefill(root);
+  bindings.clear();
+  bindings.shrink_to_fit();
   upload_bytes = weights.channels() * 4;
   download_bytes = weights.vocabulary() * 4;
   for (const auto &s : states) {

@@ -1,0 +1,230 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "c348e29",
+  "decision": "Accepted: modest repeatable whole-model decode gains, 23 fewer submissions, exact outputs/state and preserved tracing. Hardware-limit objective remains incomplete.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "design": [
+    "Fuse value recurrence and BF16 output projection/residual on layers 1\u201323. Seven prepare/update/finish lanes, two copy bridges and eight projection workers: 31 cores, five BO arguments.",
+    "Original FP32 WKV function and finishing arithmetic retained; grouped head outputs feed BF16 GEMV. Write projection/residual into auxiliary vectors 25/26 and rebind FFN input.",
+    "Default BF16 and INT8 FFN-only decode: 123 to 100 submissions. INT8 FFN+output retains 123; paired prefill body unchanged.",
+    "Keep original runs for node/projection tracing; ordinary runs share BOs and unchanged prepared runs. Both plans use identical request-state buffers. Stats and odd-tail counters follow the active plan."
+  ],
+  "stage": {
+    "validation": "Bitwise state/projection/residual, untouched auxiliary vectors, independent FP64 projection oracle, reset/replay, immutable inputs and guards passed.",
+    "fp64_projection_max_abs": 1.11272e-08,
+    "samples_per_run": 200,
+    "order": "A/B/B/A",
+    "separate_us": [
+      3215.37,
+      3222.79
+    ],
+    "fused_us": [
+      1023.37,
+      1013.51
+    ]
+  },
+  "context_reuse": {
+    "trigger": "Adding the decode program initially failed batch2 graph construction at bf16-prefill-ffn-b2-recurrence-input with DRM_IOCTL_AMDXDNA_CREATE_HWCTX err=-22.",
+    "change": "Recompile both FFN input layouts and compare complete device PDI bytes. Only if identical, copy the standard-layout xclbin into the strided-layout artifact while preserving its DMA instructions. Session shares hardware programs by device index/xclbin UUID/kernel, with independent instructions and weak cache entries.",
+    "validation": "Both BF16 and INT8 FFN PDI pairs are byte-identical; corresponding xclbin pairs are byte-identical. Full-model alternating layouts, odd tails and decode handoff pass. No claim about the maximum supported context count.",
+    "pdi_sha256": {
+      "bf16": "6db8edc242ed800c8b11073ce36ec95d44a1aa0b804faca2448a167248a2b486",
+      "int8": "784210fc50dd4325ad1084b5860bf0d1516682697af3e7affae3fab630358781"
+    }
+  },
+  "whole_model_protocol": {
+    "order": "A/B/B/A per precision, hardware dispatch serial, profiling disabled, no compilation concurrent with timing",
+    "prompt_tokens": 32,
+    "prefill_mode": "batch2",
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2
+  },
+  "performance": {
+    "bf16": {
+      "baseline": {
+        "decode_ms": 204.66742775,
+        "prefill_seconds": 3.4846147175,
+        "graph_build_seconds": 3.6173169525,
+        "runs_per_decode_token": 123,
+        "prefill_runs": 1970,
+        "resident_bytes": 2947313664,
+        "root_bos": 340,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      "candidate": {
+        "decode_ms": 202.21999592708335,
+        "prefill_seconds": 3.4809793565,
+        "graph_build_seconds": 3.556401921,
+        "runs_per_decode_token": 100,
+        "prefill_runs": 1970,
+        "resident_bytes": 2947313664,
+        "root_bos": 340,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      "decode_improvement_percent": 1.1958091474654098,
+      "prefill_change_percent": -0.10432605308537957,
+      "process_means": {
+        "a1": {
+          "decode_ms": 204.3853185208333,
+          "prefill_seconds": 3.481663371
+        },
+        "b1": {
+          "decode_ms": 202.14267470833337,
+          "prefill_seconds": 3.4827373965
+        },
+        "b2": {
+          "decode_ms": 202.2973171458333,
+          "prefill_seconds": 3.4792213165
+        },
+        "a2": {
+          "decode_ms": 204.9495369791667,
+          "prefill_seconds": 3.487566064
+        }
+      }
+    },
+    "int8-ffn": {
+      "baseline": {
+        "decode_ms": 189.1565706875,
+        "prefill_seconds": 3.448904935,
+        "graph_build_seconds": 3.6339297850000003,
+        "runs_per_decode_token": 123,
+        "prefill_runs": 1970,
+        "resident_bytes": 2154590208,
+        "root_bos": 340,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      "candidate": {
+        "decode_ms": 186.4925366875,
+        "prefill_seconds": 3.447466716,
+        "graph_build_seconds": 3.6605580885,
+        "runs_per_decode_token": 100,
+        "prefill_runs": 1970,
+        "resident_bytes": 2154590208,
+        "root_bos": 340,
+        "host_upload_bytes_per_token": 8192,
+        "host_download_bytes_per_token": 262144
+      },
+      "decode_improvement_percent": 1.4083750780199744,
+      "prefill_change_percent": -0.041700743485406644,
+      "process_means": {
+        "a1": {
+          "decode_ms": 189.36375989583334,
+          "prefill_seconds": 3.446073669
+        },
+        "b1": {
+          "decode_ms": 186.53395537499998,
+          "prefill_seconds": 3.4441934615
+        },
+        "b2": {
+          "decode_ms": 186.45111800000004,
+          "prefill_seconds": 3.4507399705
+        },
+        "a2": {
+          "decode_ms": 188.94938147916665,
+          "prefill_seconds": 3.451736201
+        }
+      }
+    }
+  },
+  "correctness": {
+    "decode": {
+      "bf16": {
+        "status": "passed",
+        "vectors_checked": 1116,
+        "first_token_nodes": 960,
+        "runs_per_token": 100,
+        "resident_bytes": 2917120000
+      },
+      "int8-ffn": {
+        "status": "passed",
+        "vectors_checked": 1116,
+        "first_token_nodes": 960,
+        "runs_per_token": 100,
+        "resident_bytes": 2124396544
+      }
+    },
+    "prefill": {
+      "bf16": {
+        "mode": "verify",
+        "prefill_pair_runs": 125,
+        "prefill_runs": 4871,
+        "resident_bytes": 2947313664,
+        "root_bos": 340,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "bf16"
+      },
+      "int8-ffn": {
+        "mode": "verify",
+        "prefill_pair_runs": 125,
+        "prefill_runs": 4871,
+        "resident_bytes": 2154590208,
+        "root_bos": 340,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "int8_ffn"
+      },
+      "int8-ffn-output": {
+        "mode": "verify",
+        "prefill_pair_runs": 148,
+        "prefill_runs": 5791,
+        "resident_bytes": 2055499776,
+        "root_bos": 340,
+        "status": "passed",
+        "vectors": 1533,
+        "weights": "int8_ffn_output"
+      }
+    },
+    "additional_checks": "128-step decode tests also switch from optimized execution back to full node trace and projection trace after state restoration, verify outputs/state and diagnostic counts, then restore the optimized plan."
+  },
+  "limits": [
+    "Isolated hot-stage gain is much larger than whole-model gain; neither proves program-switch cost or cache/memory bandwidth.",
+    "Resident byte/root-BO metrics count model data, not all XRT program/instruction memory.",
+    "INT8 output decode is not fused.",
+    "Whole-model XDNA hardware limits remain unproven."
+  ],
+  "next_action": "Measure sensitivity to matrix working-set size and program alternation before attributing the dominant decode stage time to compute, DDR/DMA or context switching.",
+  "logs": "reports/runs/decode-recurrence-projection-2026-10-03",
+  "host_tests": "Final release/test builds and 3/3 CTest passed. Promoted BF16/INT8 FFN-only batch2 CLI and BF16 sequential CLI dispatched successfully.",
+  "decode_profile": {
+    "precision": "bf16",
+    "tokens": [
+      1,
+      18,
+      35,
+      52
+    ],
+    "scope": "Four instrumented sequential tokens from zero state, includes cold first token; host stage wall time, not device counters.",
+    "mean_stage_ms": {
+      "attention_projections": 45.994875,
+      "channel_mix": 65.40985,
+      "head": 7.5263575,
+      "norm": 0.4589155,
+      "norm_mix": 8.3332125,
+      "projection_residual": 1.024407,
+      "recurrence_stage": 2.1099175,
+      "value_recurrence_projection": 71.881525
+    },
+    "samples_per_stage": {
+      "attention_projections": 4,
+      "channel_mix": 4,
+      "head": 4,
+      "norm": 4,
+      "norm_mix": 4,
+      "projection_residual": 4,
+      "recurrence_stage": 4,
+      "value_recurrence_projection": 4
+    }
+  }
+}

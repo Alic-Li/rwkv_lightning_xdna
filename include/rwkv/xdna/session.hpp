@@ -59,6 +59,8 @@ private:
 
 // One fixed-shape, static-instruction NPU design. No Python dependency.
 // Buffers follow the compiled runtime sequence's order, starting at XRT arg 3.
+// Sessions with the same device, xclbin UUID and kernel share a hardware
+// context, while retaining independent instruction buffers and prepared runs.
 // A Session is not thread-safe; use separate sessions for concurrent callers.
 class Session {
 public:

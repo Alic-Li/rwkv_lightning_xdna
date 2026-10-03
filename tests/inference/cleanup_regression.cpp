@@ -98,8 +98,8 @@ int main(int argc, char **argv) {
         int8 ? WeightMode::Int8FFN : WeightMode::BFloat16);
     graph.load_state(model.initial_state());
     auto stats = graph.stats();
-    if (stats.persistent_runs != 123)
-      throw std::runtime_error("Expected 123 resident runs");
+    if (stats.persistent_runs != (output_int8 ? 123 : 100))
+      throw std::runtime_error("Unexpected resident run count");
     size_t traced = 0;
     graph.set_trace(
         [&](size_t node, const Vector &output, const Vector *state) {
@@ -185,6 +185,24 @@ int main(int argc, char **argv) {
     if (graph.replay_resident(7) != expected)
       throw std::runtime_error("Branch logits mismatch");
     equal_state(advanced, graph.export_state());
+    // Switch back to each diagnostic plan after optimized runs have overwritten
+    // scratch arenas. Explicit state restoration must reproduce the same step.
+    for (bool projection_only : {false, true}) {
+      graph.load_state(branch);
+      size_t observed = 0;
+      if (projection_only)
+        graph.set_projection_trace([&](size_t, const Vector &, const Tensor &, bool, const Vector &) { ++observed; });
+      else graph.set_trace([&](size_t, const Vector &, const Vector *) { ++observed; });
+      if (graph.stats().persistent_runs != 123 || graph.replay_resident(7) != expected)
+        throw std::runtime_error("Diagnostic replay mismatch");
+      equal_state(advanced, graph.export_state());
+      if (!observed || (!projection_only && observed != stats.nodes))
+        throw std::runtime_error("Diagnostic trace missing nodes");
+      graph.set_trace({});
+      graph.set_projection_trace({});
+      if (graph.stats().persistent_runs != stats.persistent_runs)
+        throw std::runtime_error("Optimized replay plan not restored");
+    }
     auto host_state = branch;
     if (graph.replay(7, host_state) != expected)
       throw std::runtime_error("Host replay mismatch");

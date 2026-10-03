@@ -48,6 +48,10 @@ struct DecodeGraph::Impl {
   std::map<std::string, std::unique_ptr<xdna::Session>> sessions;
   std::vector<xdna::DeviceBuffer> device_buffers;
   std::vector<xdna::DeviceRun> runs;
+  std::vector<xdna::DeviceRun> decode_runs;
+  std::vector<size_t> decode_run_ends;
+  bool fused_decode() const { return !decode_runs.empty() && !trace && !projection_trace; }
+  size_t decode_run_count() const { return fused_decode() ? decode_runs.size() : runs.size(); }
   enum class Stage { Norm, Mix, Attention, Recurrence, Output, FFN, Head, RecurrenceOutput };
   struct RunBinding {
     xdna::Session *session;
@@ -84,6 +88,7 @@ struct DecodeGraph::Impl {
   void prepare_resident_arenas(const std::filesystem::path &, ResidentLayout &);
   void prepare_resident_runs(const std::filesystem::path &, ResidentLayout &);
   void prepare_resident(const std::filesystem::path &root);
+  void prepare_decode_fusion(const std::filesystem::path &root);
   void prepare_prefill(const std::filesystem::path &root);
   Vector prefill(const std::vector<int> &tokens);
   Id allocate(size_t size);

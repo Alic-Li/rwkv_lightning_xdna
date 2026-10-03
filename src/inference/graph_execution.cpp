@@ -81,6 +81,8 @@ Vector DecodeGraph::Impl::replay(int token, State &state, bool persistent) {
       bind(states[i].matrix, state.layers[i].matrix);
     }
   if (!device_buffers.empty()) {
+    auto &execution_runs = fused_decode() ? decode_runs : runs;
+    const auto &execution_ends = fused_decode() ? decode_run_ends : node_run_ends;
     const bool profile = std::getenv("RWKV_XDNA_PROFILE") != nullptr;
     const auto transfer_begin = profile
                                     ? std::chrono::steady_clock::now()
@@ -103,16 +105,16 @@ Vector DecodeGraph::Impl::replay(int token, State &state, bool persistent) {
     std::map<std::string, std::pair<size_t, double>> timings;
     std::map<int, std::pair<size_t, double>> layer_timings;
     double submit_us = 0, wait_us = 0;
-    for (size_t i = 0; i < runs.size(); ++i) {
+    for (size_t i = 0; i < execution_runs.size(); ++i) {
       try {
         const auto start = profile ? std::chrono::steady_clock::now()
                                    : std::chrono::steady_clock::time_point{};
         xdna::RunTiming run_timing;
-        runs[i].execute(30000, profile ? &run_timing : nullptr);
+        execution_runs[i].execute(30000, profile ? &run_timing : nullptr);
         if (profile) {
-          const size_t owner = std::lower_bound(node_run_ends.begin(),
-                                                node_run_ends.end(), i + 1) -
-                               node_run_ends.begin();
+          const size_t owner = std::lower_bound(execution_ends.begin(),
+                                                execution_ends.end(), i + 1) -
+                               execution_ends.begin();
           const auto &n = nodes[owner];
           submit_us += run_timing.submit_us;
           wait_us += run_timing.wait_us;
@@ -133,14 +135,14 @@ Vector DecodeGraph::Impl::replay(int token, State &state, bool persistent) {
                        : n.op == Op::NormalizeKey ? "prepare"
                        : n.op == Op::Mix          ? "mix"
                                                   : "element";
-          const size_t span = std::upper_bound(node_run_ends.begin(),
-                                               node_run_ends.end(), i + 1) -
-                              node_run_ends.begin() - owner;
+          const size_t span = std::upper_bound(execution_ends.begin(),
+                                               execution_ends.end(), i + 1) -
+                              execution_ends.begin() - owner;
           if (span > 1 && n.kind == Kind::Element && n.op == Op::Norm)
             category = span == 6 ? "channel_mix" : "norm_mix";
           else if (span > 1 && n.kind == Kind::Element &&
                    n.op == Op::ValueResidual)
-            category = "value_recurrence_stage";
+            category = span == 14 ? "value_recurrence_projection" : "value_recurrence_stage";
           else if (span > 1 && n.kind == Kind::Element &&
                    n.op == Op::NormalizeKey)
             category = "recurrence_stage";
@@ -157,7 +159,7 @@ Vector DecodeGraph::Impl::replay(int token, State &state, bool persistent) {
           layer.second += ms;
         }
         while ((trace || projection_trace) && node_index < nodes.size() &&
-               i + 1 == node_run_ends[node_index]) {
+               i + 1 == execution_ends[node_index]) {
           const auto &node = nodes[node_index];
           auto &out = buffers[node.output].value;
           device_buffers[node.output].download(out.data(), out.size() * 4);
@@ -181,9 +183,9 @@ Vector DecodeGraph::Impl::replay(int token, State &state, bool persistent) {
       } catch (const std::exception &e) {
         device_failed = true;
         const size_t failed_node =
-            std::lower_bound(node_run_ends.begin(), node_run_ends.end(),
+            std::lower_bound(execution_ends.begin(), execution_ends.end(),
                              i + 1) -
-            node_run_ends.begin();
+            execution_ends.begin();
         throw std::runtime_error(
             "Resident run " + std::to_string(i) + " node " +
             std::to_string(failed_node) + " kind " +
