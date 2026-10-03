@@ -60,7 +60,13 @@ struct DecodeGraph::Impl {
   };
   std::vector<RunBinding> bindings;
   std::vector<MutableAllocation> mutable_allocations;
-  std::vector<xdna::DeviceRun> prefill_body, prefill_head;
+  struct PrefillRun {
+    xdna::DeviceRun run;
+    Stage stage;
+    // 0/1 are the sequential token slots; 2 is a fused pair.
+    int token_slot;
+  };
+  std::vector<PrefillRun> prefill_body, prefill_head;
   xdna::DeviceBuffer prefill_embedding, prefill_logits;
   size_t prefill_run_count = 0;
   size_t resident_bytes = 0, upload_bytes = 0, download_bytes = 0, root_bos = 0;

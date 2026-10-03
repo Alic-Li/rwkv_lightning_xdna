@@ -94,7 +94,7 @@ cmake --build --preset release --target kernels-release-prefill-batch2
 `batch2` 每层先顺序完成两个 token 的 attention/WKV，再用一次 FFN 提交处理两行，
 共享已打包权重、session 和 FP32 recurrent state。仅增加 activation BO，奇数尾 token
 使用原 resident decode。只计算并下载最后一个 prompt token 的 logits，因此不兼容
-逐 token `--dump-logits` 或 trace/profile。CPU 不支持此模式。
+逐 token `--dump-logits` 或 tensor trace。CPU 不支持此模式。
 C++ API 使用 `DecodeGraph(weights, root, WeightMode::BFloat16, PrefillMode::Batched2)`，
 先 `load_state`，再 `prefill_resident(tokens)`；空输入返回空向量且不改变状态。
 返回后可直接 `replay_resident`，也可 export/reset/branch。
@@ -130,6 +130,24 @@ FFN+output 为5.941→3.885 s（降低34.6%）。三种精度各1,533个
 logits/state 向量逐位回归通过；INT8 的语言质量限制仍沿用下述实验性说明。
 阶段及整模型逐位回归、A/B/B/A 实测和限制见
 [INT8 prefill 验证](../reports/rwkv7-int8-prefill-2026-10-03.json)。
+
+可用 `RWKV_XDNA_PROFILE=1` 诊断 batch2：
+
+```bash
+RWKV_XDNA_PROFILE=1 ./build/release/rwkv-cli --model "$MODEL" \
+  --tokens 1,18,35,52,69,86,103,120 --prefill batch2
+```
+
+stderr 的 `prefill_profile` JSON 按 stage 和 `token_slot` 汇总次数、elapsed/submit/wait
+微秒；slot 0/1 为成对调度的第一/第二次单-token调用，slot 2 为 fused FFN pair。
+另报告 pair embedding 上传和末 pair logits 下载；奇数尾的原 decode 路径单独输出
+`decode_profile`。这些耗时包含调度、program switch、DMA 和算术，slot 差异不是独立
+PDI 计数，不能作为硬件利用率。正常计时继续使用拒绝 profile 环境变量的 `rwkv-bench`。
+2026-10-03 的32-token profile 中，recurrence 约37.7 ms/token，attention projections
+约33.1–33.3 ms/token，FFN 约31.7–32.2 ms/token。第一/第二 slot 的 recurrence
+约2.20/0.94 ms/run，提示继续测量 program switching 与 sequence reuse；该差值
+不能单独归因为 PDI。数值回归和未插桩性能检查见
+[prefill profile 证据](../reports/rwkv7-prefill-profile-2026-10-03.json)。
 
 ## 缺少生产 kernel
 

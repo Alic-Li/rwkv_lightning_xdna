@@ -2,6 +2,9 @@
 #include "graph_internal.hpp"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <iostream>
+#include <nlohmann/json.hpp>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -76,7 +79,7 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
     const auto &binding = bindings.at(index);
     auto args = binding.arguments;
     for (auto &arg : args) arg = remap(arg, second);
-    return binding.session->prepare(args);
+    return PrefillRun{binding.session->prepare(args), binding.stage, second ? 1 : 0};
   };
   prefill_embedding = remap(device_buffers[embedding], true);
   prefill_logits = remap(device_buffers[logits], true);
@@ -91,7 +94,8 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
     }
     const auto &args = bindings[1 + l * 5 + 4].arguments;
     auto half = initialized(ffn, Vector(10240, 0));
-    prefill_body.push_back(ffn.prepare({paired_outputs[l], args[1], args[2], ffn_arenas[l], half}));
+    prefill_body.push_back({ffn.prepare({paired_outputs[l], args[1], args[2], ffn_arenas[l], half}),
+                            Stage::FFN, 2});
   }
   prefill_head.push_back(bind(bindings.size() - 2, true));
   prefill_head.push_back(bind(bindings.size() - 1, true));
@@ -106,24 +110,51 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
   if (prefill_body.empty()) throw std::runtime_error("Construct graph with Batched2 prefill enabled");
   if (tokens.empty()) return {};
   if (!resident_state_valid || device_failed) throw std::runtime_error("No valid resident state");
-  if (trace || projection_trace || std::getenv("RWKV_XDNA_PROFILE"))
-    throw std::runtime_error("Disable trace/profile hooks for batched prefill");
+  if (trace || projection_trace)
+    throw std::runtime_error("Disable trace hooks for batched prefill");
   for (int token : tokens)
     if (token < 0 || size_t(token) >= weights.vocabulary())
       throw std::runtime_error("Invalid prefill token");
   const size_t c = weights.channels();
   const auto &emb = weights.at("emb.weight").data;
   Vector result;
+  const bool profile = std::getenv("RWKV_XDNA_PROFILE") != nullptr;
+  using Clock = std::chrono::steady_clock;
+  auto elapsed_us = [](Clock::time_point start) {
+    return std::chrono::duration<double, std::micro>(Clock::now() - start).count();
+  };
+  struct Timing { size_t runs = 0; double elapsed = 0, submit = 0, wait = 0; };
+  std::map<std::pair<Stage, int>, Timing> timings;
+  double upload_us = 0, download_us = 0;
+  auto execute = [&](PrefillRun &entry) {
+    if (!profile) entry.run.execute();
+    else {
+      xdna::RunTiming measured;
+      const auto start = Clock::now();
+      entry.run.execute(30000, &measured);
+      const double elapsed = elapsed_us(start);
+      auto &t = timings[{entry.stage, entry.token_slot}];
+      ++t.runs;
+      t.elapsed += elapsed;
+      t.submit += measured.submit_us;
+      t.wait += measured.wait_us;
+    }
+    ++prefill_run_count;
+  };
   try {
     for (size_t t = 0; t + 1 < tokens.size(); t += 2) {
       resident_state_valid = false;
+      const auto upload_start = profile ? Clock::now() : Clock::time_point{};
       device_buffers[embedding].upload(emb.data() + size_t(tokens[t]) * c, c * 4);
       prefill_embedding.upload(emb.data() + size_t(tokens[t + 1]) * c, c * 4);
-      for (auto &run : prefill_body) { run.execute(); ++prefill_run_count; }
+      if (profile) upload_us += elapsed_us(upload_start);
+      for (auto &run : prefill_body) execute(run);
       if (t + 2 == tokens.size()) {
-        for (auto &run : prefill_head) { run.execute(); ++prefill_run_count; }
+        for (auto &run : prefill_head) execute(run);
         result.resize(weights.vocabulary());
+        const auto download_start = profile ? Clock::now() : Clock::time_point{};
         prefill_logits.download(result.data(), result.size() * 4);
+        if (profile) download_us += elapsed_us(download_start);
         for (float x : result)
           if (!std::isfinite(x)) throw std::runtime_error("Nonfinite prefill logits");
       }
@@ -139,6 +170,32 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
     resident_state_valid = false;
     device_failed = true;
     throw;
+  }
+  if (profile) {
+    auto name = [](Stage stage) {
+      switch (stage) {
+      case Stage::Norm: return "norm";
+      case Stage::Mix: return "norm_mix";
+      case Stage::Attention: return "attention_projections";
+      case Stage::Recurrence: return "recurrence";
+      case Stage::Output: return "projection_residual";
+      case Stage::FFN: return "channel_mix";
+      case Stage::Head: return "head";
+      }
+      return "unknown";
+    };
+    nlohmann::json rows = nlohmann::json::array();
+    for (const auto &[key, t] : timings)
+      rows.push_back({{"stage", name(key.first)}, {"token_slot", key.second},
+          {"runs", t.runs}, {"elapsed_us", t.elapsed},
+          {"submit_us", t.submit}, {"wait_us", t.wait}});
+    std::cerr << "prefill_profile " << nlohmann::json({
+        {"prompt_tokens", tokens.size()}, {"pairs", tokens.size() / 2},
+        {"odd_tail_runs", tokens.size() % 2 ? runs.size() : 0},
+        {"pair_upload_us", upload_us}, {"final_pair_download_us", download_us},
+        {"stages", rows},
+        {"scope", "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output."}
+    }).dump() << '\n';
   }
   return result;
 }

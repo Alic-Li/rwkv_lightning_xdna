@@ -1,0 +1,332 @@
+{
+  "date": "2026-10-03",
+  "status": "prefill_profiler_verified; hardware_limit_objective_incomplete",
+  "baseline_commit": "a7e41c72872be787a90ae92c50b0d6ade2f9362c",
+  "hardware_software": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P / XRT 2.25.00 / firmware 1.0.0.63 / Linux 7.0.0-38-generic / project-locked MLIR-AIE and Peano; power mode not reverified",
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "changes": [
+    "Retain typed stage and token-slot metadata with each prepared prefill run",
+    "Allow opt-in RWKV_XDNA_PROFILE on batched prefill; emit structured stage elapsed/submit/wait and host-transfer timings, with odd tails reported separately by resident decode profiler",
+    "Normal benchmark path still rejects profiling and performs no per-stage clock or timing-map updates"
+  ],
+  "validation": {
+    "builds": "release and test presets passed",
+    "host_tests": "3/3 CTest passed",
+    "models": {
+      "bf16": {
+        "profiled_model_regression": {
+          "mode": "verify",
+          "prefill_pair_runs": 220,
+          "prefill_runs": 8455,
+          "resident_bytes": 2947313664,
+          "root_bos": 413,
+          "status": "passed",
+          "vectors": 1533,
+          "weights": "bf16"
+        },
+        "profile_accounting": "13 records checked: even final head, odd tail, paired run totals and elapsed/submit/wait consistency"
+      },
+      "int8-ffn-output": {
+        "profiled_model_regression": {
+          "mode": "verify",
+          "prefill_pair_runs": 220,
+          "prefill_runs": 8455,
+          "resident_bytes": 2055499776,
+          "root_bos": 413,
+          "status": "passed",
+          "vectors": 1533,
+          "weights": "int8_ffn_output"
+        },
+        "profile_accounting": "13 records checked: even final head, odd tail, paired run totals and elapsed/submit/wait consistency"
+      }
+    }
+  },
+  "profile": {
+    "bf16": {
+      "prompt_tokens": 32,
+      "stages": {
+        "norm": {
+          "ms_per_prompt_token": 0.16519709374999997,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 16,
+              "mean_us_per_run": 228.38056249999997,
+              "submit_us": 100.22200000000001,
+              "wait_us": 3552.786
+            },
+            {
+              "token_slot": 1,
+              "runs": 17,
+              "mean_us_per_run": 96.01282352941176,
+              "submit_us": 61.566,
+              "wait_us": 1569.4720000000002
+            }
+          ]
+        },
+        "norm_mix": {
+          "ms_per_prompt_token": 5.48575321875,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 336.117109375,
+              "submit_us": 1708.0440000000008,
+              "wait_us": 127335.4099999999
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 121.02899218750007,
+              "submit_us": 1564.3339999999994,
+              "wait_us": 44886.64100000005
+            }
+          ]
+        },
+        "attention_projections": {
+          "ms_per_prompt_token": 33.28140350000001,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 1877.4502552083347,
+              "submit_us": 1574.1730000000018,
+              "wait_us": 719339.6260000002
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 896.0000364583329,
+              "submit_us": 1631.6429999999993,
+              "wait_us": 342406.24600000016
+            }
+          ]
+        },
+        "recurrence": {
+          "ms_per_prompt_token": 37.65709746874998,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 2202.5574843749987,
+              "submit_us": 1323.4619999999998,
+              "wait_us": 844428.8420000003
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 935.5339713541666,
+              "submit_us": 1375.7339999999995,
+              "wait_us": 357842.45999999956
+            }
+          ]
+        },
+        "projection_residual": {
+          "ms_per_prompt_token": 15.237856718750006,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 987.6050494791671,
+              "submit_us": 1490.6180000000008,
+              "wait_us": 377723.08600000053
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 282.21634374999996,
+              "submit_us": 1306.8979999999985,
+              "wait_us": 107039.25699999998
+            }
+          ]
+        },
+        "channel_mix": {
+          "ms_per_prompt_token": 32.205682406249984,
+          "slots": [
+            {
+              "token_slot": 2,
+              "runs": 384,
+              "mean_us_per_run": 2683.806867187499,
+              "submit_us": 1666.0479999999995,
+              "wait_us": 1028886.4969999999
+            }
+          ]
+        },
+        "head": {
+          "ms_per_prompt_token": 0.2223885,
+          "slots": [
+            {
+              "token_slot": 1,
+              "runs": 1,
+              "mean_us_per_run": 7116.432,
+              "submit_us": 3.707,
+              "wait_us": 7112.625
+            }
+          ]
+        }
+      },
+      "upload_us": 145.19600000000003,
+      "download_us": 15.148,
+      "total_stage_ms_per_token": 124.25537890624999
+    },
+    "int8-ffn-output": {
+      "prompt_tokens": 32,
+      "stages": {
+        "norm": {
+          "ms_per_prompt_token": 0.1561948125,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 16,
+              "mean_us_per_run": 216.49149999999997,
+              "submit_us": 118.171,
+              "wait_us": 3344.8309999999997
+            },
+            {
+              "token_slot": 1,
+              "runs": 17,
+              "mean_us_per_run": 90.25705882352942,
+              "submit_us": 64.239,
+              "wait_us": 1469.14
+            }
+          ]
+        },
+        "norm_mix": {
+          "ms_per_prompt_token": 5.525806937500001,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 334.7419427083335,
+              "submit_us": 1959.0389999999998,
+              "wait_us": 126556.28599999992
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 125.74196874999997,
+              "submit_us": 1579.343999999999,
+              "wait_us": 46681.71799999996
+            }
+          ]
+        },
+        "attention_projections": {
+          "ms_per_prompt_token": 33.111740125,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 1866.944406249999,
+              "submit_us": 1614.9630000000016,
+              "wait_us": 715265.7219999994
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 892.3672708333337,
+              "submit_us": 1737.6019999999994,
+              "wait_us": 340906.84700000007
+            }
+          ]
+        },
+        "recurrence": {
+          "ms_per_prompt_token": 37.65754103124999,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 2202.674278645833,
+              "submit_us": 1372.3189999999995,
+              "wait_us": 844425.6600000004
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 935.4541406249997,
+              "submit_us": 1490.0799999999979,
+              "wait_us": 357697.70300000004
+            }
+          ]
+        },
+        "projection_residual": {
+          "ms_per_prompt_token": 12.929037937500013,
+          "slots": [
+            {
+              "token_slot": 0,
+              "runs": 384,
+              "mean_us_per_run": 894.7466093750012,
+              "submit_us": 1593.5459999999996,
+              "wait_us": 341963.598
+            },
+            {
+              "token_slot": 1,
+              "runs": 384,
+              "mean_us_per_run": 182.67321874999996,
+              "submit_us": 1337.7040000000004,
+              "wait_us": 68785.574
+            }
+          ]
+        },
+        "channel_mix": {
+          "ms_per_prompt_token": 31.68867546875,
+          "slots": [
+            {
+              "token_slot": 2,
+              "runs": 384,
+              "mean_us_per_run": 2640.7229557291666,
+              "submit_us": 1685.919,
+              "wait_us": 1012322.6899999997
+            }
+          ]
+        },
+        "head": {
+          "ms_per_prompt_token": 0.229729625,
+          "slots": [
+            {
+              "token_slot": 1,
+              "runs": 1,
+              "mean_us_per_run": 7351.348,
+              "submit_us": 3.427,
+              "wait_us": 7347.801
+            }
+          ]
+        }
+      },
+      "upload_us": 114.43900000000001,
+      "download_us": 38.633,
+      "total_stage_ms_per_token": 121.2987259375
+    }
+  },
+  "interpretation": [
+    "Recurrence is the largest measured batched-prefill stage, followed by attention projections and FFN",
+    "First recurrence call per pair is about 2.20 ms versus 0.94 ms for the second; attention about 1.87 versus 0.89 ms",
+    "These differences include scheduling, context/program switching, DMA/cache effects and computation. They are not isolated PDI overhead, device utilization or bandwidth counters."
+  ],
+  "next_action": "Batch remaining attention projections to reuse weights and reduce paired submissions, then measure larger-sequence scheduling within local-memory limits. Keep recurrence state FP32 and temporally ordered. Do not prioritize more FIFO-size-only FFN tuning after the rejected memory/overlap experiment.",
+  "objective": "Hardware-limit goal remains active; no saturation or negligible-further-gains claim.",
+  "raw_logs": "reports/runs/prefill-profile-2026-10-03",
+  "sha256": {
+    "src/inference/prefill_plan.cpp": "eae693c0c52a58eae6eab01e30259d0e150e6c9bae60a9ce61a02ea35b87838a",
+    "src/inference/graph_internal.hpp": "3e49ffff847558630f4a25c072c1638db947dccfafbefeba24c62fbdcf269f33"
+  },
+  "uninstrumented_regression": {
+    "bf16": {
+      "before_prefill_seconds": 3.9769541005,
+      "after_prefill_seconds": 3.9749379925,
+      "prefill_change_percent": -0.0506947766821475,
+      "before_decode_ms": 203.16360808333332,
+      "after_decode_ms": 202.44474560416666,
+      "graph_and_device_resource_counts": "unchanged",
+      "scope": "One before/after process pair, 2 trials each, 32 prefill/24 decode tokens. Regression check only, not speedup evidence or confidence interval."
+    },
+    "int8-ffn-output": {
+      "before_prefill_seconds": 3.8746541194999997,
+      "after_prefill_seconds": 3.883680131,
+      "prefill_change_percent": 0.23295012203992105,
+      "before_decode_ms": 184.95601814583333,
+      "after_decode_ms": 184.95112179166662,
+      "graph_and_device_resource_counts": "unchanged",
+      "scope": "One before/after process pair, 2 trials each, 32 prefill/24 decode tokens. Regression check only, not speedup evidence or confidence interval."
+    }
+  }
+}
