@@ -23,16 +23,17 @@ static void same(const float *a, const float *b, size_t n, const char *name) {
 }
 int main(int argc, char **argv) {
   try {
-    bool projection_input = false, quantized = false, recurrence_input = false;
+    bool projection_input = false, quantized = false, recurrence_input = false, chunk4 = false;
     while (argc > 1 && std::string(argv[argc - 1]).rfind("--", 0) == 0) {
       const std::string flag(argv[--argc]);
-      if (flag == "--projection-input") projection_input = true;
+      if (flag == "--chunk4") chunk4 = true;
+      else if (flag == "--projection-input") projection_input = true;
       else if (flag == "--recurrence-input") { recurrence_input = true; projection_input = true; }
       else if (flag == "--int8") quantized = true;
       else throw std::runtime_error("Unknown option: " + flag);
     }
     if (argc < 3 || argc > 4)
-      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS] [--projection-input|--recurrence-input] [--int8]");
+      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS] [--projection-input|--recurrence-input] [--int8] [--chunk4]");
     size_t iterations = 100;
     if (argc == 4) {
       std::string count(argv[3]);
@@ -46,23 +47,31 @@ int main(int argc, char **argv) {
       return Session(root / name / "design.xclbin", root / name / "instructions.bin");
     };
     const std::string prefix = quantized ? "int8" : "bf16";
-    auto fused = session(argv[1], prefix + "-prefill-ffn-b2" +
+    if (chunk4 && quantized)
+      throw std::runtime_error("Chunk4 experiment supports BF16 only");
+    const size_t batch_size = chunk4 ? 4 : 2;
+    const size_t tokens_c = batch_size * 2048, tokens_h = batch_size * 8192;
+    const size_t projected_offset = 2048 + tokens_h;
+    const size_t output_offset = projected_offset + tokens_c;
+    const size_t arena_floats = output_offset + tokens_c;
+    const size_t half_elements = tokens_c + tokens_h;
+    auto fused = session(argv[1], chunk4 ? std::string("bf16-chunk4-ffn-experiment") + (projection_input ? "-projection-input" : "") : prefix + "-prefill-ffn-b2" +
                          (recurrence_input ? "-recurrence-input" : projection_input ? "-projection-input" : ""));
     const size_t input_stride = recurrence_input ? 61440 : 4096;
     auto input_offset = [&](size_t t) { return projection_input ? t * input_stride + 2048 : t * 2048; };
     auto decode = session(argv[2], prefix + "-channel-mix");
-    Guarded x(fused, (projection_input ? input_stride + 4096 : 4096) * 4), parameters(fused, 6144 * 4),
-        weights(fused, quantized ? 8192 * 4160 : 33554432 * 2), fp32(fused, 26624 * 4), half(fused, 20480 * 2),
+    Guarded x(fused, (projection_input ? (batch_size - 1) * input_stride + 4096 : tokens_c) * 4), parameters(fused, 6144 * 4),
+        weights(fused, quantized ? 8192 * 4160 : 33554432 * 2), fp32(fused, arena_floats * 4), half(fused, half_elements * 2),
         diag(decode, 22528 * 4), reference(decode, 4096 * 4);
     auto shift = fp32.data.slice(0, 2048 * 4);
-    auto raw = fp32.data.slice(2048 * 4, 16384 * 4);
-    auto projected = fp32.data.slice(18432 * 4, 4096 * 4);
-    auto output = fp32.data.slice(22528 * 4, 4096 * 4);
-    auto mixed = half.data.slice(0, 4096 * 2);
-    auto active = half.data.slice(4096 * 2, 16384 * 2);
+    auto raw = fp32.data.slice(2048 * 4, tokens_h * 4);
+    auto projected = fp32.data.slice(projected_offset * 4, tokens_c * 4);
+    auto output = fp32.data.slice(output_offset * 4, tokens_c * 4);
+    auto mixed = half.data.slice(0, tokens_c * 2);
+    auto active = half.data.slice(tokens_c * 2, tokens_h * 2);
     auto fused_run = fused.prepare({x.data, parameters.data, weights.data, fp32.data, half.data});
     std::vector<DeviceRun> singles;
-    for (size_t t = 0; t < 2; ++t)
+    for (size_t t = 0; t < batch_size; ++t)
       singles.push_back(decode.prepare({x.data.slice(input_offset(t) * 4, 2048 * 4),
           parameters.data, weights.data, diag.data, reference.data}));
     auto batch = [&] { fused_run.execute(); };
@@ -103,7 +112,7 @@ int main(int argc, char **argv) {
       // row scale after accumulating the integer-code dot product.
       return float(code) * scale;
     };
-    V params(6144), initial(2048), input(4096), previous;
+    V params(6144), initial(2048), input(tokens_c), previous;
     for (auto &v : params) v = random(rng) / 8;
     for (size_t i = 0; i < 2048; ++i) params[i] += 1;
     for (auto &v : initial) v = random(rng);
@@ -123,9 +132,9 @@ int main(int argc, char **argv) {
       if (!std::isfinite(actual) || error > 2e-5 + 2e-5 * std::abs(expected))
         throw std::runtime_error("FP64 oracle mismatch");
     };
-    V actual(4096), actual_raw(16384), actual_projected(4096), state(2048),
+    V actual(tokens_c), actual_raw(tokens_h), actual_projected(tokens_c), state(2048),
         diagnostic(22528), ref(4096);
-    std::vector<uint16_t> actual_mixed(4096), actual_active(16384);
+    std::vector<uint16_t> actual_mixed(tokens_c), actual_active(tokens_h);
     for (int pass = 0; pass < 4; ++pass) {
       if (pass < 2) {
         for (auto &v : input) v = random(rng) * (pass + 1);
@@ -133,7 +142,7 @@ int main(int argc, char **argv) {
         else { std::fill(input.begin(), input.begin() + 2048, 0); branch_input = input; }
       } else if (pass == 2) { reset(initial); input = first_input; }
       else { reset(branch_state); input = branch_input; }
-      for (size_t t = 0; t < 2; ++t)
+      for (size_t t = 0; t < batch_size; ++t)
         std::copy_n(input.data() + t * 2048, 2048, packed_input.data() + input_offset(t));
       x.data.upload(packed_input.data(), x.bytes);
       std::fill(actual.begin(), actual.end(), std::nanf(""));
@@ -145,7 +154,7 @@ int main(int argc, char **argv) {
       mixed.download(actual_mixed.data(), mixed.size());
       active.download(actual_active.data(), active.size());
       shift.download(state.data(), shift.size());
-      for (size_t t = 0; t < 2; ++t) {
+      for (size_t t = 0; t < batch_size; ++t) {
         singles[t].execute();
         diag.data.download(diagnostic.data(), diag.bytes);
         reference.data.download(ref.data(), reference.bytes);
@@ -191,8 +200,8 @@ int main(int argc, char **argv) {
       same(state.data(), previous.data(), 2048, "final shift");
       if (pass == 0) { first_output = actual; branch_state = state; }
       if (pass == 1) branch_output = actual;
-      if (pass == 2) same(actual.data(), first_output.data(), 4096, "reset");
-      if (pass == 3) same(actual.data(), branch_output.data(), 4096, "branch");
+      if (pass == 2) same(actual.data(), first_output.data(), tokens_c, "reset");
+      if (pass == 3) same(actual.data(), branch_output.data(), tokens_c, "branch");
       for (auto *b : {&x, &parameters, &weights, &fp32, &half, &diag, &reference}) b->guard();
     }
     V unchanged_x(packed_input.size()), unchanged_parameters(6144);
@@ -216,16 +225,16 @@ int main(int argc, char **argv) {
       double mean = std::accumulate(times.begin(), times.end(), 0.0) / iterations;
       std::sort(times.begin(), times.end());
       timings.push_back({{"path", batched ? "batched_ffn" : "production_decode"},
-          {"samples", iterations}, {"mean_us_per_two_tokens", mean},
-          {"p95_us_per_two_tokens", times[size_t(std::ceil(.95 * iterations)) - 1]},
-          {"runs_per_two_tokens", batched ? 1 : 2}});
+          {"samples", iterations}, {"mean_us_per_batch", mean},
+          {"p95_us_per_batch", times[size_t(std::ceil(.95 * iterations)) - 1]},
+          {"runs_per_batch", batched ? size_t(1) : batch_size}});
     }
     for (auto *b : {&x, &parameters, &weights, &fp32, &half, &diag, &reference}) b->guard();
-    std::cout << Json({{"status", "passed"}, {"input_passes", 4}, {"weights", prefix},
+    std::cout << Json({{"status", "passed"}, {"input_passes", 4}, {"batch_tokens", batch_size}, {"weights", prefix},
         {"input_layout", recurrence_input ? "recurrence_projection_pairs" : projection_input ? "projection_residual_pairs" : "token_major"},
         {"oracle_max_abs", worst}, {"intermediates_output_shift_bitwise", "passed"},
         {"reset_branch_guards_immutable_inputs", "passed"}, {"timing_abba", timings},
-        {"scope", "Complete two-token FFN stage; model attention/WKV and prefill integration not included."}}).dump() << '\n';
+        {"scope", "Complete FFN batch stage; model attention/WKV and prefill integration not included."}}).dump() << '\n';
   } catch (const std::exception &e) {
     std::cerr << "prefill FFN: " << e.what() << '\n';
     return 1;

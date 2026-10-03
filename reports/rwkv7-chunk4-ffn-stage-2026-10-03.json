@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-03",
+  "status": "validated experimental BF16 FFN stage; model evaluation follows separately",
+  "design": {
+    "batch": 4,
+    "matrix_workers": "4 key + 4 value; 4 collect/activation workers separate row packets from large output storage",
+    "weight_payload_bytes_per_four_tokens": 67108864,
+    "value_activation_ddr_read_bytes": 2097152,
+    "precision": "BF16 weights/activations/MAC inputs; original FP32 sums/reduction, FP32 shift; no WKV in standalone stage",
+    "ordering": "Finish key/activation DMA before value rereads device-written BF16 arena. No host upload between stages."
+  },
+  "validation": {
+    "chunk4-stage.json": {
+      "batch_tokens": 4,
+      "input_layout": "token_major",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 4.76837158203125e-07,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete FFN batch stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "timing_abba": [
+        {
+          "mean_us_per_batch": 8133.245690000003,
+          "p95_us_per_batch": 8619.677,
+          "path": "production_decode",
+          "runs_per_batch": 4,
+          "samples": 100
+        },
+        {
+          "mean_us_per_batch": 2672.97917,
+          "p95_us_per_batch": 2702.979,
+          "path": "batched_ffn",
+          "runs_per_batch": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_batch": 2661.0016900000005,
+          "p95_us_per_batch": 2689.352,
+          "path": "batched_ffn",
+          "runs_per_batch": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_batch": 7575.14861,
+          "p95_us_per_batch": 8187.324,
+          "path": "production_decode",
+          "runs_per_batch": 4,
+          "samples": 100
+        }
+      ],
+      "weights": "bf16"
+    },
+    "chunk4-stage-projection.jsonl": {
+      "batch_tokens": 4,
+      "input_layout": "projection_residual_pairs",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 4.76837158203125e-07,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete FFN batch stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "timing_abba": [
+        {
+          "mean_us_per_batch": 7597.640210000001,
+          "p95_us_per_batch": 8210.192,
+          "path": "production_decode",
+          "runs_per_batch": 4,
+          "samples": 100
+        },
+        {
+          "mean_us_per_batch": 2662.4437900000007,
+          "p95_us_per_batch": 2699.287,
+          "path": "batched_ffn",
+          "runs_per_batch": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_batch": 2651.517580000001,
+          "p95_us_per_batch": 2676.925,
+          "path": "batched_ffn",
+          "runs_per_batch": 1,
+          "samples": 100
+        },
+        {
+          "mean_us_per_batch": 7467.508379999998,
+          "p95_us_per_batch": 8009.894,
+          "path": "production_decode",
+          "runs_per_batch": 4,
+          "samples": 100
+        }
+      ],
+      "weights": "bf16"
+    }
+  },
+  "limits": [
+    "Isolated stage is not proof of whole-model improvement.",
+    "2 MiB is scheduled DDR read payload, not measured bandwidth.",
+    "WKV state remains FP32 in the model; chunk4 FFN does not alter WKV."
+  ],
+  "artifact_sha256": {
+    "build/kernels/chunk4-resume/bf16-chunk4-ffn-experiment/design.xclbin": "fccb5d7522180481fc43e084ca5e12a751728e0945772cff58052f0483d85622",
+    "build/kernels/chunk4-resume/bf16-chunk4-ffn-experiment/instructions.bin": "e7ae6f5fb6f75488442ce9b2417a40c2d5bb5777e3ec47d98aff4ced86454f8b",
+    "build/kernels/chunk4-resume/bf16-chunk4-ffn-experiment/config.json": "9006adec1a8c7dbdb0b89f81840da94217750b640c72f5a9562b89a63a966895",
+    "build/kernels/chunk4-resume/bf16-chunk4-ffn-experiment-projection-input/design.xclbin": "126af5bc11f98998cb3e1b708df8114f12725db145ea7737270a8f0105c423f9",
+    "build/kernels/chunk4-resume/bf16-chunk4-ffn-experiment-projection-input/instructions.bin": "b713c04bfc1a211b2c10720ce7cb4d7f2c188a3773644170b2556615bb207590",
+    "build/kernels/chunk4-resume/bf16-chunk4-ffn-experiment-projection-input/config.json": "45f788b826bb33c4753089e1d2c9f78e79f2d8487fafbe71f8f2c2aeeb907799"
+  },
+  "logs": "reports/runs/throughput-resume-2026-10-03"
+}
