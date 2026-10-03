@@ -89,6 +89,19 @@ void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
          {"fp32_arena_floats", 26624}, {"bf16_arena_elements", 20480},
          {"fp32_offsets", {{"shift", 0}, {"raw", 2048}, {"projected", 18432}, {"output", 22528}}},
          {"bf16_offsets", {{"mixed", 0}, {"activated", 4096}}}});
+    if (weight_mode != WeightMode::Int8FFNOutput) {
+      check_artifact(root, "bf16-prefill-recurrence-projection-b2",
+          {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"head_size", 64},
+           {"arena_vectors", 30}, {"lanes", 7}, {"cores", 31}, {"output_vectors", {25, 26}},
+           {"dtype", "bfloat16"}, {"state_dtype", "float32"}});
+      const auto fused_ffn = int8 ? "int8-prefill-ffn-b2-recurrence-input" : "bf16-prefill-ffn-b2-recurrence-input";
+      check_artifact(root, fused_ffn,
+          {{"schema_version", 1}, {"batch", 2}, {"channels", 2048}, {"hidden", 8192},
+           {"weights", int8 ? "int8" : "bfloat16"}, {"activation", "bfloat16"}, {"state", "float32"},
+           {"input_layout", "recurrence_projection_pairs"}, {"input_stride", 61440},
+           {"fp32_arena_floats", 26624}, {"bf16_arena_elements", 20480}});
+      if (int8) check_artifact(root, fused_ffn, {{"tile_bytes", 4160}, {"scale", "fp16_expanded_fp32"}});
+    }
     if (int8) check_artifact(root, name,
         {{"tile_bytes", 4160}, {"scale", "fp16_expanded_fp32"}});
   }

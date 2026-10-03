@@ -48,7 +48,7 @@ struct DecodeGraph::Impl {
   std::map<std::string, std::unique_ptr<xdna::Session>> sessions;
   std::vector<xdna::DeviceBuffer> device_buffers;
   std::vector<xdna::DeviceRun> runs;
-  enum class Stage { Norm, Mix, Attention, Recurrence, Output, FFN, Head };
+  enum class Stage { Norm, Mix, Attention, Recurrence, Output, FFN, Head, RecurrenceOutput };
   struct RunBinding {
     xdna::Session *session;
     std::vector<xdna::DeviceBuffer> arguments;

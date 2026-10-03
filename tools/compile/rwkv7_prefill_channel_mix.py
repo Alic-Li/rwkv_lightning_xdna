@@ -16,7 +16,10 @@ def bt(n):
 
 @iron.jit
 def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
-           *, projection_input: CompileTime[bool] = False, quantized: CompileTime[bool] = False):
+           *, projection_input: CompileTime[bool] = False, quantized: CompileTime[bool] = False,
+           projection_stride: CompileTime[int] = 4096):
+    if projection_stride not in (4096, 61440):
+        raise ValueError("Unsupported projection input stride")
     wt = (lambda n: np.ndarray[(n,), np.dtype[np.uint8]]) if quantized else bt
     tile = 4160 if quantized else 4096
     stripe, count = 1024 * tile, 8192 * tile
@@ -115,7 +118,7 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
     workers += [Worker(residual, [residual_x.cons(), proj.cons(), final.prod(), add],
                        tile=Tile(7, 2), stack_size=12288)]
     def seq(x, p, w, f, h, hx, hw, hb, hc, hs, hkw, hvw, hm, hr, ha, hv, hres, hy, ho):
-        input_tap = (TAP((8192,), 2048, [2, 1, 1, 2048], [4096, 0, 0, 1])
+        input_tap = (TAP((projection_stride + 4096,), 2048, [2, 1, 1, 2048], [projection_stride, 0, 0, 1])
                      if projection_input else None)
         hx.fill(x, tap=input_tap)
         for handle, offset in ((hw, 0), (hb, 2048)):
@@ -133,7 +136,7 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
         hy.drain(f, tap=TAP((26624,), 22528, [1, 1, 1, 4096], [0, 0, 0, 1]), wait=True)
         ho.drain(f, tap=TAP((26624,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]), wait=True)
     return Program(iron.get_current_device(), Runtime(seq, [
-        typ(8192 if projection_input else 4096), typ(6144), wt(count), typ(26624), bt(20480),
+        typ(projection_stride + 4096 if projection_input else 4096), typ(6144), wt(count), typ(26624), bt(20480),
         *[f.prod() for f in inputs], *[f.prod() for f in joins],
         [f.prod() for f in wk], [f.prod() for f in wv],
         mix_out.cons(), raw_out.cons(), act_out.cons(), proj.cons(),
@@ -143,18 +146,22 @@ def design(x: In, parameters: In, weights: In, fp32: InOut, bf16: Out,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--int8", action="store_true", help="Compile W8A16 variants instead of BF16")
-    quantized = parser.parse_args().int8
-    for projection_input in (False, True):
-        suffix = "-projection-input" if projection_input else ""
+    parser.add_argument("--recurrence-input", action="store_true")
+    args = parser.parse_args()
+    quantized = args.int8
+    stride = 61440 if args.recurrence_input else 4096
+    for projection_input in ((True,) if args.recurrence_input else (False, True)):
+        suffix = "-recurrence-input" if args.recurrence_input else "-projection-input" if projection_input else ""
         path = KERNEL_ROOT / (("int8" if quantized else "bf16") + "-prefill-ffn-b2" + suffix)
         path.mkdir(parents=True, exist_ok=True)
-        design.specialize(projection_input=projection_input, quantized=quantized).compile(
+        design.specialize(projection_input=projection_input, quantized=quantized, projection_stride=stride).compile(
             path / "design.xclbin", path / "instructions.bin")
         (path / "config.json").write_text(json.dumps(dict(
             schema_version=1, batch=2, channels=2048, hidden=8192,
             weights="int8" if quantized else "bfloat16", activation="bfloat16", state="float32",
             layout="token_major", runs_per_batch=1,
-            input_layout="projection_residual_pairs" if projection_input else "token_major",
+            input_layout="recurrence_projection_pairs" if args.recurrence_input else "projection_residual_pairs" if projection_input else "token_major",
+            **(dict(input_stride=stride) if args.recurrence_input else {}),
             fp32_arena_floats=26624, bf16_arena_elements=20480,
             fp32_offsets=dict(shift=0, raw=2048, projected=18432, output=22528),
             bf16_offsets=dict(mixed=0, activated=4096),

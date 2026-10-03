@@ -91,8 +91,8 @@ cmake --build --preset release --target kernels-release-prefill-batch2
 ./build/release/rwkv-bench "$MODEL" build/kernels/rwkv7-bf16 32 24 2 --prefill-batch2
 ```
 
-`batch2` 每层 attention projections、recurrence、output projection 和 FFN 各用一次提交处理两行，
-适用于 BF16、INT8 FFN-only 和 INT8 FFN+output。WKV 在一次提交内部仍按 token 顺序
+`batch2` 的 attention projections、recurrence、output projection 和 FFN 均处理两行。
+BF16 和 INT8 FFN-only 在非首层进一步融合 recurrence 与 output projection；INT8 FFN+output 保留独立提交。WKV 在一次提交内部仍按 token 顺序
 更新 FP32 state；norm/mix 仍提交两次。共享已打包权重、session 和 FP32 recurrent state。
 仅增加 activation BO，奇数尾 token
 使用原 resident decode。只计算并下载最后一个 prompt token 的 logits，因此不兼容
@@ -101,8 +101,9 @@ C++ API 使用 `DecodeGraph(weights, root, WeightMode::BFloat16, PrefillMode::Ba
 先 `load_state`，再 `prefill_resident(tokens)`；空输入返回空向量且不改变状态。
 返回后可直接 `replay_resident`，也可 export/reset/branch。
 
-24层模型的三种精度 pair body 均为146次提交，最后 logits 再加2次；
-32-token prompt 共2338次（73.0625/token），原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
+24层模型的 BF16 / INT8 FFN-only pair body 为123次提交，最后 logits 再加2次；
+32-token prompt 共1970次（61.5625/token）。INT8 FFN+output 的 pair body 为146次，
+32-token prompt 共2338次（73.0625/token）；原逐步路径为3936次。每 token 上传8192字节，整个 prompt 仅下载
 262144字节 logits。Benchmark JSON 分开报告 prefill 提交/host BO流量和 decode 指标；
 这些数值不包含设备内部 DMA，也不等于硬件带宽计数。
 2026-10-03 首版仅 FFN batching 的 BF16 A/B/B/A 中，32-token prefill 平均6.532→4.009 s（1.63倍吞吐），
@@ -168,6 +169,15 @@ Recurrence batching 将一对 token 的状态读入/写回合并为一次，在�
 独立编译入口为 `rwkv7_prefill_recurrence.py`。
 阶段及完整模型验证、A/B/B/A 性能和限制见
 [recurrence prefill 验证](../reports/rwkv7-prefill-recurrence-2026-10-03.json)。
+
+Recurrence/output 融合使用31个计算核，直接在原 auxiliary arena 的向量25/26写入
+projection 和残差输出；FFN 以61440-float stride读取，无额外常驻 BO 或 host copy。
+重新编译 prefill target 会生成 `bf16-prefill-recurrence-projection-b2` 和
+`bf16/int8-prefill-ffn-b2-recurrence-input`；独立入口为
+`rwkv7_prefill_recurrence_projection.py` 与 `rwkv7_prefill_channel_mix.py --recurrence-input [--int8]`。
+32-token A/B/B/A：BF16 3.609→3.483 s，INT8 FFN-only 3.574→3.446 s，
+decode 均值变化分别约+0.04%和−0.02%。三种精度各1,533个向量逐位回归通过。
+详见[recurrence/output 融合验证](../reports/rwkv7-recurrence-projection-prefill-2026-10-03.json)。
 
 可用 `RWKV_XDNA_PROFILE=1` 诊断 batch2：
 

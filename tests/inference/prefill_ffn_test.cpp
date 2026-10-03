@@ -23,15 +23,16 @@ static void same(const float *a, const float *b, size_t n, const char *name) {
 }
 int main(int argc, char **argv) {
   try {
-    bool projection_input = false, quantized = false;
+    bool projection_input = false, quantized = false, recurrence_input = false;
     while (argc > 1 && std::string(argv[argc - 1]).rfind("--", 0) == 0) {
       const std::string flag(argv[--argc]);
       if (flag == "--projection-input") projection_input = true;
+      else if (flag == "--recurrence-input") { recurrence_input = true; projection_input = true; }
       else if (flag == "--int8") quantized = true;
       else throw std::runtime_error("Unknown option: " + flag);
     }
     if (argc < 3 || argc > 4)
-      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS] [--projection-input] [--int8]");
+      throw std::runtime_error("Usage: rwkv-prefill-ffn-test FUSED_KERNELS DECODE_KERNELS [ITERATIONS] [--projection-input|--recurrence-input] [--int8]");
     size_t iterations = 100;
     if (argc == 4) {
       std::string count(argv[3]);
@@ -46,10 +47,11 @@ int main(int argc, char **argv) {
     };
     const std::string prefix = quantized ? "int8" : "bf16";
     auto fused = session(argv[1], prefix + "-prefill-ffn-b2" +
-                         (projection_input ? "-projection-input" : ""));
-    auto input_offset = [&](size_t t) { return projection_input ? t * 4096 + 2048 : t * 2048; };
+                         (recurrence_input ? "-recurrence-input" : projection_input ? "-projection-input" : ""));
+    const size_t input_stride = recurrence_input ? 61440 : 4096;
+    auto input_offset = [&](size_t t) { return projection_input ? t * input_stride + 2048 : t * 2048; };
     auto decode = session(argv[2], prefix + "-channel-mix");
-    Guarded x(fused, (projection_input ? 8192 : 4096) * 4), parameters(fused, 6144 * 4),
+    Guarded x(fused, (projection_input ? input_stride + 4096 : 4096) * 4), parameters(fused, 6144 * 4),
         weights(fused, quantized ? 8192 * 4160 : 33554432 * 2), fp32(fused, 26624 * 4), half(fused, 20480 * 2),
         diag(decode, 22528 * 4), reference(decode, 4096 * 4);
     auto shift = fp32.data.slice(0, 2048 * 4);
@@ -220,7 +222,7 @@ int main(int argc, char **argv) {
     }
     for (auto *b : {&x, &parameters, &weights, &fp32, &half, &diag, &reference}) b->guard();
     std::cout << Json({{"status", "passed"}, {"input_passes", 4}, {"weights", prefix},
-        {"input_layout", projection_input ? "projection_residual_pairs" : "token_major"},
+        {"input_layout", recurrence_input ? "recurrence_projection_pairs" : projection_input ? "projection_residual_pairs" : "token_major"},
         {"oracle_max_abs", worst}, {"intermediates_output_shift_bitwise", "passed"},
         {"reset_branch_guards_immutable_inputs", "passed"}, {"timing_abba", timings},
         {"scope", "Complete two-token FFN stage; model attention/WKV and prefill integration not included."}}).dump() << '\n';

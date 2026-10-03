@@ -1,0 +1,146 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "1acece8",
+  "decision": "Accepted: exact outputs and consistent whole-model prefill gain; sequential decode unchanged.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "design": [
+    "Fuse paired value recurrence and BF16 output projection on layers 1–23. Layer 0 and INT8 output retain separate stages.",
+    "31 workers: seven prepare/update/finish lanes, two group-copy bridges and eight projection workers. Five BO arguments; FP32 state preserved.",
+    "Projection and residual write only auxiliary vectors 25/26. FFN reads those vectors with a 61440-float token stride. No host arithmetic, copies or extra resident allocation."
+  ],
+  "compiler_constraints": [
+    "Nested ObjectFifoLink joins are unsupported; two copy workers bridge grouped head outputs into the projection input join.",
+    "Projection stack 8192 bytes failed with measured requirement 8320; 9216 bytes compiles."
+  ],
+  "stage": {
+    "validation": "Bitwise state and projection/residual; untouched auxiliary vectors, FP64 projection oracle, reset/replay, immutable inputs and guards passed.",
+    "fp64_max_abs": 1.13579e-08,
+    "samples_per_run": 200,
+    "order": "A/B/B/A",
+    "separate_pair_us": [
+      4181.22,
+      4215.38
+    ],
+    "fused_pair_us": [
+      1783.68,
+      1758.15
+    ]
+  },
+  "whole_model_protocol": {
+    "order": "A/B/B/A per precision, serial dispatch, profiling disabled",
+    "prompt_tokens": 32,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2
+  },
+  "performance": {
+    "bf16": {
+      "baseline": {
+        "prefill_seconds": 3.60888176175,
+        "decode_ms": 204.88497602083334,
+        "prefill_runs": 2338,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2947313664,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.482802317,
+        "decode_ms": 204.96749055208335,
+        "prefill_runs": 1970,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2947313664,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 3.4935875729234844,
+      "decode_change_percent": 0.04027358806515391
+    },
+    "int8-ffn": {
+      "baseline": {
+        "prefill_seconds": 3.5736046637500003,
+        "decode_ms": 189.33921837500003,
+        "prefill_runs": 2338,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2154590208,
+        "root_bos": 340
+      },
+      "candidate": {
+        "prefill_seconds": 3.446124887,
+        "decode_ms": 189.29426842708335,
+        "prefill_runs": 1970,
+        "runs_per_decode_token": 123,
+        "resident_bytes": 2154590208,
+        "root_bos": 340
+      },
+      "prefill_improvement_percent": 3.5672601964938155,
+      "decode_change_percent": -0.02374043175125129
+    }
+  },
+  "correctness": {
+    "bf16": {
+      "mode": "verify",
+      "prefill_pair_runs": 125,
+      "prefill_runs": 4940,
+      "resident_bytes": 2947313664,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "bf16"
+    },
+    "int8-ffn": {
+      "mode": "verify",
+      "prefill_pair_runs": 125,
+      "prefill_runs": 4940,
+      "resident_bytes": 2154590208,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn"
+    },
+    "int8-ffn-output": {
+      "mode": "verify",
+      "prefill_pair_runs": 148,
+      "prefill_runs": 5791,
+      "resident_bytes": 2055499776,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn_output"
+    }
+  },
+  "ffn_strided_input": {
+    "bf16": {
+      "input_layout": "recurrence_projection_pairs",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 3.5762786865234375e-07,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete two-token FFN stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "weights": "bf16"
+    },
+    "int8": {
+      "input_layout": "recurrence_projection_pairs",
+      "input_passes": 4,
+      "intermediates_output_shift_bitwise": "passed",
+      "oracle_max_abs": 2.6806723326444626e-05,
+      "reset_branch_guards_immutable_inputs": "passed",
+      "scope": "Complete two-token FFN stage; model attention/WKV and prefill integration not included.",
+      "status": "passed",
+      "weights": "int8"
+    }
+  },
+  "host_tests": "Release/test builds and 3/3 CTest passed.",
+  "limitations": [
+    "INT8 output projection is not fused.",
+    "Isolated stage improvement does not predict whole-model gain.",
+    "Host elapsed timings do not separate program switching, DMA and compute; hardware limits remain unproven."
+  ],
+  "logs": "reports/runs/recurrence-projection-2026-10-03"
+}

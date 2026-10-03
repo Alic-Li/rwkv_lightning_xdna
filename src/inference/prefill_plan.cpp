@@ -102,6 +102,8 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
   auto &ffn = session(root, weight_mode == WeightMode::BFloat16
       ? "bf16-prefill-ffn-b2-projection-input" : "int8-prefill-ffn-b2-projection-input");
   for (size_t l = 0; l < layers; ++l) {
+    const bool fuse_projection = l > 0 && weight_mode != WeightMode::Int8FFNOutput;
+    auto ffn_input = paired_outputs[l];
     for (size_t stage = 0; stage < 4; ++stage) {
       const size_t index = 1 + l * 5 + stage;
       if (stage == 1) {
@@ -112,6 +114,18 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
         auto &attention = session(root, "bf16-attention-projections-" + std::to_string(branches) + "-b2");
         prefill_body.push_back({attention.prepare({paired_view(args[0]), args[1],
             paired_view(args[2]), paired_view(args[3]), paired_view(args[4])}), Stage::Attention, 2});
+      } else if (stage == 2 && fuse_projection) {
+        const auto &args = bindings[index].arguments;
+        const auto &projection = bindings[index + 1].arguments;
+        auto residual = ffn_arenas[l - 1].slice(22528 * 4, 4096 * 4);
+        if (!same_region(remap(projection[2], false), residual.slice(0, 8192)) ||
+            !same_region(remap(projection[2], true), residual.slice(8192, 8192)))
+          throw std::runtime_error("Unsupported fused projection residual layout");
+        auto arena = paired_view(args[1]);
+        auto &fused = session(root, "bf16-prefill-recurrence-projection-b2");
+        prefill_body.push_back({fused.prepare({args[0], arena, paired_view(args[2]),
+            projection[1], residual}), Stage::RecurrenceOutput, 2});
+        ffn_input = arena.slice(25 * 2048 * 4, 65536 * 4);
       } else if (stage == 2) {
         const auto &args = bindings[index].arguments;
         const bool value = args.size() == 3;
@@ -120,6 +134,7 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
         if (value) pair.push_back(paired_view(args[2]));
         prefill_body.push_back({recurrence.prepare(pair), Stage::Recurrence, 2});
       } else if (stage == 3) {
+        if (fuse_projection) continue;
         const auto &args = bindings[index].arguments;
         auto input = paired_view(args[0]);
         const size_t stride = input.size() / sizeof(float) - 2048;
@@ -133,8 +148,10 @@ void DecodeGraph::Impl::prepare_prefill(const std::filesystem::path &root) {
       }
     }
     const auto &args = bindings[1 + l * 5 + 4].arguments;
-    auto half = initialized(ffn, Vector(10240, 0));
-    prefill_body.push_back({ffn.prepare({paired_outputs[l], args[1], args[2], ffn_arenas[l], half}),
+    auto &ffn_stage = fuse_projection ? session(root, weight_mode == WeightMode::BFloat16
+        ? "bf16-prefill-ffn-b2-recurrence-input" : "int8-prefill-ffn-b2-recurrence-input") : ffn;
+    auto half = initialized(ffn_stage, Vector(10240, 0));
+    prefill_body.push_back({ffn_stage.prepare({ffn_input, args[1], args[2], ffn_arenas[l], half}),
                             Stage::FFN, 2});
   }
   prefill_head.push_back(bind(bindings.size() - 2, true));
@@ -218,6 +235,7 @@ Vector DecodeGraph::Impl::prefill(const std::vector<int> &tokens) {
       case Stage::Mix: return "norm_mix";
       case Stage::Attention: return "attention_projections";
       case Stage::Recurrence: return "recurrence";
+      case Stage::RecurrenceOutput: return "recurrence_projection_residual";
       case Stage::Output: return "projection_residual";
       case Stage::FFN: return "channel_mix";
       case Stage::Head: return "head";
