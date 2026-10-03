@@ -1,0 +1,149 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "9ebf8a2",
+  "decision": "Rejected all candidate INT8 output recurrence/prefill fusion layouts; restore production sources and artifacts unchanged.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "model": "rwkv7-g1k-1.5b-20260930-ctx25600.pth",
+  "precision": "INT8 FFN and output weights; BF16 activations/MAC and FP32 recurrent state",
+  "protocol": {
+    "order": "A/B/B/A for 31 workers; one two-trial screening process for 24 workers",
+    "prompt_tokens": 32,
+    "decode_tokens_per_trial": 24,
+    "trials_per_process": 2,
+    "hardware_dispatch": "serial, profiling disabled"
+  },
+  "candidate_31_workers": {
+    "design": "Seven prepare/update/finish lanes, two copy bridges, eight W8A16 projection workers; same five-BO layout as accepted BF16 fusion. Decode each tile once for two tokens, apply row scale after all K tiles. Projection stack 17408 bytes.",
+    "stage_validation": "Bitwise FP32 state, projection/residual, untouched auxiliary vectors, FP64 projection, reset/replay, immutable inputs and guards passed.",
+    "stage_fp64_max_abs": 1.28933e-08,
+    "stage_samples_per_run": 200,
+    "stage_separate_us": [
+      3815.75,
+      3784.72
+    ],
+    "stage_fused_us": [
+      1705.96,
+      1709.53
+    ],
+    "model_validation": {
+      "mode": "verify",
+      "prefill_pair_runs": 125,
+      "prefill_runs": 4940,
+      "resident_bytes": 2055499776,
+      "root_bos": 340,
+      "status": "passed",
+      "vectors": 1533,
+      "weights": "int8_ffn_output"
+    },
+    "prefill_baseline_seconds": 3.419290639,
+    "prefill_candidate_seconds": 3.4137337345,
+    "prefill_improvement_percent": 0.16251629611764296,
+    "decode_baseline_ms": 186.69192133333334,
+    "decode_candidate_ms": 186.84445864583338,
+    "decode_change_percent": 0.08170536325868838,
+    "assessment": "Only about 0.16% whole-model gain, insufficient evidence to retain the added production complexity. Isolated hot-stage timing overstates the end-to-end benefit."
+  },
+  "candidate_24_workers": {
+    "design": "Combine state update and finish on each of seven lanes. Split state/y output retains original FP32 operation order and fits local memory.",
+    "stage_validation": "Same bitwise, FP64, reset and guard checks passed.",
+    "stage_fp64_max_abs": 1.28933e-08,
+    "stage_separate_us": [
+      3855.75,
+      4298.51
+    ],
+    "stage_fused_us": [
+      2580.84,
+      2576.25
+    ],
+    "prefill_change_percent": 3.5360256194939987,
+    "assessment": "Screening whole-model run is about 3.5% slower; rejected without broader model regression or extended timing."
+  },
+  "candidate_32_workers": {
+    "design": "Eleven prepare/update-finish lanes (ten with three heads, one with two), two copy bridges and eight projection workers. Group state drains to avoid exceeding shim output count.",
+    "compilation": [
+      "Initial ten-way input split rejected: no MemTile has 1 input / 10 output DMA channels.",
+      "Split input and state drain groups into five/five/one lanes, with five/six-way finish joins: no legal routing found.",
+      "Explicit placement of projection workers on row 5 and recurrence/copy workers on rows 2\u20134 also failed routing."
+    ],
+    "validation": "No hardware dispatch; unsupported layouts, not passing kernels.",
+    "assessment": "Compiler routing failures constrain these layouts, not proof that all possible layouts are impossible or whole-model hardware limits have been reached."
+  },
+  "samples": {
+    "a1": {
+      "prefill_seconds": 3.4190553135000004,
+      "decode_ms": 186.83804029166672,
+      "prefill_runs": 2338,
+      "resident_bytes": 2055499776,
+      "root_bos": 340
+    },
+    "b1": {
+      "prefill_seconds": 3.4122356375000003,
+      "decode_ms": 186.76237112500004,
+      "prefill_runs": 1970,
+      "resident_bytes": 2055499776,
+      "root_bos": 340
+    },
+    "b2": {
+      "prefill_seconds": 3.4152318315,
+      "decode_ms": 186.92654616666672,
+      "prefill_runs": 1970,
+      "resident_bytes": 2055499776,
+      "root_bos": 340
+    },
+    "a2": {
+      "prefill_seconds": 3.4195259645,
+      "decode_ms": 186.54580237499997,
+      "prefill_runs": 2338,
+      "resident_bytes": 2055499776,
+      "root_bos": 340
+    },
+    "24-b1": {
+      "prefill_seconds": 3.540197632,
+      "decode_ms": 186.49290639583333,
+      "prefill_runs": 1970,
+      "resident_bytes": 2055499776,
+      "root_bos": 340
+    }
+  },
+  "limitations": [
+    "No native INT8 MAC claim; arithmetic uses BF16 after local weight expansion.",
+    "Host wall time does not identify device compute utilization, actual DDR bandwidth or program-switch cost.",
+    "The 24-worker screening run is not an A/B/B/A acceptance measurement.",
+    "BF16 fusion accepted in 9ebf8a2 is retained; INT8 output remains separate."
+  ],
+  "next_action": "Investigate resident decode recurrence/output fusion, beginning with BF16, while retaining exact state/output tests and whole-model timing gates.",
+  "logs": "reports/runs/recurrence-projection-int8-2026-10-03",
+  "restoration_checks": "Release/test builds and 3/3 CTest passed after restoring all production code to 9ebf8a2; both BF16 and INT8 FFN+output CLI dispatches succeeded.",
+  "restored_initial_token_profile": {
+    "scope": "One instrumented initial token per precision, zero initial state, default sequential path. Host stage wall time includes program switches, DMA and compute. Exploratory evidence, not a steady-state benchmark.",
+    "host_stage_ms": {
+      "bf16": {
+        "attention_projections": 45.9477,
+        "channel_mix": 66.1465,
+        "head": 7.71957,
+        "norm": 0.481442,
+        "norm_mix": 8.38392,
+        "projection_residual": 23.9651,
+        "recurrence_stage": 2.22661,
+        "value_recurrence_stage": 51.9194
+      },
+      "int8-ffn-output": {
+        "attention_projections": 45.309,
+        "channel_mix": 50.6549,
+        "head": 7.73275,
+        "norm": 0.509605,
+        "norm_mix": 8.65096,
+        "projection_residual": 21.8479,
+        "recurrence_stage": 2.0446,
+        "value_recurrence_stage": 52.3188
+      }
+    }
+  }
+}

@@ -179,6 +179,11 @@ projection 和残差输出；FFN 以61440-float stride读取，无额外常驻 B
 decode 均值变化分别约+0.04%和−0.02%。三种精度各1,533个向量逐位回归通过。
 详见[recurrence/output 融合验证](../reports/rwkv7-recurrence-projection-prefill-2026-10-03.json)。
 
+INT8 输出权重的同类融合实验未采纳：31核版整模型仅改善0.16%，24核版筛选测试慢约3.5%，
+增加至11条 recurrence lane 的32核版受到 MemTile DMA 通道与路由约束，未完成编译。
+INT8 FFN+output 继续使用独立 recurrence/output 提交；详见
+[INT8 融合淘汰记录](../reports/rwkv7-int8-recurrence-projection-rejected-2026-10-03.json)。
+
 可用 `RWKV_XDNA_PROFILE=1` 诊断 batch2：
 
 ```bash
