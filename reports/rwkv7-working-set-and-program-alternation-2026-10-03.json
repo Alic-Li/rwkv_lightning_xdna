@@ -1,0 +1,211 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "78daece",
+  "decision": "Keep the diagnostic benchmark; do not promote the narrower partition artifacts. Prioritize shared device-program experiments over weight-cache tuning.",
+  "hardware": {
+    "device": "Ryzen AI 7 H 350 / RyzenAI-npu6 AIE2P",
+    "columns": 8,
+    "compute_rows": 4,
+    "xrt": "2.25.00",
+    "firmware": "1.0.0.63",
+    "power_mode": "not freshly verified"
+  },
+  "protocol": {
+    "matrix_shape": [
+      2048,
+      2048
+    ],
+    "weight_banks": [
+      1,
+      4,
+      32,
+      128
+    ],
+    "samples_per_case_per_round": 128,
+    "rounds": 2,
+    "order": "Ascending banks with same-program then after-norm; reverse banks and mode order in round two. Warm each case for max(8,banks) runs.",
+    "timing": "Projection host wall time only. A complete norm execute/wait precedes each projection in alternate mode but is excluded from projection timing. No host upload/download, allocation or oracle work inside timed loops.",
+    "data": "128 distinct guarded BOs, with a unique first matrix entry per bank. Random BF16 activations; W8A16 variant uses signed INT8 values and power-of-two FP16-representable row scales.",
+    "accuracy": "Every bank checked against FP64 projection oracle before timing and exact saved output after timing. Norm has an independent FP64 oracle. All weight contents, immutable inputs and BO guards checked after timing.",
+    "dispatch": "C++ only, serial NPU dispatch; Python used only for offline compilation and report aggregation.",
+    "result_array_order": "Arrays follow weight_banks=[1,4,32,128]; detailed per-round and percentile data are in logs."
+  },
+  "results": {
+    "bf16": {
+      "weight_bytes_per_bank": 8388608,
+      "same_program_mean_us": [
+        276.4623984374999,
+        275.76744140625,
+        277.0527578125001,
+        282.4552500000001
+      ],
+      "same_program_submit_mean_us": [
+        2.0504414062499996,
+        2.3894687500000003,
+        2.52441796875,
+        3.5476835937500004
+      ],
+      "after_norm_program_mean_us": [
+        997.6445273437499,
+        993.9199609375004,
+        992.806859375,
+        1007.3354453125
+      ],
+      "after_norm_program_submit_mean_us": [
+        2.0871875000000006,
+        2.6045078124999996,
+        2.8650820312499996,
+        3.3943359374999993
+      ],
+      "validation": {
+        "status": "passed",
+        "banks_verified": 128,
+        "projection_fp64_max_abs": 4.1420571506023407e-07
+      }
+    },
+    "w8a16": {
+      "weight_bytes_per_bank": 4259840,
+      "same_program_mean_us": [
+        177.11335156250004,
+        172.9240859375,
+        175.03532031249998,
+        175.682859375
+      ],
+      "same_program_submit_mean_us": [
+        2.616621093749999,
+        2.2999140625,
+        2.5740898437500004,
+        2.4727578125000003
+      ],
+      "after_norm_program_mean_us": [
+        892.9644375,
+        890.228578125,
+        900.7976406250002,
+        892.6149882812497
+      ],
+      "after_norm_program_submit_mean_us": [
+        2.4449960937499995,
+        2.4662578125000003,
+        3.2664179687500003,
+        3.4939375000000004
+      ],
+      "validation": {
+        "status": "passed",
+        "banks_verified": 128,
+        "projection_fp64_max_abs": 2.086162567138672e-06
+      }
+    },
+    "bf16_partitioned": {
+      "weight_bytes_per_bank": 8388608,
+      "same_program_mean_us": [
+        282.28202343749996,
+        278.8799023437499,
+        276.5040859375,
+        282.19755859375005
+      ],
+      "same_program_submit_mean_us": [
+        2.963796875,
+        2.7250312500000002,
+        2.60550390625,
+        2.7982421874999988
+      ],
+      "after_norm_program_mean_us": [
+        996.8862421874999,
+        985.9194687500003,
+        990.4224414062498,
+        1023.1584648437502
+      ],
+      "after_norm_program_submit_mean_us": [
+        2.6620195312500003,
+        2.6648671874999996,
+        2.9848085937500004,
+        4.120218749999999
+      ],
+      "validation": {
+        "status": "passed",
+        "banks_verified": 128,
+        "projection_fp64_max_abs": 4.1420571506023407e-07
+      }
+    },
+    "w8a16_partitioned": {
+      "weight_bytes_per_bank": 4259840,
+      "same_program_mean_us": [
+        176.00626562499997,
+        175.42539843750006,
+        175.3199296875,
+        174.1105234375
+      ],
+      "same_program_submit_mean_us": [
+        2.114765625,
+        1.9254726562500006,
+        2.06209765625,
+        2.39604296875
+      ],
+      "after_norm_program_mean_us": [
+        888.7062968749999,
+        884.5816640625,
+        896.3981640625,
+        894.64726953125
+      ],
+      "after_norm_program_submit_mean_us": [
+        2.248203125,
+        1.8812734374999995,
+        2.9052031249999994,
+        3.63700390625
+      ],
+      "validation": {
+        "status": "passed",
+        "banks_verified": 128,
+        "projection_fp64_max_abs": 2.086162567138672e-06
+      }
+    }
+  },
+  "partition_probe": {
+    "compiled_widths": {
+      "projection": 5,
+      "norm": 2
+    },
+    "production_widths": {
+      "projection": 8,
+      "norm": 8
+    },
+    "device_code": "Same existing BF16/W8A16 projection and FP32 norm kernels; only the IRON device column count changes.",
+    "runtime_snapshot": "xrt-smi during the INT8 narrow-partition run reports both active contexts in one partition at start_col=0, num_cols=8, with zero reported errors/migrations/preemption events.",
+    "timing_note": "Use separate uninstrumented rerun for narrow INT8 timing. The snapshot run is retained only for allocation evidence.",
+    "conclusion": "No material latency improvement. Compilation metadata alone did not result in the intended disjoint runtime allocation. Exact cause of the runtime allocation remains unverified.",
+    "offline_compilation": {
+      "environment": {
+        "PYTHONPATH": "tools/compile",
+        "RWKV_XDNA_KERNEL_DIR": "build/kernels/partition-probe",
+        "MLIR_AIE_KERNEL_SOURCES": "third_party/mlir-aie"
+      },
+      "python": [
+        "import runpy, rwkv7_common",
+        "from aie.iron.device import from_name",
+        "from aie.utils import set_current_device",
+        "set_current_device(from_name(\"npu2\", n_cols=5))",
+        "runpy.run_path(\"tools/compile/rwkv7_projection_residual.py\", run_name=\"__main__\")",
+        "runpy.run_path(\"tools/compile/rwkv7_projection_residual_int8.py\", run_name=\"__main__\")",
+        "set_current_device(from_name(\"npu2\", n_cols=2))",
+        "runpy.run_path(\"tools/compile/rwkv7_norm.py\", run_name=\"__main__\")"
+      ]
+    }
+  },
+  "binary_inspection": {
+    "binary": "/usr/lib/x86_64-linux-gnu/libxrt_driver_xdna.so.2.25.00",
+    "sha256": "2938c6a128f82cda56e52fc7a738e35970ad89f4284e2ece8d88cacb1cd2e738",
+    "observations": [
+      "hwctx constructor at 0x52b7e calls xclbin_parser::get_column_cnt and stores the result at object offset 0x38.",
+      "create_ctx_on_device reads offset 0x38, multiplies by queried device information at 0x51cf3 and passes the creation payload to drv_ioctl at 0x51d0d."
+    ],
+    "scope": "Host disassembly indicates the parsed column count participates in creation. It does not establish why runtime reports an eight-column allocation; no driver or system parameters changed."
+  },
+  "interpretation": [
+    "BF16 same-program latency barely changes between 8 MiB and 1 GiB of addressed weights; W8A16 is similarly insensitive over its tested sizes.",
+    "Alternation adds roughly 0.72 ms to the measured projection call while submission itself is only a few microseconds. This is evidence of sensitivity to program alternation, not a pure context-switch or preemption measurement.",
+    "The experiment does not establish whole-model hardware limits or measure actual DDR bandwidth, DMA bandwidth, cache hit rate or compute utilization."
+  ],
+  "next_action": "Build a control with norm and projection co-resident in one device program and separate runtime instruction streams, preserving the same data movement/arithmetic and verifying PDI identity, outputs and guards. If it removes the alternation penalty, apply this approach to adjacent model stages and benchmark the full model.",
+  "logs": "reports/runs/working-set-2026-10-03",
+  "host_tests": "Release/test builds and 3/3 CTest passed. Production runtime, kernels and artifact root unchanged."
+}

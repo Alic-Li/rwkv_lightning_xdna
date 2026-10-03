@@ -282,6 +282,23 @@ BO 数从291降到242，且128步逐位回归通过，整模型 A/B/B/A 仍比�
 因此未采用该 attention 融合，当时保留123次提交；孤立 warm-stage 加速不能代替整模型测量。
 布局、调度失败和对比数据见 [被拒绝的 attention 融合](../reports/rwkv7-attention-fusion-rejected-2026-10-03.json)。
 
+### 权重工作集与程序交替诊断
+
+```bash
+cmake --build --preset test --target rwkv-working-set-bench
+./build/test/rwkv-working-set-bench build/kernels/rwkv7-bf16
+./build/test/rwkv-working-set-bench build/kernels/rwkv7-bf16 --int8
+```
+
+此 C++ benchmark 使用128个不同权重 BO，BF16 最大工作集1 GiB。比较连续执行投影与
+每次先执行另一 LayerNorm 程序的情况；投影计时不包含 LayerNorm 调用时间，也不包含
+host 传输或数值检查。每种模式进行正反两轮，每组128次测量，所有 BO 做数值与保护检查。
+2026-10-03 测量中，BF16 连续投影约276–282 µs，交替程序后约993–1007 µs；
+W8A16 分别约173–177 µs和890–901 µs。扩大工作集的影响远小于程序交替。
+缩小编译分区到投影5列、norm 2列未改善延迟，运行时仍报告共同的8列分区。
+这不是实际 DDR 带宽或纯 context 切换计数；下一步检查多个阶段共用设备程序的效果。
+详见[工作集与程序交替测量](../reports/rwkv7-working-set-and-program-alternation-2026-10-03.json)。
+
 ## C++ 接口和状态
 
 ```cpp
