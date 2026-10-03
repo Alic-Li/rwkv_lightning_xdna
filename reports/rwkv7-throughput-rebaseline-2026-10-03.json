@@ -1,0 +1,379 @@
+{
+  "date": "2026-10-03",
+  "baseline_commit": "2cd50a1",
+  "status": "fresh serial production baseline; no optimization promoted",
+  "power_mode": "default (xrt-smi); historical performance-mode runs are not paired controls",
+  "artifact_manifest_sha256": "6ca3f029dd958c27b29db6a7c43d1da3acb86d4b8549454158f9a6542fa95815",
+  "changed_artifacts_since_previous_uncommitted_baseline": [],
+  "hardware_health": "Production BF16 FFN oracle/shift/replay/guards passed, 20 samples mean 1910.04 us",
+  "modes": {
+    "bf16": {
+      "decode": {
+        "max_ms": 214.109146,
+        "mean_ms": 202.22858141666666,
+        "min_ms": 198.377632,
+        "p50_ms": 199.601727,
+        "p95_ms": 212.054094,
+        "samples": 48,
+        "tokens_per_second": 4.944899444948512
+      },
+      "prefill_trial_seconds": [
+        3.438894552,
+        3.454779469
+      ],
+      "prefill_trial_tokens_per_second": [
+        9.305315855465638,
+        9.262530441418459
+      ],
+      "runs_per_token": 100,
+      "resident_bytes": 2947313664,
+      "decode_stage_ms_mean_excluding_first_token": {
+        "attention_projections": 45.10577142857143,
+        "channel_mix": 65.57501428571429,
+        "head": 7.535814285714286,
+        "norm": 0.4730388571428571,
+        "norm_mix": 8.228898571428571,
+        "projection_residual": 0.9876271428571428,
+        "recurrence_stage": 2.1318942857142855,
+        "value_recurrence_projection": 70.93811428571429
+      },
+      "batch2_profile": {
+        "final_pair_download_us": 14.525,
+        "odd_tail_runs": 0,
+        "pair_upload_us": 26.716,
+        "pairs": 4,
+        "prompt_tokens": 8,
+        "scope": "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output.",
+        "stages": [
+          {
+            "elapsed_us": 913.475,
+            "runs": 4,
+            "stage": "norm",
+            "submit_us": 51.76,
+            "token_slot": 0,
+            "wait_us": 861.445
+          },
+          {
+            "elapsed_us": 538.023,
+            "runs": 5,
+            "stage": "norm",
+            "submit_us": 29.070999999999998,
+            "token_slot": 1,
+            "wait_us": 508.641
+          },
+          {
+            "elapsed_us": 32920.85700000001,
+            "runs": 96,
+            "stage": "norm_mix",
+            "submit_us": 858.3760000000001,
+            "token_slot": 0,
+            "wait_us": 32053.856000000003
+          },
+          {
+            "elapsed_us": 12059.844999999998,
+            "runs": 96,
+            "stage": "norm_mix",
+            "submit_us": 678.0330000000001,
+            "token_slot": 1,
+            "wait_us": 11373.896999999997
+          },
+          {
+            "elapsed_us": 190191.30699999997,
+            "runs": 96,
+            "stage": "attention_projections",
+            "submit_us": 632.8700000000006,
+            "token_slot": 2,
+            "wait_us": 189549.45500000007
+          },
+          {
+            "elapsed_us": 11413.221,
+            "runs": 4,
+            "stage": "recurrence",
+            "submit_us": 25.684,
+            "token_slot": 2,
+            "wait_us": 11387.177
+          },
+          {
+            "elapsed_us": 4814.029,
+            "runs": 4,
+            "stage": "projection_residual",
+            "submit_us": 34.54,
+            "token_slot": 2,
+            "wait_us": 4778.967
+          },
+          {
+            "elapsed_us": 266121.98700000014,
+            "runs": 96,
+            "stage": "channel_mix",
+            "submit_us": 1024.833,
+            "token_slot": 2,
+            "wait_us": 265086.34699999995
+          },
+          {
+            "elapsed_us": 7696.066,
+            "runs": 1,
+            "stage": "head",
+            "submit_us": 8.014,
+            "token_slot": 1,
+            "wait_us": 7687.962
+          },
+          {
+            "elapsed_us": 352211.8530000001,
+            "runs": 92,
+            "stage": "recurrence_projection_residual",
+            "submit_us": 708.7160000000001,
+            "token_slot": 2,
+            "wait_us": 351491.56099999987
+          }
+        ]
+      }
+    },
+    "int8-ffn": {
+      "decode": {
+        "max_ms": 185.035193,
+        "mean_ms": 183.52102254166667,
+        "min_ms": 182.37979900000002,
+        "p50_ms": 183.247602,
+        "p95_ms": 184.845666,
+        "samples": 48,
+        "tokens_per_second": 5.448967023780393
+      },
+      "prefill_trial_seconds": [
+        3.410747894,
+        3.406240189
+      ],
+      "prefill_trial_tokens_per_second": [
+        9.38210650405814,
+        9.39452247182678
+      ],
+      "runs_per_token": 100,
+      "resident_bytes": 2154590208,
+      "decode_stage_ms_mean_excluding_first_token": {
+        "attention_projections": 44.90452857142857,
+        "channel_mix": 49.94274285714285,
+        "head": 7.28593,
+        "norm": 0.4462054285714286,
+        "norm_mix": 8.014021428571429,
+        "projection_residual": 1.0037708571428572,
+        "recurrence_stage": 2.1069785714285714,
+        "value_recurrence_projection": 70.31824285714286
+      },
+      "batch2_profile": {
+        "final_pair_download_us": 11.981,
+        "odd_tail_runs": 0,
+        "pair_upload_us": 21.597,
+        "pairs": 4,
+        "prompt_tokens": 8,
+        "scope": "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output.",
+        "stages": [
+          {
+            "elapsed_us": 868.538,
+            "runs": 4,
+            "stage": "norm",
+            "submit_us": 29.881999999999998,
+            "token_slot": 0,
+            "wait_us": 838.256
+          },
+          {
+            "elapsed_us": 555.022,
+            "runs": 5,
+            "stage": "norm",
+            "submit_us": 23.67,
+            "token_slot": 1,
+            "wait_us": 530.981
+          },
+          {
+            "elapsed_us": 31385.622999999992,
+            "runs": 96,
+            "stage": "norm_mix",
+            "submit_us": 426.9849999999998,
+            "token_slot": 0,
+            "wait_us": 30951.23500000002
+          },
+          {
+            "elapsed_us": 11603.177999999994,
+            "runs": 96,
+            "stage": "norm_mix",
+            "submit_us": 365.9609999999999,
+            "token_slot": 1,
+            "wait_us": 11230.043000000005
+          },
+          {
+            "elapsed_us": 186508.58899999995,
+            "runs": 96,
+            "stage": "attention_projections",
+            "submit_us": 373.092,
+            "token_slot": 2,
+            "wait_us": 186128.23299999998
+          },
+          {
+            "elapsed_us": 11209.126,
+            "runs": 4,
+            "stage": "recurrence",
+            "submit_us": 27.807,
+            "token_slot": 2,
+            "wait_us": 11180.989000000001
+          },
+          {
+            "elapsed_us": 4627.183,
+            "runs": 4,
+            "stage": "projection_residual",
+            "submit_us": 22.268,
+            "token_slot": 2,
+            "wait_us": 4604.6449999999995
+          },
+          {
+            "elapsed_us": 253184.99000000002,
+            "runs": 96,
+            "stage": "channel_mix",
+            "submit_us": 466.82199999999995,
+            "token_slot": 2,
+            "wait_us": 252709.5659999999
+          },
+          {
+            "elapsed_us": 7129.911,
+            "runs": 1,
+            "stage": "head",
+            "submit_us": 5.87,
+            "token_slot": 1,
+            "wait_us": 7123.951
+          },
+          {
+            "elapsed_us": 348582.067,
+            "runs": 92,
+            "stage": "recurrence_projection_residual",
+            "submit_us": 339.81199999999995,
+            "token_slot": 2,
+            "wait_us": 348233.773
+          }
+        ]
+      }
+    },
+    "int8-output": {
+      "decode": {
+        "max_ms": 209.97663,
+        "mean_ms": 185.57566702083332,
+        "min_ms": 183.379438,
+        "p50_ms": 184.367098,
+        "p95_ms": 193.64628,
+        "samples": 48,
+        "tokens_per_second": 5.388637508643505
+      },
+      "prefill_trial_seconds": [
+        3.390042901,
+        3.378763177
+      ],
+      "prefill_trial_tokens_per_second": [
+        9.439408566351945,
+        9.470921258356071
+      ],
+      "runs_per_token": 123,
+      "resident_bytes": 2055499776,
+      "decode_stage_ms_mean_excluding_first_token": {
+        "attention_projections": 44.74947142857143,
+        "channel_mix": 49.921842857142856,
+        "head": 7.187504285714286,
+        "norm": 0.444301,
+        "norm_mix": 8.119924285714285,
+        "projection_residual": 21.70124285714286,
+        "recurrence_stage": 2.082594285714286,
+        "value_recurrence_stage": 50.35964285714285
+      },
+      "batch2_profile": {
+        "final_pair_download_us": 15.719,
+        "odd_tail_runs": 0,
+        "pair_upload_us": 27.988,
+        "pairs": 4,
+        "prompt_tokens": 8,
+        "scope": "Host stage wall time including scheduling, program switches, DMA and compute; odd tail has separate decode_profile output.",
+        "stages": [
+          {
+            "elapsed_us": 906.023,
+            "runs": 4,
+            "stage": "norm",
+            "submit_us": 41.711,
+            "token_slot": 0,
+            "wait_us": 863.9810000000001
+          },
+          {
+            "elapsed_us": 572.9639999999999,
+            "runs": 5,
+            "stage": "norm",
+            "submit_us": 30.103,
+            "token_slot": 1,
+            "wait_us": 542.5
+          },
+          {
+            "elapsed_us": 32236.992000000006,
+            "runs": 96,
+            "stage": "norm_mix",
+            "submit_us": 599.2299999999998,
+            "token_slot": 0,
+            "wait_us": 31629.407999999996
+          },
+          {
+            "elapsed_us": 11829.289999999999,
+            "runs": 96,
+            "stage": "norm_mix",
+            "submit_us": 532.1419999999998,
+            "token_slot": 1,
+            "wait_us": 11289.217999999997
+          },
+          {
+            "elapsed_us": 189861.45199999996,
+            "runs": 96,
+            "stage": "attention_projections",
+            "submit_us": 545.121,
+            "token_slot": 2,
+            "wait_us": 189307.412
+          },
+          {
+            "elapsed_us": 289177.7590000001,
+            "runs": 96,
+            "stage": "recurrence",
+            "submit_us": 475.04699999999997,
+            "token_slot": 2,
+            "wait_us": 288692.97099999996
+          },
+          {
+            "elapsed_us": 74493.28699999998,
+            "runs": 96,
+            "stage": "projection_residual",
+            "submit_us": 633.0749999999998,
+            "token_slot": 2,
+            "wait_us": 73851.88299999999
+          },
+          {
+            "elapsed_us": 254907.853,
+            "runs": 96,
+            "stage": "channel_mix",
+            "submit_us": 561.6560000000003,
+            "token_slot": 2,
+            "wait_us": 254336.69100000005
+          },
+          {
+            "elapsed_us": 7900.981,
+            "runs": 1,
+            "stage": "head",
+            "submit_us": 6.663,
+            "token_slot": 1,
+            "wait_us": 7894.278
+          }
+        ]
+      }
+    }
+  },
+  "historical_uncommitted_experiments": {
+    "logs": "reports/runs/throughput-2026-10-03",
+    "eight_key_and_value": "Compute-peer DMA placement and nine-input MemTile join failures; do not repeat unchanged",
+    "eight_value": "Compiled bounded/drain candidates lack passing dispatch. Historical timeout followed by SMU recovery errors. Current boot production health passes. Causality not proven.",
+    "chunk4": "Compiled artifact exists but no successful dispatch record; source absent from tracked tree. Not an accepted prefill implementation."
+  },
+  "measurement_limits": [
+    "Host stage wall times include program alternation, DMA, FIFO waits and arithmetic; they are not independent hardware counters.",
+    "Current production prefill kernels batch two tokens; default CLI still uses sequential decode.",
+    "INT8 modes use INT8 storage, BF16 activations and MAC inputs, FP32 accumulation/state; output scale is FP16-derived FP32.",
+    "No hardware-limit or speedup claim."
+  ],
+  "logs": "reports/runs/throughput-resume-2026-10-03"
+}
