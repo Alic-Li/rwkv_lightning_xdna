@@ -7,11 +7,22 @@ PTH/safetensors 支持 FP32、FP16、BF16 存储，加载为主机 FP32 后一�
 
 2026-10-03 已对本机编译器做精度能力核查：`aie2p` 对应 `__AIE_ARCH__=21`，
 BF16/INT8 vector multiply 正向对照均编译成功，而 `_Float16` 被目标明确拒绝。
-[AMD 矩阵模式表](https://download.amd.com/docnav/aiengine/xilinx2025_1/aiengine_api/aie_api/doc/group__group__mmul.html)
+[AMD AIE API 2026.1 矩阵模式表](https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/group__group__mmul.html)
 也未在 XDNA2 行列出 FP16 模式。因此 IEEE FP16 不能作为该目标的原生矩阵模式直接
 替换 BF16；若要求严格 FP16 语义，需要单独实现并测量仿真路径，不能把 BF16 改名为
 FP16。该能力核查不代表整个性能目标已完成，见
 [精度能力证据](../reports/rwkv7-precision-capability-2026-10-03.json)。
+
+后续 kernel 开发以 [AIE API 2026.1](https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/index.html)
+为文档参考，并对照本机头文件和编译器验证。必须读取 **XDNA2** 行，不能套用
+AIE-MLv2 行。矩阵表中的 float 乘法通过 BF16 仿真；BF16 `8×8×8` 模式的脚注 e
+要求开启 `AIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16`，以精度换吞吐，不能直接用于
+要求原有数值行为的路径。文档版本也不等于本机安装的 API 版本。
+
+优化同时参考 `FastFlowLM/src/lib/xrt` 和 `FastFlowLM/src/lib/hrx` 的实际二进制。
+已反汇编核实 HRX forward 的批量 dispatch、统一 flush/wait，以及 executable 创建路径；
+这些是待实测的调度方案，不是本项目已经获得的性能收益。地址、哈希、源码交叉核对和
+后续验证项见 [2026.1 / FastFlowLM 核查](../reports/amd2026-fastflow-review-2026-10-03.json)。
 
 embedding 查表、tokenizer、sampler、权重加载和调度在 CPU；模型算术全部在 NPU。
 没有 CPU 算子回退。NPU 纯 FP32、hybrid、逐节点 NPU eager 和独立 sequence prefill

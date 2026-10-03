@@ -8,7 +8,17 @@
 不是整个 decode 的单次硬件图提交。默认 NPU resident 路径使用 BF16 权重、固定 arena、
 阶段融合和阵列并行。通过 `load_state / replay_resident / export_state`，FP32 状态跨
  token 留在设备 BO，稳态只传 embedding/logits；兼容 `replay(token, State&)` 同步完整状态。
-当前24层模型为146 runs/token，约236 ms/token。生产实现及验证见 [inference.md](inference.md)。
+当前24层模型普通 BF16 / INT8 FFN-only decode 为100 runs/token，INT8 FFN+output
+和诊断 trace 为123 runs/token。延迟取决于权重模式和测试条件，生产实现及各次测量见
+[inference.md](inference.md)。
+
+2026-10-03 补查 FastFlowLM 的 `src/lib/hrx/libllama_npu.so`：其 forward 中存在
+循环调用 `hrx_stream_dispatch` 后统一 `hrx_stream_flush` / `hrx_stream_wait` 的路径，
+随后单独运行输出 head。本地 HRX 包装头文件也提供 executable 缓存和批量 record 接口。
+FastFlowLM 的 `FLM_USE_HRX` 默认关闭，不能把 HRX 与 XRT 库的行为混为一谈。
+这说明应独立验证 HRX 的兼容性及收益；下面的旧 XRT runlist 失败不能排除 HRX 路径。
+统一 flush 也不证明只有一条硬件命令。可复查的二进制地址、哈希及证据边界见
+[FastFlowLM HRX 核查](../reports/amd2026-fastflow-review-2026-10-03.json)。
 
 以下是历史 runlist/capture 探针记录，不代表当前接口或本轮重新测试。
 

@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-03",
+  "scope": "AMD AIE API 2026.1 reference refresh and read-only FastFlowLM host binary analysis; no production runtime change",
+  "amd": {
+    "index": "https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/index.html",
+    "matrix_table": "https://download.amd.com/docnav/aiengine/xilinx2026_1/aiengine_api/aie_api/doc/group__group__mmul.html",
+    "retrieval": "Downloaded with curl; browser tool could not open the URL. HTML and extracted text retained in ignored evidence directory.",
+    "target": "XDNA2 / aie2p, __AIE_ARCH__=21; distinct from AIE-MLv2",
+    "observations": [
+      "XDNA2 f16 x f16 matrix cell is empty; prior local compiler rejection remains consistent.",
+      "Float matrix multiplication is emulated using native BF16 multiplication (footnote d).",
+      "BF16 8x8x8 uses block-floating-point emulation enabled by AIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16, with an accuracy tradeoff (footnote e).",
+      "Documentation version does not establish the installed headers/compiler version; new APIs require local compilation and numerical validation."
+    ]
+  },
+  "fastflow_commit": "b0d41a03411470373f849b25e3ce9356d716a483",
+  "binaries": {
+    "src/lib/hrx/libllama_npu.so": {
+      "sha256": "fd6fddedc32302b6cda4ef65f3e75ba58e7960246ab7830551abb9f7b5685931",
+      "forward": {
+        "symbol_address": "0x14c40",
+        "dispatch": "0x14ed8",
+        "loop_back_edge": "0x14f00 -> 0x14d90",
+        "flush": "0x14f19",
+        "wait": "0x14f3e",
+        "subsequent_run_start": "0x1501f"
+      },
+      "run_start": {
+        "buffer_flush": "0x275f1",
+        "dispatch": "0x2769e",
+        "flush": "0x276c7"
+      },
+      "executable_cache": {
+        "create": "0x29c4e",
+        "lookup_export": "0x29cc2"
+      }
+    },
+    "src/lib/hrx/libgemm.so": {
+      "sha256": "348c6fc5a0a8303aa708f7efd9095174223446c7ef1b6ffa4fe0156fabadb17a",
+      "getters": {
+        "get_m": "0x8350: returns 64",
+        "get_k": "0x8360: returns 512",
+        "get_n": "0x8370: returns 128"
+      }
+    }
+  },
+  "source_cross_checks": [
+    "FastFlowLM/src/include/hrx_cpp/hrx_cpp.hpp: executable cache keyed by length-prefixed full xclbin and transaction bytes; record dispatches, start records then flushes, runlist records all then flushes once.",
+    "FastFlowLM/src/include/npu_utils/npu_utils_hrx.hpp calls lookup_or_build_executable.",
+    "FastFlowLM/src/CMakeLists.txt: FLM_USE_HRX defaults OFF; HRX is opt-in.",
+    "FastFlowLM/hrx-integration/hrx-release.env pins flm-hrx-amdxdna-v2026.09.15."
+  ],
+  "limits": [
+    "Analysis decodes x86 host instructions, not embedded AIE device instructions.",
+    "Multiple dispatches followed by one flush/wait do not prove one hardware command or a speedup.",
+    "GEMM getters alone do not establish native INT8 MAC execution.",
+    "Earlier XRT runlist ERT_CMD_STATE_ABORT does not establish HRX incompatibility.",
+    "HRX runtime compatibility and performance have not been measured in this project."
+  ],
+  "next_measurements": [
+    "Check availability and ABI of the pinned HRX runtime; build a C++ control using identical existing artifacts and buffers.",
+    "Compare individual start/wait against record-many/flush/wait, including executable reuse, changing inputs, state order, guards and numerical equivalence.",
+    "Only integrate after serial hardware A/B measurements establish reduced host/dispatch cost without numerical or prefill regressions."
+  ],
+  "validation": {
+    "release_build": "passed",
+    "test_build": "passed",
+    "ctest": "3/3 passed; CPU tests",
+    "performance": "Not applicable to this documentation-only change; no HRX performance claim."
+  },
+  "evidence_directory": "reports/runs/amd2026-fastflow-2026-10-03",
+  "reproduce_disassembly": "objdump -d -C --start-address=0x14c40 --stop-address=0x15c90 /home/alic-li/work_space/FastFlowLM/src/lib/hrx/libllama_npu.so"
+}
