@@ -67,6 +67,12 @@ void validate_resident_artifacts(const std::filesystem::path &root,
     if (!input)
       throw std::runtime_error("Missing production artifact: bf16-channel-mix");
     input >> config;
+    const auto layout = config.value("weight_layout", "row_major");
+    if (layout != "row_major" && layout != "w2_k_major_4")
+      throw std::runtime_error("Unsupported BF16 FFN weight layout: " + layout);
+    if (layout == "w2_k_major_4")
+      check_artifact(root, "bf16-channel-mix",
+                     {{"experimental", "stream_activation256_k_major_w2"}, {"value_cores", 4}});
     const bool spatial = config.value("value_cores", 0) == 8;
     if (spatial)
       check_artifact(root, "bf16-channel-mix",

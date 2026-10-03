@@ -340,6 +340,16 @@ void DecodeGraph::Impl::prepare_resident_arenas(
 // runs.
 void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
                                               ResidentLayout &layout) {
+  bool ffn_value_k_major = false;
+  if (weight_mode == WeightMode::BFloat16) {
+    std::ifstream input(root / "bf16-channel-mix/config.json");
+    nlohmann::json config;
+    input >> config;
+    ffn_value_k_major = config.value("weight_layout", "row_major") == "w2_k_major_4";
+    if (ffn_value_k_major && capture_prefill)
+      throw std::runtime_error("Experimental K-major FFN supports sequential decode/prefill only");
+  }
+
   const bool use_mode_attention = mode_attention(root);
   auto &value_args = layout.value_args;
   auto &recurrence_stages = layout.recurrence_stages;
@@ -441,7 +451,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
           ++root_bos;
         } else {
           packed_weights = initialized_bf16(stage,
-              weight_layout::channel_mix(*n[2].weight, *n[4].weight));
+              weight_layout::channel_mix(*n[2].weight, *n[4].weight, ffn_value_k_major));
         }
         auto diagnostic = initialized(stage, Vector(capture_prefill ? (prefill_chunk_tokens == 4 ? 51200 : 26624) : 22528, 0));
         auto result = initialized(stage, Vector(4096, 0));

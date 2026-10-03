@@ -54,7 +54,18 @@ int main(int argc, char **argv) {
     std::vector<uint16_t> w(33554432);
     for (auto &v : w)
       v = bf16(d(rng) / 64);
-    weights.data.upload(w.data(), weights.bytes);
+    auto uploaded_weights = w;
+    if (config.value("weight_layout", "row_major") == "w2_k_major_4") {
+      // The oracle below retains its independent canonical row-major weights.
+      for (size_t worker = 0; worker < 4; ++worker)
+        for (size_t k = 0; k < 32; ++k)
+          for (size_t row = 0; row < 32; ++row) {
+            size_t base = 16777216 + worker * 4194304;
+            std::copy_n(w.begin() + base + (row * 32 + k) * 4096, 4096,
+                        uploaded_weights.begin() + base + (k * 32 + row) * 4096);
+          }
+    }
+    weights.data.upload(uploaded_weights.data(), weights.bytes);
     V input(2048), constants(6144), previous(2048), actual_diag(22528),
         actual(4096);
     for (auto &v : constants)
@@ -127,7 +138,7 @@ int main(int argc, char **argv) {
     params.data.download(cp.data(), params.bytes);
     std::vector<uint16_t> same(w.size());
     weights.data.download(same.data(), weights.bytes);
-    if (ix != input || cp != constants || same != w)
+    if (ix != input || cp != constants || same != uploaded_weights)
       throw std::runtime_error("immutable input overwritten");
     std::cout << "ChannelMix oracle/shift/replay/guards passed max_abs="
               << worst << '\n';

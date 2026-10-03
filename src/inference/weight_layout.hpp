@@ -15,7 +15,8 @@ constexpr size_t row_tile = 16, reduction_tile = 256, tile_elements = 4096;
 Vector projection(const Tensor &logical, bool transposed, size_t first_output,
                   size_t physical_outputs, size_t physical_inputs);
 // Concatenated standard key[8192,2048], value[2048,8192] tiles.
-Vector channel_mix(const Tensor &key, const Tensor &value);
+// Experimental value layout: [worker=4,K/256,local_row/16,16,256].
+Vector channel_mix(const Tensor &key, const Tensor &value, bool value_k_major = false);
 // [worker=8,projection=3,local_row/16,K/256,16,256], stripe=256 rows.
 Vector rkv(const std::array<const Tensor *, 3> &logical);
 struct RankBranch {

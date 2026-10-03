@@ -1,0 +1,142 @@
+{
+  "date": "2026-10-03",
+  "scope": "Single-request single-token BF16 FFN producer-consumer dataflow; no batching",
+  "status": "All three retained streaming variants pass stage oracle and 128-step bitwise model regression; performance evaluation continues for block-cyclic variant",
+  "precision": "Original BF16 GEMV operands and FP32 accumulation, activation/residual/norm. WKV state stays FP32. Per-output K tile order stays 0..31; no reassociation, approximation, fast-math or activation precision change.",
+  "device": "RyzenAI-npu6, XDNA2 eight columns, default power mode; same model/toolchain as spatial-w2-eight report",
+  "variants": {
+    "stream": "Four W1 produce 256 outputs at a time. Two pair collectors and one root collector serialize canonical channel order. Four W2 consume a 256-element FIFO; row-major weights are read K-major using strided DMA. Fourteen compute workers.",
+    "packed": "Same graph, W2 tiles repacked once on host at model load to [worker=4,K/256,local_row/16,16,256], allowing contiguous replay DMA. No decode-time weight packing or additional host transfers.",
+    "interleaved": "W1 worker j owns 256-output blocks j,j+4,...; W1 DMA selects these from unchanged canonical key weights. MemTile joins four 256-output blocks into each successive contiguous 1024-element activation chunk. W2 consumes eight chunks with four K tiles per chunk, in original per-row reduction order. Raw diagnostic DMA scatters worker-local rows back into canonical order. No collectors; eleven compute workers, same count as production."
+  },
+  "validation": {
+    "stream": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 206.4664005196851,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 100,
+      "status": "passed",
+      "tokens_per_second": 4.843403079062528,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16",
+      "logits_state_max_abs": 0
+    },
+    "stream-packed": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 204.75483858267717,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 100,
+      "status": "passed",
+      "tokens_per_second": 4.883889469582493,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16",
+      "logits_state_max_abs": 0
+    },
+    "interleaved": {
+      "download_bytes": 262144,
+      "first_token_nodes": 960,
+      "mean_ms": 197.0851437086615,
+      "measured_steps": 127,
+      "mode": "verify",
+      "resident_bytes": 2917120000,
+      "runs_per_token": 100,
+      "status": "passed",
+      "tokens_per_second": 5.073949163201447,
+      "upload_bytes": 8192,
+      "vectors_checked": 1116,
+      "weights": "bf16",
+      "logits_state_max_abs": 0
+    }
+  },
+  "collector_model_comparison": {
+    "a": {
+      "process_means_ms": [
+        198.44452477083334,
+        199.01875183333337
+      ],
+      "mean_ms": 198.73163830208335,
+      "samples": 192
+    },
+    "s": {
+      "process_means_ms": [
+        206.39161511458337,
+        205.29909304166662
+      ],
+      "mean_ms": 205.845354078125,
+      "samples": 192
+    },
+    "p": {
+      "process_means_ms": [
+        203.81980814583338,
+        203.81252380208332
+      ],
+      "mean_ms": 203.81616597395833,
+      "samples": 192
+    },
+    "order": "A/S/P/P/S/A; 8 prompt, 48 decode, 2 trials, 4 warmup; no compilation overlap",
+    "decision": "Reject both 3-collector graphs for production; ~205.85/203.82 vs ~198.73 ms/token."
+  },
+  "trace": {
+    "interleaved_first_capture": {
+      "schema_version": 1,
+      "cores": [
+        {
+          "core": "core_trace for tile3,0",
+          "invocations": 1,
+          "marked_cycles": 2907344,
+          "event_cycles": {
+            "PORT_RUNNING_0": 0,
+            "LOCK_STALL": 2278053,
+            "INSTR_VECTOR": 113152,
+            "MEMORY_STALL": 550,
+            "PORT_RUNNING_1": 917
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0,
+            "LOCK_STALL": 0.7835512412703829,
+            "INSTR_VECTOR": 0.03891937108233494,
+            "MEMORY_STALL": 0.00018917610024819903,
+            "PORT_RUNNING_1": 0.00031540815259563365
+          }
+        },
+        {
+          "core": "core_trace for tile5,0",
+          "invocations": 1,
+          "marked_cycles": 2916012,
+          "event_cycles": {
+            "PORT_RUNNING_0": 3584,
+            "LOCK_STALL": 2286804,
+            "MEMORY_STALL": 725,
+            "INSTR_VECTOR": 110592,
+            "PORT_RUNNING_1": 0
+          },
+          "event_fraction": {
+            "PORT_RUNNING_0": 0.0012290758748592255,
+            "LOCK_STALL": 0.7842231101929622,
+            "MEMORY_STALL": 0.0002486272347301726,
+            "INSTR_VECTOR": 0.03792576985279896,
+            "PORT_RUNNING_1": 0.0
+          }
+        }
+      ],
+      "scope": "Marked execution on selected cores; excludes waiting for initial activation. Fractions overlap; vector issue is not peak-compute utilization."
+    },
+    "scope": "Only key0/value0. W1 includes activation production/backpressure; W2 begins after first activation and includes later chunk waits. Different regions/data dependencies from monolithic production, so lock fraction changes are not a utilization comparison. No whole-array compute/DMA utilization claim.",
+    "diagnostic_fix": "Direct MLIR event markers produced incomplete W2 windows (end before begin); moving the source marker behind acquire did not fix it. Out-of-line diagnostic C++ event calls gave complete windows. Initial incomplete traces are excluded, not repaired in the analyzer."
+  },
+  "raw_logs": "reports/runs/spatial-decode-2026-10-03",
+  "production_default": "Untouched; all builds require isolated roots and refuse the default production directory.",
+  "limits": [
+    "K-major experimental weights support sequential decode/prefill only; batch2/chunk4 rejects them before dispatch.",
+    "Spatial INT8 variants are not introduced. Existing W8A16 path remains unchanged.",
+    "This is an FFN subgraph prototype, not an integrated 32-tile full-layer graph or a measured hardware ceiling."
+  ]
+}
