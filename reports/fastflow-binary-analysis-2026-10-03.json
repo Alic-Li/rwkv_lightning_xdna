@@ -6,7 +6,8 @@
   "sha256": {
     "src/lib/xrt/libgemm.so": "4edc9b8ad41059ced21d0b21ce08214fdc784fe4057aa667c10995d1177dad67",
     "src/lib/xrt/libdequant.so": "c89ae39e7fe76e7ef8c3e0cdb5141311b6b43dd3b624ec8bb195a6a91e6d6f58",
-    "src/lib/xrt/libllama_npu.so": "4354b5c7c064853d7c9748a7669e6703516319d06800afc1a66b9b9c176a8c6f"
+    "src/lib/xrt/libllama_npu.so": "4354b5c7c064853d7c9748a7669e6703516319d06800afc1a66b9b9c176a8c6f",
+    "src/xclbins/Llama-3.1-8B-NPU2/mm.xclbin": "4afc2a6f2459c0ddcf7de61193a6e83e53a951a0f6c33521456d569bab2c7142"
   },
   "verified_findings": [
     {
@@ -44,6 +45,12 @@
         "0x3d33d"
       ],
       "finding": "One forward branch executes and waits on xrt::runlist, then starts a separate xrt::run and waits. Other branches issue individual runs."
+    },
+    {
+      "binary": "src/xclbins/Llama-3.1-8B-NPU2/mm.xclbin",
+      "method": "xclbinutil 2.25 --info and AIE_PARTITION/EMBEDDED_METADATA extraction",
+      "finding": "Container version 2.21.75; eight-column partition starting at zero; MLIR_AIE DPU kernel ID 0x901; opcode/instruction/count followed by five BO arguments. Embedded PDI UUID 975f2a36-5763-4eed-8b10-718b86b81fe5.",
+      "limitation": "operations_per_cycle=2048 is a metadata declaration, not measured throughput or proof of arithmetic precision. No AIE instructions decoded yet."
     }
   ],
   "interpretation": [
