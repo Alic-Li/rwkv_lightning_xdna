@@ -1,0 +1,130 @@
+{
+  "date": "2026-10-04",
+  "base_revision": "979ce03 (working tree changes)",
+  "model": {
+    "layers": 24,
+    "channels": 1024,
+    "heads": 16,
+    "head_size": 64,
+    "hidden": 4096,
+    "vocabulary": 65536,
+    "max_rank": 128
+  },
+  "checkpoint": "RWKV_v7_G1d_0.4B_Translate_ctx4096_20260607.pth",
+  "provenance": {
+    "os": "Ubuntu 24.04.5 LTS",
+    "kernel": "7.0.0-38-generic",
+    "cpu": "AMD Ryzen AI 7 H 350 w/ Radeon 860M",
+    "xrt": "2.25.00",
+    "npu": "RyzenAI-npu6",
+    "firmware": "1.0.0.63",
+    "aie_architecture": "aie2p",
+    "driver_version": "unknown",
+    "mlir_aie": "1.4.4.dev53+gd53582d",
+    "peano": "22.0.0.2026091701+773413fb"
+  },
+  "validation": {
+    "host_builds": [
+      "release passed",
+      "test passed"
+    ],
+    "cpu_ctest": "3/3 passed",
+    "real_input_bf16_projection_oracle": {
+      "projections": 1340,
+      "max_abs": 7.62939e-06,
+      "tolerance": "2e-5 + 2e-5 * abs(reference)",
+      "status": "passed"
+    },
+    "new_shape_stage_oracles_replay_and_bo_guards": {
+      "channel_mix_max_abs": 2.38419e-07,
+      "recurrence_max_abs": 9.53674e-07,
+      "value_recurrence_max_abs": 7.15256e-07,
+      "projection_residual_max_abs": 5.9139e-07,
+      "status": "passed"
+    },
+    "existing_2048_shape_artifact_regression": {
+      "channel_mix_max_abs": 2.42144e-07,
+      "recurrence_max_abs": 1.19209e-06,
+      "projection_residual_max_abs": 1.29192e-06,
+      "status": "passed"
+    },
+    "concurrent_isolation": {
+      "requests": 2,
+      "token_sequences": [
+        [
+          1,
+          2,
+          7,
+          9
+        ],
+        [
+          42,
+          17,
+          3,
+          8
+        ]
+      ],
+      "logits_and_final_per_layer_state": "bitwise equal to isolated device execution",
+      "peak_pending_npu_commands": 2,
+      "status": "passed"
+    },
+    "cli_concurrent_diagnostics": {
+      "requests": 2,
+      "input_tokens": [
+        1,
+        2,
+        3
+      ],
+      "each_request_logits": "bitwise equal to single-request NPU logits",
+      "status": "passed"
+    },
+    "translation": "single-request output and all four concurrent outputs byte-identical; Chinese translation"
+  },
+  "benchmark": {
+    "prompt_source": "/home/alic-li/work_space/translate.txt",
+    "prompt_sha256": "20286f164339fb56b3b23aaffb3b18f8834ea75473a644662021d1acf3cdb0a4",
+    "prompt_unescape": true,
+    "prompt_tokens_per_request": 146,
+    "max_tokens": 128,
+    "top_k": 1,
+    "weights": "bf16",
+    "backend": "npu",
+    "prefill": "decode",
+    "single": {
+      "generated": 128,
+      "prefill_seconds_excluding_setup": 21.1586,
+      "generation_seconds": 18.5342,
+      "generation_token_per_second": 6.90615187059598,
+      "decode_forwards": 127,
+      "decode_forward_per_second": 6.85594
+    },
+    "parallel4": {
+      "requests": 4,
+      "peak_pending_npu_commands": 4,
+      "setup_seconds": 3.51768,
+      "total_prompt_tokens": 584,
+      "prefill_wall_seconds": 37.7485,
+      "prefill_total_token_per_second": 15.4708,
+      "total_generated": 512,
+      "generation_wall_seconds": 36.92,
+      "generation_total_token_per_second": 13.8678,
+      "decode_forward_per_second": 13.7595,
+      "inference_wall_seconds": 74.6685,
+      "end_to_end_generated_token_per_second": 6.85697
+    },
+    "aggregate_generation_speedup": 2.0080357715625,
+    "scope": "One run per configuration, identical prompt/greedy sampling/max tokens; aggregate tokens divided by shared phase wall time. Setup excluded. First output token uses prefill logits; forward rate is separate."
+  },
+  "limitations": [
+    "Concurrent independent request threads and overlapping submitted NPU commands; physical tile scheduling is controlled by XRT. No spatial partitioning claim.",
+    "0.4B uses BF16 sequential token prefill and 123 resident runs/token; 2048-specific recurrence/output fusion and batch2/chunk4 are not enabled for this shape.",
+    "Other accepted tiled shapes are not covered by this hardware validation.",
+    "Same immutable host weights are shared, but each request has its own packed device weights and mutable BOs (about 855 MB resident per request)."
+  ],
+  "reproduce": {
+    "compile": ".venv/bin/python tools/compile/rwkv7_optimized.py --model \"$MODEL\" --output build/kernels/rwkv7-bf16",
+    "parallel_cli": "./build/release/rwkv-cli --model \"$MODEL\" --backend npu --kernel-dir build/kernels/rwkv7-bf16 --weights bf16 --prompt-file /home/alic-li/work_space/translate.txt --unescape-prompt --concurrency 4 --top-k 1 --max-tokens 128",
+    "isolation": "./build/test/rwkv-concurrent-graph-test \"$MODEL\" build/kernels/rwkv7-bf16"
+  },
+  "detailed_logs": "reports/runs/translate-0.4b-2026-10-04/"
+}

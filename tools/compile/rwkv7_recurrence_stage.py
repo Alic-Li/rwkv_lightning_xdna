@@ -7,21 +7,21 @@ import aie.iron as iron
 from aie.iron import InOut, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_common import KERNEL_ROOT, typ, external
+from rwkv7_common import C, HEADS, KERNEL_ROOT, typ, external
 
 
 def recurrence_program(with_value=False):
     lanes = 7 if with_value else 8
-    head_counts = [5, 5, 5, 5, 4, 4, 4] if with_value else [32 // lanes] * lanes
+    head_counts = [HEADS // lanes + (i < HEADS % lanes) for i in range(lanes)]
     head_offsets = [sum(head_counts[:i]) for i in range(lanes)]
     aux_size = 1728
     input_size = 1920 if with_value else aux_size
-    arena_size = 32 * input_size
+    arena_size = HEADS * input_size
     pre = external(
         "rwkv7_value_stage_prepare" if with_value else "rwkv7_stage_prepare",
         "value_recurrence_fp32.cc" if with_value else "recurrence_prepare_fp32.cc",
         (
-            [typ(input_size), typ(2048), typ(aux_size), np.int32]
+            [typ(input_size), typ(C), typ(aux_size), np.int32]
             if with_value
             else [typ(aux_size), typ(aux_size)]
         ),
@@ -40,7 +40,7 @@ def recurrence_program(with_value=False):
         optimization="-Os",
     )
     first_values = (
-        ObjectFifo(typ(2048), name="first_values", depth=1) if with_value else None
+        ObjectFifo(typ(C), name="first_values", depth=1) if with_value else None
     )
     ss = [ObjectFifo(typ(4096), name=f"state_{i}", depth=1) for i in range(lanes)]
     aa = [ObjectFifo(typ(input_size), name=f"aux_{i}", depth=1) for i in range(lanes)]
@@ -124,7 +124,7 @@ def recurrence_program(with_value=False):
             heads_per_lane = head_counts[i]
             head_offset = head_offsets[i]
             st = TAP(
-                (131072,),
+                ((C * 64),),
                 head_offset * 4096,
                 [1, 1, 1, heads_per_lane * 4096],
                 [0, 0, 0, 1],
@@ -133,7 +133,7 @@ def recurrence_program(with_value=False):
                 (arena_size,),
                 head_offset * 64,
                 [heads_per_lane, input_size // 64, 1, 64],
-                [64, 2048, 0, 1],
+                [64, C, 0, 1],
             )
             hs[i].fill(state, tap=st)
             ha[i].fill(auxiliary, tap=at)
@@ -144,7 +144,7 @@ def recurrence_program(with_value=False):
                     (arena_size,),
                     head_offset * 64,
                     [heads_per_lane, 27, 1, 64],
-                    [64, 2048, 0, 1],
+                    [64, C, 0, 1],
                 ),
                 wait=True,
             )
@@ -160,9 +160,9 @@ def recurrence_program(with_value=False):
         Runtime(
             seq_value if with_value else seq,
             [
-                typ(131072),
+                typ((C * 64)),
                 typ(arena_size),
-                *([typ(2048)] if with_value else []),
+                *([typ(C)] if with_value else []),
                 [f.prod() for f in ss],
                 [f.prod() for f in aa],
                 [f[0].cons() for f in splits],
@@ -189,7 +189,7 @@ if __name__ == "__main__":
             dict(
                 schema_version=1,
                 dtype="float32",
-                channels=2048,
+                channels=C,
                 head_size=64,
                 arena_vectors=27,
                 exact_fp32=False,

@@ -10,6 +10,9 @@
 #include <vector>
 
 namespace rwkv::xdna {
+// Process-wide high watermark of submitted DeviceRun commands awaiting completion.
+size_t dispatch_concurrency_peak();
+
 struct Buffer {
   std::vector<uint8_t> bytes;
   bool output = false;

@@ -31,13 +31,13 @@ int main(int argc, char **argv) {
                      root / name / "instructions.bin");
     };
     auto fused = session(argv[1], "bf16-channel-mix");
-    Guarded x(fused, 2048 * 4), params(fused, 6144 * 4),
-        weights(fused, 33554432 * 2), diag(fused, 22528 * 4),
-        out(fused, 4096 * 4);
     nlohmann::json config;
-    std::ifstream metadata(std::filesystem::path(argv[1]) /
-                           "bf16-channel-mix/config.json");
+    std::ifstream metadata(std::filesystem::path(argv[1]) / "bf16-channel-mix/config.json");
     metadata >> config;
+    const size_t C = config.at("channels"), H = config.at("hidden");
+    Guarded x(fused, C * 4), params(fused, 3 * C * 4),
+        weights(fused, 2 * C * H * 2), diag(fused, (3 * C + 2 * H) * 4),
+        out(fused, 2 * C * 4);
     if (config.value("trace_buffer_bytes", size_t(0)))
       throw std::runtime_error("Expected untraced production artifact");
     std::vector<DeviceBuffer> arguments{x.data, params.data, weights.data,
@@ -45,15 +45,15 @@ int main(int argc, char **argv) {
     auto run = fused.prepare(arguments);
     std::mt19937 rng(730);
     std::uniform_real_distribution<float> d(-1, 1);
-    std::vector<uint16_t> w(33554432);
+    std::vector<uint16_t> w((2 * C * H));
     for (auto &v : w)
       v = bf16(d(rng) / 64);
     weights.data.upload(w.data(), weights.bytes);
-    V input(2048), constants(6144), previous(2048), actual_diag(22528),
-        actual(4096);
+    V input(C), constants((3 * C)), previous(C), actual_diag((3 * C + 2 * H)),
+        actual(2 * C);
     for (auto &v : constants)
       v = d(rng) / 8;
-    for (size_t i = 0; i < 2048; ++i)
+    for (size_t i = 0; i < C; ++i)
       constants[i] += 1;
     for (auto &v : previous)
       v = d(rng);
@@ -81,37 +81,37 @@ int main(int argc, char **argv) {
       double mean = 0, var = 0;
       for (auto v : input)
         mean += v;
-      mean /= 2048;
+      mean /= C;
       for (auto v : input)
         var += (v - mean) * (v - mean);
-      for (size_t i = 0; i < 2048; ++i) {
+      for (size_t i = 0; i < C; ++i) {
         check(actual_diag[i],
-              float((input[i] - mean) / std::sqrt(var / 2048 + 1e-5f)) *
+              float((input[i] - mean) / std::sqrt(var / C + 1e-5f)) *
                       constants[i] +
-                  constants[2048 + i]);
-        if (actual_diag[2048 + i] != previous[i])
+                  constants[C + i]);
+        if (actual_diag[C + i] != previous[i])
           throw std::runtime_error("shift snapshot mismatch");
-        check(actual_diag[4096 + i],
+        check(actual_diag[2 * C + i],
               actual_diag[i] +
-                  (previous[i] - actual_diag[i]) * constants[4096 + i]);
+                  (previous[i] - actual_diag[i]) * constants[2 * C + i]);
         previous[i] = actual_diag[i];
       }
-      for (size_t row = 0; row < 8192; ++row) {
+      for (size_t row = 0; row < H; ++row) {
         double sum = 0;
-        for (size_t col = 0; col < 2048; ++col)
-          sum += double(expand(w[pos(row, col, 2048)])) *
-                 expand(bf16(actual_diag[4096 + col]));
-        check(actual_diag[6144 + row], sum);
-        float relu = std::max(actual_diag[6144 + row], 0.f);
-        check(actual_diag[14336 + row], relu * relu);
+        for (size_t col = 0; col < C; ++col)
+          sum += double(expand(w[pos(row, col, C)])) *
+                 expand(bf16(actual_diag[2 * C + col]));
+        check(actual_diag[(3 * C) + row], sum);
+        float relu = std::max(actual_diag[(3 * C) + row], 0.f);
+        check(actual_diag[(3 * C + H) + row], relu * relu);
       }
-      for (size_t row = 0; row < 2048; ++row) {
+      for (size_t row = 0; row < C; ++row) {
         double sum = 0;
-        for (size_t col = 0; col < 8192; ++col)
-          sum += double(expand(w[16777216 + pos(row, col, 8192)])) *
-                 expand(bf16(actual_diag[14336 + col]));
+        for (size_t col = 0; col < H; ++col)
+          sum += double(expand(w[(C * H) + pos(row, col, H)])) *
+                 expand(bf16(actual_diag[(3 * C + H) + col]));
         check(actual[row], sum);
-        check(actual[2048 + row], actual[row] + input[row]);
+        check(actual[C + row], actual[row] + input[row]);
       }
     }
     for (auto *p : {&x, &params, &weights, &diag, &out})

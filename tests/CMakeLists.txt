@@ -90,3 +90,7 @@ target_link_libraries(rwkv-recurrence-projection-test PRIVATE rwkv_xdna)
 
 add_executable(rwkv-decode-recurrence-projection-test inference/decode_recurrence_projection_test.cpp)
 target_link_libraries(rwkv-decode-recurrence-projection-test PRIVATE rwkv_xdna)
+
+target_include_directories(rwkv-projection-residual-test PRIVATE "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
+add_executable(rwkv-concurrent-graph-test inference/concurrent_graph_test.cpp)
+target_link_libraries(rwkv-concurrent-graph-test PRIVATE rwkv::inference rwkv::xdna Threads::Threads)

@@ -61,6 +61,7 @@ xdna::DeviceBuffer DecodeGraph::Impl::initialized_bf16(xdna::Session &s,
 // its aliases are also consumed by attention projection.
 void DecodeGraph::Impl::prepare_resident_arenas(
     const std::filesystem::path &root, ResidentLayout &layout) {
+  const size_t c = weights.channels();
   auto &value_args = layout.value_args;
   auto &recurrence_stages = layout.recurrence_stages;
   auto &allocator = session(root, "upstream-norm");
@@ -120,18 +121,18 @@ void DecodeGraph::Impl::prepare_resident_arenas(
       ids[20] = pre[1].output;
       for (size_t j = 0; j < 4; ++j)
         ids[21 + j] = post[j].output;
-      Vector values(ids.size() * 2048, 0);
+      Vector values(ids.size() * c, 0);
       for (size_t j = 0; j < ids.size(); ++j)
         if (ids[j] != none && buffers[ids[j]].constant)
           std::copy(read(ids[j]).begin(), read(ids[j]).end(),
-                    values.begin() + j * 2048);
+                    values.begin() + j * c);
       auto arena = initialized_pair(allocator, values);
       for (size_t j = 0; j < ids.size(); ++j) {
         if (ids[j] == none)
           continue;
-        if (device_buffers[ids[j]].size() || buffers[ids[j]].size != 2048)
+        if (device_buffers[ids[j]].size() || buffers[ids[j]].size != c)
           throw std::runtime_error("Unsupported recurrence arena alias");
-        device_buffers[ids[j]] = arena.slice(j * 2048 * 4, 2048 * 4);
+        device_buffers[ids[j]] = arena.slice(j * c * 4, c * 4);
       }
       recurrence_stages.emplace(ni - 6, arena);
       continue;
@@ -142,7 +143,7 @@ void DecodeGraph::Impl::prepare_resident_arenas(
     if (n->kind != Kind::Element)
       continue;
     if (n->op == Op::ValueResidual) {
-      auto input = recurrence_stages.at(i + 1).slice(27 * 2048 * 4, 6144 * 4);
+      auto input = recurrence_stages.at(i + 1).slice(27 * c * 4, (3 * c) * 4);
       value_args[i] = {input, device_buffers[n->inputs[1]]};
     }
   }
@@ -151,7 +152,7 @@ void DecodeGraph::Impl::prepare_resident_arenas(
   size_t arena_floats = 0;
   for (size_t id = 0; id < buffers.size(); ++id)
     if (!device_buffers[id].size())
-      arena_floats += ((buffers[id].size + 2047) / 2048) * 2048;
+      arena_floats += ((buffers[id].size + (c - 1)) / c) * c;
   Vector arena_data(arena_floats, 0);
   size_t offset = 0;
   for (size_t id = 0; id < buffers.size(); ++id) {
@@ -161,14 +162,14 @@ void DecodeGraph::Impl::prepare_resident_arenas(
     if (b.constant)
       std::copy(b.constant->begin(), b.constant->end(),
                 arena_data.begin() + offset);
-    offset += ((b.size + 2047) / 2048) * 2048;
+    offset += ((b.size + (c - 1)) / c) * c;
   }
   auto arena = initialized(allocator, arena_data);
   offset = 0;
   for (size_t id = 0; id < buffers.size(); ++id) {
     if (device_buffers[id].size())
       continue;
-    size_t size = ((buffers[id].size + 2047) / 2048) * 2048;
+    size_t size = ((buffers[id].size + (c - 1)) / c) * c;
     device_buffers[id] = arena.slice(offset * 4, size * 4);
     offset += size;
   }

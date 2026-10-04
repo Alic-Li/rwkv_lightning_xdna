@@ -27,6 +27,10 @@ cmake --build --preset release-kernels  # 只编译生产 kernel，不提交 NPU
 若出现 `Missing production artifact: upstream-norm`，按
 [推理排障](docs/inference.md#产物排障与迁移) 补齐设备产物。
 
+0.4B 翻译模型可用 `tools/compile/rwkv7_optimized.py --model "$MODEL"` 按实际形状
+编译内核，再用 `--prompt-file FILE --concurrency 4` 同时提交四个独立请求，
+统计总吞吐。形状、换行处理及并发调度边界见[推理说明](docs/inference.md#按模型形状编译与并发翻译)。
+
 默认产物目录为 `build/kernels/rwkv7-bf16`。当前支持的模型形状及 C++ 状态接口见
 [推理说明](docs/inference.md)。
 

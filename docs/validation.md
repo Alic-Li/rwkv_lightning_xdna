@@ -86,3 +86,26 @@ MLIR_AIE_KERNEL_SOURCES=third_party/mlir-aie \
 cmake --build --preset test
 ./build/test/rwkv-activation-test build/kernels/activation-test
 ```
+
+## 0.4B 动态形状与并发翻译（2026-10-04）
+
+实测模型为 `RWKV_v7_G1d_0.4B_Translate_ctx4096_20260607.pth`：24层、C=1024、
+16×64 heads、FFN=4096、vocabulary=65536，最大低秩128。
+[验证摘要](../reports/rwkv7-translate-concurrency-2026-10-04.json) 包含模型元数据、
+数值/guard 结果和相同 prompt 的单请求/四路并发数据。其他可编译形状尚不等于实机验证。
+
+```bash
+cmake --build --preset test
+./build/test/rwkv-alignment-test "$MODEL" build/kernels/rwkv7-bf16
+./build/test/rwkv-concurrent-graph-test "$MODEL" build/kernels/rwkv7-bf16
+./build/test/rwkv-channel-mix-test build/kernels/rwkv7-bf16/c1024-h4096-v65536
+./build/test/rwkv-recurrence-stage-test build/kernels/rwkv7-bf16/c1024-h4096-v65536
+./build/test/rwkv-recurrence-stage-test build/kernels/rwkv7-bf16/c1024-h4096-v65536 1 --fused-value
+./build/test/rwkv-projection-residual-test build/kernels/rwkv7-bf16/c1024-h4096-v65536
+```
+
+并发隔离测试使用两条不同 token 序列，将同步开始的并发执行与各自独立设备执行
+进行逐位比较，包括每步 logits 和最终各层 attention shift、FFN shift、WKV matrix。
+必须观测到至少两个同时等待完成的 NPU 提交。
+CLI 实测则将同一翻译 prompt 复制四份；四路输出与单请求输出完全一致。
+设备物理 tile 调度仍由 XRT 控制，提交重叠和吞吐收益不证明空间分区同时计算。

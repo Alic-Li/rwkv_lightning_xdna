@@ -2,6 +2,7 @@
 """Compile resident BF16/FP32 programs and optional INT8 FFN; never dispatch."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -23,9 +24,10 @@ def compile_stages(args):
             "projection_residual",
             "channel_mix",
             "head",
-            "decode_recurrence_projection",
         )
     ]
+    if args.channels == 2048 and args.hidden == 8192:
+        stages.append(("decode_recurrence_projection", []))
     if args.int8_ffn:
         stages.append(("channel_mix_int8", []))
     if args.prefill_batch2 or args.prefill_chunk4:
@@ -61,11 +63,55 @@ def main():
     prefill.add_argument(
         "--prefill-chunk4", action="store_true", help="Includes batch2 artifacts"
     )
+    parser.add_argument(
+        "--model", type=Path, help="Read actual model shape with the C++ loader"
+    )
+    parser.add_argument("--cli", type=Path, default=ROOT / "build/release/rwkv-cli")
     args = parser.parse_args()
+    args.channels, args.hidden, args.vocabulary = 2048, 8192, 65536
+    shape = None
+    if args.model:
+        shape = json.loads(
+            subprocess.check_output(
+                [
+                    str(args.cli.resolve()),
+                    "--model",
+                    str(args.model.resolve()),
+                    "--inspect-model",
+                ],
+                text=True,
+            )
+        )
+        args.channels, args.hidden, args.vocabulary = (
+            shape[k] for k in ("channels", "hidden", "vocabulary")
+        )
+        if (
+            not 512 <= args.channels <= 2048
+            or args.channels % 256
+            or shape["head_size"] != 64
+            or args.hidden % 256
+            or not 256 <= args.hidden <= 8192
+            or args.vocabulary % 128
+            or shape["max_rank"] > 256
+        ):
+            parser.error(f"Unsupported tiled NPU model shape: {shape}")
+        args.output = (
+            args.output / f"c{args.channels}-h{args.hidden}-v{args.vocabulary}"
+        )
+        print(f"Model shape: {shape}; artifacts: {args.output}", flush=True)
+    if (args.channels != 2048 or args.hidden != 8192 or args.vocabulary != 65536) and (
+        args.int8_ffn or args.prefill_batch2 or args.prefill_chunk4
+    ):
+        parser.error(
+            "Non-2048/8192/65536 models currently support BF16 sequential prefill only"
+        )
     env = dict(
         os.environ,
         MLIR_AIE_KERNEL_SOURCES=str(ROOT / "third_party/mlir-aie"),
         RWKV_XDNA_KERNEL_DIR=str(args.output.resolve()),
+        RWKV_XDNA_CHANNELS=str(args.channels),
+        RWKV_XDNA_HIDDEN=str(args.hidden),
+        RWKV_XDNA_VOCAB=str(args.vocabulary),
     )
     for stage, flags in compile_stages(args):
         subprocess.run(
@@ -73,6 +119,10 @@ def main():
             cwd=ROOT,
             env=env,
             check=True,
+        )
+    if shape:
+        (args.output / "model-shape.json").write_text(
+            json.dumps(shape, indent=2) + "\n"
         )
     print(
         "Compiled resident pipeline. Validate with C++ dispatch, numerical and guard checks."

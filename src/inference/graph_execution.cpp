@@ -147,7 +147,7 @@ Vector DecodeGraph::Impl::replay(int token, State &state, bool persistent) {
                    n.op == Op::NormalizeKey)
             category = "recurrence_stage";
           else if (span > 2 && n.kind == Kind::Linear && !n.transpose &&
-                   buffers[n.output].size == 2048)
+                   buffers[n.output].size == weights.channels())
             category = "attention_projections";
           else if (span == 2 && n.kind == Kind::Linear && !n.transpose)
             category = "projection_residual";

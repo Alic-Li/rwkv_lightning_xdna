@@ -8,7 +8,7 @@ import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_common import KERNEL_ROOT, typ, external
+from rwkv7_common import C, V, KERNEL_ROOT, typ, external
 
 
 @iron.jit
@@ -17,20 +17,20 @@ def design(x: In, w: In, y: Out):
     fn = external(
         "rwkv7_head_tile",
         "head_bf16.cc",
-        [typ(2048), wt(4096), typ(16), np.int32],
+        [typ(C), wt(4096), typ(16), np.int32],
         optimization="-O3",
     )
     zero = fn.object_file.bind("rwkv7_zero", [typ(16)])
-    xs = [ObjectFifo(typ(2048), name=f"x{i}", depth=1) for i in range(8)]
+    xs = [ObjectFifo(typ(C), name=f"x{i}", depth=1) for i in range(8)]
     ws = [ObjectFifo(wt(4096), name=f"w{i}", depth=2) for i in range(8)]
     ys = [ObjectFifo(typ(16), name=f"y{i}", depth=2) for i in range(8)]
 
     def core(x, w, y, f, z):
         xv = x.acquire(1)
-        for _ in range_(512):
+        for _ in range_(V // 128):
             out = y.acquire(1)
             z(out)
-            for col in range_(8):
+            for col in range_(C // 256):
                 wv = w.acquire(1)
                 f(xv, wv, out, col)
                 w.release(1)
@@ -49,10 +49,14 @@ def design(x: In, w: In, y: Out):
             hx[i].fill(x)
             hw[i].fill(
                 w,
-                tap=TAP((134217728,), i * 16777216, [1, 1, 1, 16777216], [0, 0, 0, 1]),
+                tap=TAP(
+                    ((C * V),), i * (C * V // 8), [1, 1, 1, (C * V // 8)], [0, 0, 0, 1]
+                ),
             )
             hy[i].drain(
-                y, tap=TAP((65536,), i * 8192, [1, 1, 1, 8192], [0, 0, 0, 1]), wait=True
+                y,
+                tap=TAP((V,), i * (V // 8), [1, 1, 1, (V // 8)], [0, 0, 0, 1]),
+                wait=True,
             )
 
     return Program(
@@ -60,9 +64,9 @@ def design(x: In, w: In, y: Out):
         Runtime(
             seq,
             [
-                typ(2048),
-                wt(134217728),
-                typ(65536),
+                typ(C),
+                wt((C * V)),
+                typ(V),
                 [f.prod() for f in xs],
                 [f.prod() for f in ws],
                 [f.cons() for f in ys],
@@ -73,7 +77,7 @@ def design(x: In, w: In, y: Out):
 
 
 if __name__ == "__main__":
-    path = KERNEL_ROOT / "bf16-array-gemv-2048-65536"
+    path = KERNEL_ROOT / f"bf16-array-gemv-{C}-{V}"
     path.mkdir(parents=True, exist_ok=True)
     design.compile(path / "design.xclbin", path / "instructions.bin")
     (path / "config.json").write_text(
@@ -81,8 +85,8 @@ if __name__ == "__main__":
             dict(
                 schema_version=1,
                 dtype="bfloat16",
-                k=2048,
-                rows=65536,
+                k=C,
+                rows=V,
                 cores=8,
                 input_resident=True,
             )

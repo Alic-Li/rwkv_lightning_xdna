@@ -11,11 +11,11 @@
 using namespace rwkv::xdna;
 using namespace rwkv::xdna::test;
 using V = std::vector<float>;
-static void reference(V &state, V &aux) {
+static void reference(V &state, V &aux, size_t C) {
   auto sigmoid = [](double x) { return 1 / (1 + std::exp(-x)); };
-  for (size_t h = 0; h < 32; ++h) {
+  for (size_t h = 0; h < C / 64; ++h) {
     auto at = [&](size_t v, size_t j) -> float & {
-      return aux[v * 2048 + h * 64 + j];
+      return aux[v * C + h * 64 + j];
     };
     double ss = 0;
     for (size_t j = 0; j < 64; ++j) {
@@ -90,26 +90,28 @@ int main(int argc, char **argv) {
     const auto stage_name =
         fused_value ? "fused-value-recurrence-stage" : "fused-recurrence-stage";
     auto fused = session(argv[1], stage_name);
-    const size_t arena_floats = (fused_value ? 30 : 27) * 2048;
-    Guarded fs(fused, 131072 * 4), fa(fused, arena_floats * 4);
     nlohmann::json config;
     std::ifstream metadata(std::filesystem::path(argv[1]) / stage_name /
                            "config.json");
     metadata >> config;
+    const size_t C = config.at("channels");
+    const size_t arena_floats = (fused_value ? 30 : 27) * C;
+    Guarded fs(fused, (C * 64) * 4), fa(fused, arena_floats * 4);
+
     if (config.value("trace_buffer_bytes", size_t(0)))
       throw std::runtime_error("Expected untraced production artifact");
     std::vector<DeviceBuffer> arguments{fs.data, fa.data};
     std::unique_ptr<Guarded> first_input;
-    V value_data(6144), first_data(2048);
+    V value_data((3 * C)), first_data(C);
     if (fused_value) {
       if (!config.value("fused_value", false) || config.at("lanes") != 7 ||
           config.at("arena_vectors") != 30)
         throw std::runtime_error("Incompatible fused value artifact");
-      first_input = std::make_unique<Guarded>(fused, 2048 * 4);
+      first_input = std::make_unique<Guarded>(fused, C * 4);
       arguments.push_back(first_input->data);
     }
     auto run = fused.prepare(arguments);
-    V state(131072), aux(arena_floats), ref, expected, actual_s(state.size()),
+    V state((C * 64)), aux(arena_floats), ref, expected, actual_s(state.size()),
         actual_a(aux.size());
     std::mt19937 rng(20261003);
     std::uniform_real_distribution<float> d(-.125f, .125f);
@@ -121,28 +123,28 @@ int main(int argc, char **argv) {
     double worst = 0;
     for (int pass = 0; pass < 3; ++pass) {
       for (int v : {0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 16})
-        for (size_t i = 0; i < 2048; ++i)
-          aux[v * 2048 + i] = (v == 9 ? 1.f : 0.f) + d(rng) * (pass + 1);
+        for (size_t i = 0; i < C; ++i)
+          aux[v * C + i] = (v == 9 ? 1.f : 0.f) + d(rng) * (pass + 1);
       if (fused_value) {
         for (auto &x : value_data)
           x = d(rng) * (pass + 1);
         for (auto &x : first_data)
           x = d(rng) * (pass + 1);
         std::copy(value_data.begin(), value_data.end(),
-                  aux.begin() + 27 * 2048);
+                  aux.begin() + 27 * C);
         first_input->data.upload(first_data.data(), first_input->bytes);
       }
       expected = aux;
       if (fused_value)
-        for (size_t j = 0; j < 2048; ++j) {
+        for (size_t j = 0; j < C; ++j) {
           const float a =
-              float(1 / (1 + std::exp(-double(value_data[2048 + j] +
-                                              value_data[4096 + j]))));
-          expected[16 * 2048 + j] =
+              float(1 / (1 + std::exp(-double(value_data[C + j] +
+                                              value_data[2 * C + j]))));
+          expected[16 * C + j] =
               value_data[j] + (first_data[j] - value_data[j]) * a;
         }
       ref = state;
-      reference(ref, expected);
+      reference(ref, expected, C);
       fa.data.upload(aux.data(), fa.bytes);
       run.execute();
       fs.data.download(actual_s.data(), fs.bytes);
@@ -160,7 +162,7 @@ int main(int argc, char **argv) {
       check(actual_s, ref);
       check(actual_a, expected);
       if (fused_value && !std::equal(value_data.begin(), value_data.end(),
-                                     actual_a.begin() + 27 * 2048))
+                                     actual_a.begin() + 27 * C))
         throw std::runtime_error("Fused value arena inputs overwritten");
       state = actual_s;
       aux = actual_a;
@@ -169,7 +171,7 @@ int main(int argc, char **argv) {
     fa.guard();
     if (fused_value) {
       first_input->guard();
-      V same_first(2048);
+      V same_first(C);
       first_input->data.download(same_first.data(), first_input->bytes);
       if (same_first != first_data)
         throw std::runtime_error("Fused value input overwritten");

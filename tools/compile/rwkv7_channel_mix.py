@@ -8,58 +8,56 @@ import aie.iron as iron
 from aie.iron import In, InOut, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_common import KERNEL_ROOT, typ, external
+from rwkv7_common import C, H, KERNEL_ROOT, typ, external
 
 
 def channel_mix_program():
     activation_type = typ
     wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]]
     tile = 4096
-    weight_count, stripe = (8192 * tile, 1024 * tile)
+    weight_count, stripe = (2 * C * H, C * H // 4)
     matrix_stack = 12288
     key = external(
         "rwkv7_ffn_key_tile",
         "channel_mix_bf16.cc",
-        [activation_type(2048), wt(tile), typ(2048), np.int32, np.int32],
+        [activation_type(C), wt(tile), typ(H // 4), np.int32, np.int32],
         optimization="-O3",
         stack_size=8192,
     )
     value = key.object_file.bind(
         "rwkv7_ffn_value_tile",
-        [activation_type(8192), wt(tile), typ(512), np.int32, np.int32],
+        [activation_type(H), wt(tile), typ(C // 4), np.int32, np.int32],
     )
-    zero = key.object_file.bind("rwkv7_ffn_zero2048", [typ(2048)])
-    vz = key.object_file.bind("rwkv7_channel_zero512", [typ(512)])
-    relu = key.object_file.bind("rwkv7_ffn_activate2048", [typ(2048), typ(2048)])
-    add = key.object_file.bind("rwkv7_ffn_residual", [typ(4096), typ(4096)])
-    norm_in = ObjectFifo(typ(8192), name="norm_input", depth=1)
-    norm_join = norm_in.prod().join([0, 2048, 4096, 6144], obj_types=[typ(2048)] * 4)
-    pair_norm = ObjectFifo(typ(4096), name="norm_pair", depth=1)
-    coeff = ObjectFifo(typ(2048), name="coefficient", depth=1)
-    norm = external("rwkv7_norm_pair", "norm_mix_fp32.cc", [typ(8192), typ(4096)])
-    mix = external(
-        "rwkv7_mix_pair", "mix_pair_fp32.cc", [typ(4096), typ(2048), typ(2048)]
-    )
-    fx = ObjectFifo(typ(2048), name="input", depth=1)
+    zero = key.object_file.bind("rwkv7_ffn_zero2048", [typ(H // 4)])
+    vz = key.object_file.bind("rwkv7_channel_zero512", [typ(C // 4)])
+    relu = key.object_file.bind("rwkv7_ffn_activate2048", [typ(H // 4), typ(H // 4)])
+    add = key.object_file.bind("rwkv7_ffn_residual", [typ(2 * C), typ(2 * C)])
+    norm_in = ObjectFifo(typ(4 * C), name="norm_input", depth=1)
+    norm_join = norm_in.prod().join([0, C, 2 * C, 3 * C], obj_types=[typ(C)] * 4)
+    pair_norm = ObjectFifo(typ(2 * C), name="norm_pair", depth=1)
+    coeff = ObjectFifo(typ(C), name="coefficient", depth=1)
+    norm = external("rwkv7_norm_pair", "norm_mix_fp32.cc", [typ(4 * C), typ(2 * C)])
+    mix = external("rwkv7_mix_pair", "mix_pair_fp32.cc", [typ(2 * C), typ(C), typ(C)])
+    fx = ObjectFifo(typ(C), name="input", depth=1)
     w1 = [ObjectFifo(wt(tile), name=f"keyw{i}", depth=2) for i in range(4)]
-    raw = ObjectFifo(typ(8192), name="raw", depth=1)
-    act = ObjectFifo(typ(8192), name="active", depth=1)
-    kr = raw.prod().join([i * 2048 for i in range(4)], obj_types=[typ(2048)] * 4)
-    ka = act.prod().join([i * 2048 for i in range(4)], obj_types=[typ(2048)] * 4)
+    raw = ObjectFifo(typ(H), name="raw", depth=1)
+    act = ObjectFifo(typ(H), name="active", depth=1)
+    kr = raw.prod().join([i * (H // 4) for i in range(4)], obj_types=[typ(H // 4)] * 4)
+    ka = act.prod().join([i * (H // 4) for i in range(4)], obj_types=[typ(H // 4)] * 4)
     w2 = [ObjectFifo(wt(tile), name=f"valuew{i}", depth=2) for i in range(4)]
-    pair = ObjectFifo(typ(4096), name="residual_pair", depth=1)
+    pair = ObjectFifo(typ(2 * C), name="residual_pair", depth=1)
     joins = pair.prod().join(
-        [0, 512, 1024, 1536, 2048],
-        obj_types=[typ(512)] * 4 + [typ(2048)],
+        [0, C // 4, C // 2, 3 * C // 4, C],
+        obj_types=[typ(C // 4)] * 4 + [typ(C)],
     )
     vo = joins[:4]
-    final = ObjectFifo(typ(4096), name="result", depth=1)
+    final = ObjectFifo(typ(2 * C), name="result", depth=1)
 
     def first(x, w, r, a, f, z, activation):
         xv, rv, av = (x.acquire(1), r.acquire(1), a.acquire(1))
         z(rv)
-        for row in range_(128):
-            for col in range_(8):
+        for row in range_(H // 64):
+            for col in range_(C // 256):
                 wv = w.acquire(1)
                 f(xv, wv, rv, row, col)
                 w.release(1)
@@ -71,8 +69,8 @@ def channel_mix_program():
     def second(x, w, o, f, z):
         xv, ov = (x.acquire(1), o.acquire(1))
         z(ov)
-        for row in range_(32):
-            for col in range_(32):
+        for row in range_(C // 64):
+            for col in range_(H // 256):
                 wv = w.acquire(1)
                 f(xv, wv, ov, row, col)
                 w.release(1)
@@ -149,13 +147,19 @@ def channel_mix_program():
         ho,
     ):
         hx.fill(x)
-        hw.fill(parameters, tap=TAP((6144,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]))
-        hb.fill(parameters, tap=TAP((6144,), 2048, [1, 1, 1, 2048], [0, 0, 0, 1]))
-        hold.fill(diag, tap=TAP((22528,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]))
-        hc.fill(parameters, tap=TAP((6144,), 4096, [1, 1, 1, 2048], [0, 0, 0, 1]))
-        hn.drain(diag, tap=TAP((22528,), 0, [1, 1, 1, 4096], [0, 0, 0, 1]), wait=True)
+        hw.fill(parameters, tap=TAP((3 * C,), 0, [1, 1, 1, C], [0, 0, 0, 1]))
+        hb.fill(parameters, tap=TAP((3 * C,), C, [1, 1, 1, C], [0, 0, 0, 1]))
+        hold.fill(diag, tap=TAP((3 * C + 2 * H,), 0, [1, 1, 1, C], [0, 0, 0, 1]))
+        hc.fill(parameters, tap=TAP((3 * C,), 2 * C, [1, 1, 1, C], [0, 0, 0, 1]))
+        hn.drain(
+            diag,
+            tap=TAP((3 * C + 2 * H,), 0, [1, 1, 1, 2 * C], [0, 0, 0, 1]),
+            wait=True,
+        )
         hm.drain(
-            diag, tap=TAP((22528,), 4096, [1, 1, 1, 2048], [0, 0, 0, 1]), wait=True
+            diag,
+            tap=TAP((3 * C + 2 * H,), 2 * C, [1, 1, 1, C], [0, 0, 0, 1]),
+            wait=True,
         )
         for i in range(4):
             hw1[i].fill(
@@ -172,10 +176,14 @@ def channel_mix_program():
                 ),
             )
         hr.drain(
-            diag, tap=TAP((22528,), 6144, [1, 1, 1, 8192], [0, 0, 0, 1]), wait=True
+            diag,
+            tap=TAP((3 * C + 2 * H,), 3 * C, [1, 1, 1, H], [0, 0, 0, 1]),
+            wait=True,
         )
         ha.drain(
-            diag, tap=TAP((22528,), 14336, [1, 1, 1, 8192], [0, 0, 0, 1]), wait=True
+            diag,
+            tap=TAP((3 * C + 2 * H,), 3 * C + H, [1, 1, 1, H], [0, 0, 0, 1]),
+            wait=True,
         )
         hres.fill(x)
         ho.drain(out, wait=True)
@@ -185,11 +193,11 @@ def channel_mix_program():
         Runtime(
             seq,
             [
-                typ(2048),
-                typ(6144),
+                typ(C),
+                typ(3 * C),
                 wt(weight_count),
-                typ(22528),
-                typ(4096),
+                typ(3 * C + 2 * H),
+                typ(2 * C),
                 *[f.prod() for f in norm_join],
                 coeff.prod(),
                 pair_norm.cons(),
@@ -221,8 +229,8 @@ if __name__ == "__main__":
             dict(
                 schema_version=1,
                 dtype="bfloat16",
-                channels=2048,
-                hidden=8192,
+                channels=C,
+                hidden=H,
                 key_cores=4,
                 value_cores=4,
                 exact_fp32=False,

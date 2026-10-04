@@ -12,12 +12,13 @@ namespace rwkv::inference {
 // input binding. Replay adds no host transfer.
 void DecodeGraph::Impl::prepare_decode_fusion(
     const std::filesystem::path &root) {
-  if (states.size() < 2)
+  const size_t c = weights.channels();
+  if (states.size() < 2 || c != 2048 || weights.at("blocks.0.ffn.key.weight").shape[0] != 8192)
     return;
   check_artifact(root, "bf16-decode-recurrence-projection",
                  {{"schema_version", 1},
                   {"batch", 1},
-                  {"channels", 2048},
+                  {"channels", c},
                   {"head_size", 64},
                   {"arena_vectors", 30},
                   {"lanes", 7},
@@ -39,12 +40,12 @@ void DecodeGraph::Impl::prepare_decode_fusion(
         throw std::runtime_error("Unsupported decode fusion schedule");
       const auto &projection = bindings[i + 1].arguments;
       const auto offset = projection[0].offset_within(args[1]);
-      if (!offset || *offset != 24 * 2048 * 4 ||
-          args[1].size() != 30 * 2048 * 4)
+      if (!offset || *offset != 24 * c * 4 ||
+          args[1].size() != 30 * c * 4)
         throw std::runtime_error("Unsupported decode fusion arena");
       decode_runs.push_back(fused.prepare(
           {args[0], args[1], args[2], projection[1], projection[2]}));
-      ffn_input = args[1].slice(26 * 2048 * 4, 2048 * 4);
+      ffn_input = args[1].slice(26 * c * 4, c * 4);
       ends[i + 1] = ends[i + 2] = decode_runs.size();
       ++i;
     } else {
@@ -64,6 +65,7 @@ void DecodeGraph::Impl::prepare_decode_fusion(
     decode_run_ends.push_back(ends.at(end));
 }
 void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
+  const size_t c = weights.channels();
   validate_resident_artifacts(root, weights, weight_mode);
   if (capture_prefill)
     validate_prefill_artifacts(root, weight_mode, prefill_chunk_tokens);
@@ -79,7 +81,7 @@ void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
   }
   bindings.clear();
   bindings.shrink_to_fit();
-  upload_bytes = weights.channels() * 4;
+  upload_bytes = c * 4;
   download_bytes = weights.vocabulary() * 4;
   for (const auto &s : states) {
     size_t bytes = (buffers[s.old_attention].size + buffers[s.old_ffn].size +
@@ -94,6 +96,7 @@ void DecodeGraph::Impl::prepare_resident(const std::filesystem::path &root) {
 // runs.
 void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
                                               ResidentLayout &layout) {
+  const size_t c = weights.channels(), hidden = weights.at("blocks.0.ffn.key.weight").shape[0];
   auto &value_args = layout.value_args;
   auto &recurrence_stages = layout.recurrence_stages;
   std::map<Id, xdna::DeviceBuffer> mixed_inputs;
@@ -106,7 +109,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
     for (int activation : {1, 0, 2, 0}) {
       if (cursor >= nodes.size() || nodes[cursor].kind != Kind::Linear ||
           !nodes[cursor].transpose ||
-          buffers[nodes[cursor].inputs[0]].size != 2048 ||
+          buffers[nodes[cursor].inputs[0]].size != c ||
           buffers[nodes[cursor].output].size > 256)
         break;
       size_t last = cursor + 1;
@@ -120,7 +123,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
       if (last >= nodes.size() || nodes[last].kind != Kind::Linear ||
           !nodes[last].transpose ||
           nodes[last].inputs[0] != nodes[last - 1].output ||
-          buffers[nodes[last].output].size != 2048)
+          buffers[nodes[last].output].size != c)
         throw std::runtime_error("Unexpected batched rank output");
       branches.push_back({cursor, last, activation});
       cursor = last + 1;
@@ -150,7 +153,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
     const auto &node = nodes[node_index];
     const auto &a = node.inputs;
     if (node.kind == Kind::Element && node.op == Op::Norm &&
-        node.group == 2048 && node.epsilon == 1e-5f &&
+        node.group == c && node.epsilon == 1e-5f &&
         node_index + 1 < nodes.size()) {
       size_t count = 0;
       const Id old = nodes[node_index + 1].inputs[1];
@@ -165,11 +168,11 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         const auto *n = &nodes[node_index];
         if (n[2].kind != Kind::Linear || n[2].transpose ||
             n[2].inputs[0] != n[1].output ||
-            n[2].weight->shape != std::vector<size_t>{8192, 2048} ||
+            n[2].weight->shape != std::vector<size_t>{hidden, c} ||
             n[3].kind != Kind::Element || n[3].op != Op::ReluSquared ||
             n[3].inputs[0] != n[2].output || n[4].kind != Kind::Linear ||
             n[4].transpose || n[4].inputs[0] != n[3].output ||
-            n[4].weight->shape != std::vector<size_t>{2048, 8192} ||
+            n[4].weight->shape != std::vector<size_t>{c, hidden} ||
             n[5].kind != Kind::Element || n[5].op != Op::Add ||
             n[5].inputs[0] != a[0] || n[5].inputs[1] != n[4].output ||
             !std::any_of(
@@ -179,12 +182,12 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         const bool int8 = weight_mode != WeightMode::BFloat16;
         auto &stage =
             session(root, int8 ? "int8-channel-mix" : "bf16-channel-mix");
-        Vector parameters(6144);
+        Vector parameters(3 * c);
         for (size_t j = 0; j < 3; ++j) {
           const auto &value = read(j < 2 ? a[j + 1] : n[1].inputs[2]);
-          if (value.size() != 2048)
+          if (value.size() != c)
             throw std::runtime_error("Unexpected ChannelMix parameter shape");
-          std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
+          std::copy(value.begin(), value.end(), parameters.begin() + j * c);
         }
         xdna::DeviceBuffer packed_weights;
         if (int8) {
@@ -200,16 +203,16 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         auto diagnostic = initialized(
             stage,
             Vector(capture_prefill ? (prefill_chunk_tokens == 4 ? 51200 : 26624)
-                                   : 22528,
+                                   : 3 * c + 2 * hidden,
                    0));
-        auto result = initialized(stage, Vector(4096, 0));
-        device_buffers[old] = diagnostic.slice(0, 2048 * 4);
+        auto result = initialized(stage, Vector(2 * c, 0));
+        device_buffers[old] = diagnostic.slice(0, c * 4);
         device_buffers[n[0].output] = device_buffers[old];
-        device_buffers[n[1].output] = diagnostic.slice(4096 * 4, 2048 * 4);
-        device_buffers[n[2].output] = diagnostic.slice(6144 * 4, 8192 * 4);
-        device_buffers[n[3].output] = diagnostic.slice(14336 * 4, 8192 * 4);
-        device_buffers[n[4].output] = result.slice(0, 2048 * 4);
-        device_buffers[n[5].output] = result.slice(2048 * 4, 2048 * 4);
+        device_buffers[n[1].output] = diagnostic.slice(2 * c * 4, c * 4);
+        device_buffers[n[2].output] = diagnostic.slice(3 * c * 4, hidden * 4);
+        device_buffers[n[3].output] = diagnostic.slice((3 * c + hidden) * 4, hidden * 4);
+        device_buffers[n[4].output] = result.slice(0, c * 4);
+        device_buffers[n[5].output] = result.slice(c * 4, c * 4);
         append_run(stage,
                    {device_buffers[a[0]], initialized(stage, parameters, true),
                     packed_weights, diagnostic, result},
@@ -226,20 +229,20 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
                 [&](const StateBinding &s) { return s.old_attention == old; }))
           throw std::runtime_error("Unexpected norm/mix shift binding");
         auto &stage = session(root, name);
-        Vector parameters((2 + count) * 2048);
+        Vector parameters((2 + count) * c);
         for (size_t j = 0; j < 2 + count; ++j) {
           const auto &value =
               read(j < 2 ? a[1 + j] : nodes[node_index + j - 1].inputs[2]);
-          if (value.size() != 2048)
+          if (value.size() != c)
             throw std::runtime_error("Unexpected norm/mix parameter shape");
-          std::copy(value.begin(), value.end(), parameters.begin() + j * 2048);
+          std::copy(value.begin(), value.end(), parameters.begin() + j * c);
         }
-        auto pair = initialized(stage, Vector(4096, 0));
-        auto mixed = initialized_pair(stage, Vector(count * 2048, 0));
-        device_buffers[node.output] = pair.slice(0, 2048 * 4);
+        auto pair = initialized(stage, Vector(2 * c, 0));
+        auto mixed = initialized_pair(stage, Vector(count * c, 0));
+        device_buffers[node.output] = pair.slice(0, c * 4);
         for (size_t j = 0; j < count; ++j)
           device_buffers[nodes[node_index + 1 + j].output] =
-              mixed.slice(j * 2048 * 4, 2048 * 4);
+              mixed.slice(j * c * 4, c * 4);
         mixed_inputs.emplace(nodes[node_index + 1].output, mixed);
         mixed_inputs.emplace(nodes[node_index + 2].output, mixed);
         append_run(stage,
@@ -253,22 +256,22 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
       }
     }
     if (node.kind == Kind::Linear && !node.transpose &&
-        node.weight->shape == std::vector<size_t>{2048, 2048} &&
+        node.weight->shape == std::vector<size_t>{c, c} &&
         node_index + 1 < nodes.size() &&
         nodes[node_index + 1].kind == Kind::Element &&
         nodes[node_index + 1].op == Op::Add &&
         nodes[node_index + 1].inputs[1] == node.output) {
       auto &stage = session(root, "bf16-projection-residual");
       auto packed_weights = initialized_bf16(
-          stage, weight_layout::projection(*node.weight, false, 0, 2048, 2048));
+          stage, weight_layout::projection(*node.weight, false, 0, c, c));
       auto result_root = initialized(
           stage,
-          Vector(capture_prefill ? prefill_chunk_tokens * 4096 : 4096, 0));
+          Vector(capture_prefill ? prefill_chunk_tokens * 2 * c : 2 * c, 0));
       auto result =
-          capture_prefill ? result_root.slice(0, 4096 * 4) : result_root;
-      device_buffers[node.output] = result.slice(0, 2048 * 4);
+          capture_prefill ? result_root.slice(0, 2 * c * 4) : result_root;
+      device_buffers[node.output] = result.slice(0, c * 4);
       device_buffers[nodes[node_index + 1].output] =
-          result.slice(2048 * 4, 2048 * 4);
+          result.slice(c * 4, c * 4);
       append_run(stage,
                  {device_buffers[a[0]], packed_weights,
                   device_buffers[nodes[node_index + 1].inputs[0]], result},
@@ -314,7 +317,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
         auto packed = weight_layout::rkv(projections);
         packed.insert(packed.end(), ranks.begin(), ranks.end());
         auto value_aux = count == 4 ? value_args.at(cursor)[0]
-                                    : initialized_pair(stage, Vector(6144, 0));
+                                    : initialized_pair(stage, Vector(3 * c, 0));
         append_run(stage,
                    {mixed_inputs.at(a[0]), initialized_bf16(stage, packed),
                     recurrence_stages.at(prepare_index), value_aux, auxiliary},
@@ -352,7 +355,7 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
       continue;
     }
     if (node.kind == Kind::Element && node.op == Op::Norm &&
-        node.group == 2048 && node.epsilon == 1e-5f) {
+        node.group == c && node.epsilon == 1e-5f) {
       auto &norm = session(root, "upstream-norm");
       append_run(norm,
                  {device_buffers[a[0]], device_buffers[a[1]],
@@ -362,12 +365,12 @@ void DecodeGraph::Impl::prepare_resident_runs(const std::filesystem::path &root,
       throw std::runtime_error("Element not covered by the production plan");
     } else if (node.kind == Kind::Linear) {
       if (node.transpose || node.output != logits ||
-          node.weight->shape != std::vector<size_t>{65536, 2048})
+          node.weight->shape != std::vector<size_t>{weights.vocabulary(), c})
         throw std::runtime_error(
             "Projection not covered by the BF16 production plan");
-      auto &head = session(root, "bf16-array-gemv-2048-65536");
+      auto &head = session(root, "bf16-array-gemv-" + std::to_string(c) + "-" + std::to_string(weights.vocabulary()));
       auto packed =
-          weight_layout::projection(*node.weight, false, 0, 65536, 2048);
+          weight_layout::projection(*node.weight, false, 0, weights.vocabulary(), c);
       append_run(head,
                  {device_buffers[a[0]], initialized_bf16(head, packed),
                   device_buffers[node.output]},

@@ -10,6 +10,7 @@
 #include <xrt/experimental/xrt_xclbin.h>
 #endif
 #include <chrono>
+#include <atomic>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -33,6 +34,17 @@ std::vector<uint32_t> read_instructions(const std::filesystem::path &path) {
     throw std::runtime_error("Truncated instruction stream");
   return data;
 }
+// Count submitted commands whose waits have not completed. This proves host
+// submission overlap; physical tile scheduling is still controlled by XRT.
+std::atomic<size_t> pending_commands{0}, peak_commands{0};
+struct PendingCommand {
+  PendingCommand() {
+    const size_t count = pending_commands.fetch_add(1) + 1;
+    size_t peak = peak_commands.load();
+    while (peak < count && !peak_commands.compare_exchange_weak(peak, count)) {}
+  }
+  ~PendingCommand() { pending_commands.fetch_sub(1); }
+};
 using Clock = std::chrono::steady_clock;
 double micros(Clock::time_point start, Clock::time_point end) {
   return std::chrono::duration<double, std::micro>(end - start).count();
@@ -87,6 +99,8 @@ struct Session::Impl {
     instruction_buffer.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   }
 };
+
+size_t dispatch_concurrency_peak() { return peak_commands.load(); }
 
 Session::Session(const std::filesystem::path &binary,
                  const std::filesystem::path &inst, const std::string &name,
@@ -166,6 +180,7 @@ void DeviceRun::execute(unsigned timeout_ms, RunTiming *timing) {
     throw std::invalid_argument("Invalid device timeout");
   const auto begin = timing ? Clock::now() : Clock::time_point{};
   impl_->run.start();
+  PendingCommand pending;
   const auto submitted = timing ? Clock::now() : Clock::time_point{};
   try {
     auto state = impl_->run.wait(timeout_ms);

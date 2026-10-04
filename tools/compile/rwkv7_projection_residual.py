@@ -8,7 +8,7 @@ import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_common import KERNEL_ROOT, typ, external
+from rwkv7_common import C, KERNEL_ROOT, typ, external
 
 
 def projection_residual_graph():
@@ -17,29 +17,31 @@ def projection_residual_graph():
     fn = external(
         "rwkv7_ffn_value_tile",
         "ffn_pipeline_bf16.cc",
-        [typ(2048), wt(tile), typ(256), np.int32, np.int32],
+        [typ(C), wt(tile), typ(C // 8), np.int32, np.int32],
         optimization="-O3",
     )
-    zero = fn.object_file.bind("rwkv7_ffn_zero256", [typ(256)])
-    copy = fn.object_file.bind("rwkv7_ffn_copy1024", [typ(1024), typ(1024)])
-    add = fn.object_file.bind("rwkv7_ffn_residual", [typ(4096), typ(4096)])
-    xfifo = ObjectFifo(typ(2048), name="input", depth=1)
+    zero = fn.object_file.bind("rwkv7_ffn_zero256", [typ(C // 8)])
+    copy = fn.object_file.bind("rwkv7_ffn_copy1024", [typ(C // 2), typ(C // 2)])
+    add = fn.object_file.bind("rwkv7_ffn_residual", [typ(2 * C), typ(2 * C)])
+    xfifo = ObjectFifo(typ(C), name="input", depth=1)
     ws = [ObjectFifo(wt(tile), name=f"w{i}", depth=2) for i in range(8)]
-    groups = [ObjectFifo(typ(1024), name=f"group{i}", depth=1) for i in range(2)]
+    groups = [ObjectFifo(typ(C // 2), name=f"group{i}", depth=1) for i in range(2)]
     ys = []
     for group in groups:
-        ys += group.prod().join([0, 256, 512, 768], obj_types=[typ(256)] * 4)
-    pair = ObjectFifo(typ(4096), name="pair", depth=1)
+        ys += group.prod().join(
+            [0, C // 8, C // 4, 3 * C // 8], obj_types=[typ(C // 8)] * 4
+        )
+    pair = ObjectFifo(typ(2 * C), name="pair", depth=1)
     joins = pair.prod().join(
-        [0, 1024, 2048], obj_types=[typ(1024), typ(1024), typ(2048)]
+        [0, C // 2, C], obj_types=[typ(C // 2), typ(C // 2), typ(C)]
     )
-    final = ObjectFifo(typ(4096), name="final", depth=1)
+    final = ObjectFifo(typ(2 * C), name="final", depth=1)
 
     def core(x, w, y, f, z):
         xv, yv = (x.acquire(1), y.acquire(1))
         z(yv)
-        for row in range_(16):
-            for col in range_(8):
+        for row in range_(C // 128):
+            for col in range_(C // 256):
                 wv = w.acquire(1)
                 f(xv, wv, yv, row, col)
                 w.release(1)
@@ -69,7 +71,7 @@ def projection_residual_graph():
 def projection_residual_program():
     workers, xfifo, ws, residual_input, final = projection_residual_graph()
     wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]]
-    weights = 4096 * 1024
+    weights = C * C
 
     def seq(x, w, res, out, hx, hw, hr, ho):
         hx.fill(x)
@@ -91,10 +93,10 @@ def projection_residual_program():
         Runtime(
             seq,
             [
-                typ(2048),
+                typ(C),
                 wt(weights),
-                typ(2048),
-                typ(4096),
+                typ(C),
+                typ(2 * C),
                 xfifo.prod(),
                 [f.prod() for f in ws],
                 residual_input.prod(),
@@ -119,7 +121,7 @@ if __name__ == "__main__":
             dict(
                 schema_version=1,
                 dtype="bfloat16",
-                channels=2048,
+                channels=C,
                 cores=11,
                 exact_fp32=False,
             )

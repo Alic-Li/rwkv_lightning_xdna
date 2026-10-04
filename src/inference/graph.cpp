@@ -151,8 +151,13 @@ DecodeGraph::Impl::Impl(const Weights &w, RecurrentBackend *b,
         throw std::runtime_error("Non-topological graph dependency");
     ready[node.output] = true;
   }
-  if (!resident.empty())
-    prepare_resident(resident);
+  if (!resident.empty()) {
+    if (capture_prefill && (w.channels() != 2048 || w.at("blocks.0.ffn.key.weight").shape[0] != 8192 || w.vocabulary() != 65536))
+      throw std::invalid_argument("batch2/chunk4 prefill currently requires C=2048, hidden=8192, vocabulary=65536; use --prefill decode");
+    const auto shape_dir = resident / ("c" + std::to_string(c) + "-h" +
+        std::to_string(w.at("blocks.0.ffn.key.weight").shape[0]) + "-v" + std::to_string(w.vocabulary()));
+    prepare_resident(std::filesystem::is_directory(shape_dir) ? shape_dir : resident);
+  }
 }
 DecodeGraph::DecodeGraph(const Weights &w, RecurrentBackend &b)
     : impl_(std::make_unique<Impl>(w, &b, std::filesystem::path{})) {}

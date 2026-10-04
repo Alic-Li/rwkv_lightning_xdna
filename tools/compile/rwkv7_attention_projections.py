@@ -9,20 +9,20 @@ import aie.iron as iron
 from aie.iron import In, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_common import KERNEL_ROOT, typ, external
+from rwkv7_common import C, KERNEL_ROOT, typ, external
 
 
 def projections(count, batch=1):
-    arena_stride = 61440 if batch == 2 and count == 4 else 55296
-    value_stride = arena_stride if batch == 2 and count == 4 else 6144
-    value_size = (batch - 1) * value_stride + 6144
+    arena_stride = (30 * C) if batch == 2 and count == 4 else (27 * C)
+    value_stride = arena_stride if batch == 2 and count == 4 else (3 * C)
+    value_size = (batch - 1) * value_stride + (3 * C)
     source = (
         "prefill_attention_bf16.cc" if batch == 2 else "attention_projections_bf16.cc"
     )
     wt = lambda n: np.ndarray[(n,), np.dtype[bfloat16]]
     rkv_weight_type = wt(4096)
-    n_rkv = 3 * 2048 * 2048
-    n_rank = count * 256 * 2048
+    n_rkv = 3 * C * C
+    n_rank = count * 256 * C
     n_weights = n_rkv + 2 * n_rank
 
     @iron.jit
@@ -34,7 +34,7 @@ def projections(count, batch=1):
                 else "rwkv7_attention_rank_tile"
             ),
             source,
-            [typ(2048 * batch), wt(4096), typ(128 * batch), np.int32, np.int32],
+            [typ(C * batch), wt(4096), typ(128 * batch), np.int32, np.int32],
             optimization="-O3",
         )
         z = fn.object_file.bind(
@@ -63,10 +63,10 @@ def projections(count, batch=1):
         )
         rkv = fn.object_file.bind(
             "rwkv7_prefill_attention_rkv" if batch == 2 else "rwkv7_attention_rkv_tile",
-            [typ(2048 * batch), rkv_weight_type, typ(16 * batch), np.int32],
+            [typ(C * batch), rkv_weight_type, typ(16 * batch), np.int32],
         )
-        rx = ObjectFifo(typ(2048 * batch), name="rkv_x", depth=1)
-        kx = ObjectFifo(typ(2048 * batch), name="rank_x", depth=1)
+        rx = ObjectFifo(typ(C * batch), name="rkv_x", depth=1)
+        kx = ObjectFifo(typ(C * batch), name="rank_x", depth=1)
         rw = [ObjectFifo(rkv_weight_type, name=f"rkv_w{i}", depth=2) for i in range(8)]
         ry = [ObjectFifo(typ(16 * batch), name=f"rkv_y{i}", depth=2) for i in range(8)]
         w1 = [ObjectFifo(wt(4096), name=f"first_w{i}", depth=1) for i in range(2)]
@@ -80,10 +80,10 @@ def projections(count, batch=1):
         def rkv_core(x, w, y, f, z):
             for _ in range_(3):
                 xv = x.acquire(1)
-                for _ in range_(16):
+                for _ in range_(C // 128):
                     out = y.acquire(1)
                     z(out)
-                    for col in range_(8):
+                    for col in range_(C // 256):
                         wv = w.acquire(1)
                         f(xv, wv, out, col)
                         w.release(1)
@@ -95,7 +95,7 @@ def projections(count, batch=1):
                 xv, rv, av = (x.acquire(1), r.acquire(1), a.acquire(1))
                 z(rv)
                 for row in range_(8):
-                    for col in range_(8):
+                    for col in range_(C // 256):
                         wv = w.acquire(1)
                         f(xv, wv, rv, row, col)
                         w.release(1)
@@ -107,7 +107,7 @@ def projections(count, batch=1):
         def second(x, w, y, f, z):
             for _ in range_(count):
                 xv = x.acquire(1)
-                for _ in range_(32):
+                for _ in range_(C // 64):
                     wv, yv = (w.acquire(1), y.acquire(1))
                     z(yv)
                     f(xv, wv, yv)
@@ -161,20 +161,20 @@ def projections(count, batch=1):
                 hxr.fill(
                     x,
                     tap=TAP(
-                        (12288 * batch,),
-                        slot * 2048,
-                        [batch, 1, 1, 2048],
-                        [12288, 0, 0, 1],
+                        ((6 * C) * batch,),
+                        slot * C,
+                        [batch, 1, 1, C],
+                        [(6 * C), 0, 0, 1],
                     ),
                 )
             for slot in [1, 4, 5, 3][:count]:
                 hxk.fill(
                     x,
                     tap=TAP(
-                        (12288 * batch,),
-                        slot * 2048,
-                        [batch, 1, 1, 2048],
-                        [12288, 0, 0, 1],
+                        ((6 * C) * batch,),
+                        slot * C,
+                        [batch, 1, 1, C],
+                        [(6 * C), 0, 0, 1],
                     ),
                 )
             for i in range(8):
@@ -182,16 +182,16 @@ def projections(count, batch=1):
                     w,
                     tap=TAP(
                         (n_weights,),
-                        i * 3 * 256 * 2048,
-                        [1, 1, 1, 3 * 256 * 2048],
+                        i * 3 * (C // 8) * C,
+                        [1, 1, 1, 3 * (C // 8) * C],
                         [0, 0, 0, 1],
                     ),
                 )
                 destinations = [
-                    (arena, arena_stride, 13 * 2048),
+                    (arena, arena_stride, 13 * C),
                     (arena, arena_stride, 0),
                     (
-                        (arena, arena_stride, 16 * 2048)
+                        (arena, arena_stride, 16 * C)
                         if count == 3
                         else (value_aux, value_stride, 0)
                     ),
@@ -201,8 +201,8 @@ def projections(count, batch=1):
                         target,
                         tap=TAP(
                             (arena_stride * batch if target is arena else value_size,),
-                            offset + i * 256,
-                            [16, batch, 1, 16],
+                            offset + i * (C // 8),
+                            [C // 128, batch, 1, 16],
                             [16, size, 0, 1],
                         ),
                         wait=True,
@@ -212,8 +212,8 @@ def projections(count, batch=1):
                     w,
                     tap=TAP(
                         (n_weights,),
-                        n_rkv + i * count * 128 * 2048,
-                        [1, 1, 1, count * 128 * 2048],
+                        n_rkv + i * count * 128 * C,
+                        [1, 1, 1, count * 128 * C],
                         [0, 0, 0, 1],
                     ),
                 )
@@ -242,24 +242,24 @@ def projections(count, batch=1):
                     w,
                     tap=TAP(
                         (n_weights,),
-                        n_rkv + n_rank + i * count * 512 * 256,
-                        [1, 1, 1, count * 512 * 256],
+                        n_rkv + n_rank + i * count * (C // 4) * 256,
+                        [1, 1, 1, count * (C // 4) * 256],
                         [0, 0, 0, 1],
                     ),
                 )
                 destinations = [
-                    (arena, arena_stride, 4096),
-                    (arena, arena_stride, 2048),
-                    (arena, arena_stride, 12 * 2048),
-                    (value_aux, value_stride, 2048),
+                    (arena, arena_stride, 2 * C),
+                    (arena, arena_stride, C),
+                    (arena, arena_stride, 12 * C),
+                    (value_aux, value_stride, C),
                 ]
                 for target, size, offset in destinations[:count]:
                     hyk[i].drain(
                         target,
                         tap=TAP(
                             (arena_stride * batch if target is arena else value_size,),
-                            offset + i * 512,
-                            [32, batch, 1, 16],
+                            offset + i * (C // 4),
+                            [C // 64, batch, 1, 16],
                             [16, size, 0, 1],
                         ),
                         wait=True,
@@ -271,7 +271,7 @@ def projections(count, batch=1):
                 seq,
                 [
                     *[
-                        typ(12288 * batch),
+                        typ((6 * C) * batch),
                         wt(n_weights + 0),
                         typ(arena_stride * batch),
                         typ(value_size),
@@ -310,7 +310,7 @@ if __name__ == "__main__":
         config = dict(
             schema_version=1,
             dtype="bfloat16",
-            channels=2048,
+            channels=C,
             branches=count,
             rank=256,
             cores=14,
@@ -319,8 +319,8 @@ if __name__ == "__main__":
         if batch == 2:
             config.update(
                 batch=2,
-                arena_stride=61440 if count == 4 else 55296,
-                value_stride=61440 if count == 4 else 6144,
+                arena_stride=(30 * C) if count == 4 else (27 * C),
+                value_stride=(30 * C) if count == 4 else (3 * C),
             )
         (path / "config.json").write_text(json.dumps(config) + "\n")
         print(path, flush=True)

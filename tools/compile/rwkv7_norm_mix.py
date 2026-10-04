@@ -6,21 +6,23 @@ import aie.iron as iron
 from aie.iron import In, InOut, Out, ObjectFifo, Worker, Runtime, Program
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern as TAP
-from rwkv7_common import KERNEL_ROOT, typ, external
+from rwkv7_common import C, KERNEL_ROOT, typ, external
 
 
 def norm_mix(count):
     @iron.jit
     def design(x: In, parameters: In, old: InOut, normalized_pair: Out, mixed: Out):
-        packed = ObjectFifo(typ(8192), name="norm_input", depth=1)
-        joins = packed.prod().join([0, 2048, 4096, 6144], obj_types=[typ(2048)] * 4)
-        pair = ObjectFifo(typ(4096), name="pair", depth=1)
-        coeff = ObjectFifo(typ(2048), name="coeff", depth=1)
-        out = ObjectFifo(typ(4096), name="mixed", depth=1)
-        splits = out.cons().split([0, 2048], obj_types=[typ(2048)] * 2)
-        norm = external("rwkv7_norm_pair", "norm_mix_fp32.cc", [typ(8192), typ(4096)])
+        packed = ObjectFifo(typ((4 * C)), name="norm_input", depth=1)
+        joins = packed.prod().join([0, C, (2 * C), (3 * C)], obj_types=[typ(C)] * 4)
+        pair = ObjectFifo(typ((2 * C)), name="pair", depth=1)
+        coeff = ObjectFifo(typ(C), name="coeff", depth=1)
+        out = ObjectFifo(typ((2 * C)), name="mixed", depth=1)
+        splits = out.cons().split([0, C], obj_types=[typ(C)] * 2)
+        norm = external(
+            "rwkv7_norm_pair", "norm_mix_fp32.cc", [typ((4 * C)), typ((2 * C))]
+        )
         mix = external(
-            "rwkv7_mix_pair_shift", "mix_fp32.cc", [typ(4096), typ(2048), typ(4096)]
+            "rwkv7_mix_pair_shift", "mix_fp32.cc", [typ((2 * C)), typ(C), typ((2 * C))]
         )
 
         def normalize(p, o, f):
@@ -47,33 +49,29 @@ def norm_mix(count):
 
         def seq(x, p, old, pair, mixed, hx, hw, hb, hp, hc, hn, hm, hs):
             hx.fill(x)
-            hw.fill(p, tap=TAP(((2 + count) * 2048,), 0, [1, 1, 1, 2048], [0, 0, 0, 1]))
-            hb.fill(
-                p, tap=TAP(((2 + count) * 2048,), 2048, [1, 1, 1, 2048], [0, 0, 0, 1])
-            )
+            hw.fill(p, tap=TAP(((2 + count) * C,), 0, [1, 1, 1, C], [0, 0, 0, 1]))
+            hb.fill(p, tap=TAP(((2 + count) * C,), C, [1, 1, 1, C], [0, 0, 0, 1]))
             hp.fill(old)
             hc.fill(
                 p,
                 tap=TAP(
-                    ((2 + count) * 2048,), 4096, [1, 1, 1, count * 2048], [0, 0, 0, 1]
+                    ((2 + count) * C,), (2 * C), [1, 1, 1, count * C], [0, 0, 0, 1]
                 ),
             )
             hn.drain(pair, wait=True)
             hm.drain(mixed, wait=True)
-            hs.drain(
-                old, tap=TAP((2048,), 0, [count, 1, 1, 2048], [0, 0, 0, 1]), wait=True
-            )
+            hs.drain(old, tap=TAP((C,), 0, [count, 1, 1, C], [0, 0, 0, 1]), wait=True)
 
         return Program(
             iron.get_current_device(),
             Runtime(
                 seq,
                 [
-                    typ(2048),
-                    typ((2 + count) * 2048),
-                    typ(2048),
-                    typ(4096),
-                    typ(count * 2048),
+                    typ(C),
+                    typ((2 + count) * C),
+                    typ(C),
+                    typ((2 * C)),
+                    typ(count * C),
                     *[f.prod() for f in joins],
                     coeff.prod(),
                     pair.cons(),
@@ -97,7 +95,7 @@ if __name__ == "__main__":
                 dict(
                     schema_version=1,
                     dtype="float32",
-                    channels=2048,
+                    channels=C,
                     mixes=count,
                     exact_fp32=False,
                 )

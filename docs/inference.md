@@ -4,8 +4,12 @@
 tokenizer、sampler 和调度；NPU 执行模型算术，无 CPU 算子回退。Python 只用于离线
 编译和验证。显式 `--backend cpu` 提供 FP32 参考。
 
-支持 C=2048、32×64 heads、FFN=8192、词表65536、低秩维度≤256。
-已验证 checkpoint 为 `rwkv7-g1k-1.5b-20260930-ctx25600.pth`（24层）。
+模型加载器从权重读取层数、通道数、头数、FFN 和低秩矩阵形状。
+BF16 tiled decode 接受 512≤C≤2048（256 的倍数）、head_size=64、
+统一 FFN hidden≤8192（256 的倍数）、词表为128的倍数、低秩维度≤256。
+低秩矩阵补零到256；其逻辑维度仍取自权重。已验证形状为 C=2048 / FFN=8192，
+以及翻译专用 0.4B 的 C=1024 / FFN=4096 / 16 heads / 24层 / 词表65536。
+INT8 和 batch2/chunk4 保持原来的 C=2048 / FFN=8192 支持范围。
 PTH/safetensors 的 FP32、FP16、BF16 存储统一加载为主机 FP32，再一次性打包设备权重。
 
 ## 权重与数值
@@ -55,6 +59,49 @@ CLI 用 `--prompt-file FILE` 读取较长输入；`--tokens 1,2,7,9 --dump-logit
 可导出逐 token FP32 logits。CPU 参考支持 `--decode graph|eager` 和
 `--prefill decode|sequence`。NPU 只支持 resident decode。
 CLI 分开报告权重加载、建图、prefill、TTFT 和后续 decode；首个生成 token 来自 prefill。
+
+## 按模型形状编译与并发翻译
+
+首次使用不同模型形状，在仓库根目录执行：
+
+```bash
+export PATH="$PWD/.venv/bin:$PATH"
+cmake --build --preset release
+export MODEL=/home/alic-li/rwkv_weights/RWKV_v7_G1d_0.4B_Translate_ctx4096_20260607.pth
+./build/release/rwkv-cli --model "$MODEL" --inspect-model
+.venv/bin/python tools/compile/rwkv7_optimized.py --model "$MODEL" \
+  --output build/kernels/rwkv7-bf16
+
+./build/release/rwkv-cli --model "$MODEL" --backend npu \
+  --kernel-dir build/kernels/rwkv7-bf16 --weights bf16 \
+  --prompt-file /home/alic-li/work_space/translate.txt --unescape-prompt \
+  --concurrency 4 --top-k 1 --max-tokens 128
+```
+
+离线编译器调用 C++ 权重加载器读取实际形状，写入 `c1024-h4096-v65536/`
+子目录。运行时自动按形状选择此目录，也可直接指定子目录。旧默认形状的根目录
+产物继续可用。不同层数使用同一组内核；图按实际层数展开。
+
+`--concurrency N` 把同一条 `--prompt` 或 `--prompt-file` 输入复制给 N 个请求。
+每个请求拥有独立 DecodeGraph、设备 BO、递归状态、sampler 和 penalties。
+各请求线程同步启动，独立完成 prefill，再同步开始生成；建图和权重上传不计入吞吐。
+没有跨请求的推理互斥锁，不会循环完成一个请求后再启动下一个。
+输出按 `[request 0]` 等分组，避免字符交错。诊断模式的 logits 分别写入
+`FILE.request-0` 等文件。CPU 并发参考只支持 graph/decode。
+
+统计包含各请求 prefill/TTFT、总 prompt token/s、总生成 token/s、decode forward/s
+和端到端生成 token/s。**总吞吐用所有请求的 token 数除以同一段墙钟时间**，
+不会相加各请求的 token/s。首个生成 token 使用 prefill logits，故生成数量和
+后续 forward 次数分别报告。EOS 使请求提前结束，`--max-tokens` 是上限。
+
+运行时报告 `peak` 个已提交但尚未完成的 NPU 命令，验证提交发生重叠。
+这表示并发请求/异步设备队列；同一 xclbin 的 Session 共享硬件 context，
+实际计算 tile 的执行顺序由 XRT/驱动调度。此实现不声称多个请求在不同 tile
+上同时计算，也不保证吞吐随并发数增长。
+
+`--unescape-prompt` 是可选的输入转换：把字面量 `\n`、`\r`、`\t`、`\\`
+转为对应字符。本次 `translate.txt` 末尾含字面量 `\n\nChinese:`，
+需要此选项才形成模型预期的实际换行；文件本身不被修改。
 
 ## Prefill
 

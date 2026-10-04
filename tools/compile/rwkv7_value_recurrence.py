@@ -4,7 +4,7 @@
 import json
 import aie.iron as iron
 from aie.iron import In, InOut
-from rwkv7_common import KERNEL_ROOT
+from rwkv7_common import C, KERNEL_ROOT
 from rwkv7_recurrence_stage import recurrence_program
 
 
@@ -22,7 +22,7 @@ if __name__ == "__main__":
             dict(
                 schema_version=1,
                 dtype="float32",
-                channels=2048,
+                channels=C,
                 head_size=64,
                 arena_vectors=30,
                 lanes=7,

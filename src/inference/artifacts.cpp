@@ -30,24 +30,39 @@ void check_artifact(const std::filesystem::path &root, const std::string &name,
 }
 void validate_resident_artifacts(const std::filesystem::path &root,
                                  const Weights &w, WeightMode mode) {
-  if (w.channels() != 2048 || w.heads() != 32 || w.vocabulary() != 65536)
-    throw std::runtime_error(
-        "BF16 NPU inference requires C=2048, heads=32, vocabulary=65536");
+  if (w.channels() < 512 || w.channels() > 2048 || w.channels() % 256 ||
+      w.head_size() != 64 || w.vocabulary() % 128)
+    throw std::runtime_error("NPU requires 512<=C<=2048, C divisible by 256, head_size=64 and vocabulary divisible by 128");
+  const size_t hidden = w.at("blocks.0.ffn.key.weight").shape[0];
+  if (hidden % 256 || hidden < 256 || hidden > 8192)
+    throw std::runtime_error("NPU FFN hidden must be divisible by 256 and <=8192");
+  for (size_t l = 0; l < w.layers(); ++l) {
+    const auto p = "blocks." + std::to_string(l) + ".";
+    if (w.at(p + "ffn.key.weight").shape[0] != hidden)
+      throw std::runtime_error("NPU requires uniform FFN hidden dimensions");
+    for (const auto *branch : {"w", "a", "g", "v"}) {
+      if (!l && std::string(branch) == "v") continue;
+      if (w.at(p + "att." + branch + "1").shape[1] > 256)
+        throw std::runtime_error("NPU low-rank dimension exceeds padded rank 256");
+    }
+  }
+  if (mode != WeightMode::BFloat16 && (w.channels() != 2048 || hidden != 8192))
+    throw std::runtime_error("INT8 FFN currently requires C=2048, hidden=8192");
   check_artifact(root, "upstream-norm",
                  {{"schema_version", 1},
                   {"dtype", "float32"},
-                  {"channels", 2048},
+                  {"channels", w.channels()},
                   {"epsilon", 1e-5}});
   check_artifact(root, "fused-norm-mix-6",
                  {{"schema_version", 1},
                   {"dtype", "float32"},
-                  {"channels", 2048},
+                  {"channels", w.channels()},
                   {"mixes", 6},
                   {"exact_fp32", false}});
   check_artifact(root, "fused-value-recurrence-stage",
                  {{"schema_version", 1},
                   {"dtype", "float32"},
-                  {"channels", 2048},
+                  {"channels", w.channels()},
                   {"head_size", 64},
                   {"arena_vectors", 30},
                   {"lanes", 7},
@@ -56,7 +71,7 @@ void validate_resident_artifacts(const std::filesystem::path &root,
   check_artifact(root, "fused-recurrence-stage",
                  {{"schema_version", 1},
                   {"dtype", "float32"},
-                  {"channels", 2048},
+                  {"channels", w.channels()},
                   {"head_size", 64},
                   {"arena_vectors", 27},
                   {"exact_fp32", false}});
@@ -65,8 +80,8 @@ void validate_resident_artifacts(const std::filesystem::path &root,
         root, "int8-channel-mix",
         {{"schema_version", 1},
          {"dtype", "int8"},
-         {"channels", 2048},
-         {"hidden", 8192},
+         {"channels", w.channels()},
+         {"hidden", hidden},
          {"key_cores", 4},
          {"value_cores", 4},
          {"tile_bytes", 4160},
@@ -89,8 +104,8 @@ void validate_resident_artifacts(const std::filesystem::path &root,
     check_artifact(root, "bf16-channel-mix",
                    {{"schema_version", 1},
                     {"dtype", "bfloat16"},
-                    {"channels", 2048},
-                    {"hidden", 8192},
+                    {"channels", w.channels()},
+                    {"hidden", hidden},
                     {"key_cores", 4},
                     {"value_cores", 4},
                     {"weight_layout", "row_major"},
@@ -98,7 +113,7 @@ void validate_resident_artifacts(const std::filesystem::path &root,
   check_artifact(root, "bf16-projection-residual",
                  {{"schema_version", 1},
                   {"dtype", "bfloat16"},
-                  {"channels", 2048},
+                  {"channels", w.channels()},
                   {"cores", 11},
                   {"exact_fp32", false}});
   for (int branches : {3, 4})
@@ -106,17 +121,17 @@ void validate_resident_artifacts(const std::filesystem::path &root,
                    "bf16-attention-projections-" + std::to_string(branches),
                    {{"schema_version", 1},
                     {"dtype", "bfloat16"},
-                    {"channels", 2048},
+                    {"channels", w.channels()},
                     {"rank", 256},
                     {"branches", branches},
                     {"cores", 14},
                     {"exact_fp32", false}});
-  check_artifact(root, "bf16-array-gemv-2048-65536",
+  check_artifact(root, "bf16-array-gemv-" + std::to_string(w.channels()) + "-" + std::to_string(w.vocabulary()),
                  {{"schema_version", 1},
                   {"dtype", "bfloat16"},
-                  {"rows", 65536},
+                  {"rows", w.vocabulary()},
                   {"cores", 8},
-                  {"k", 2048}});
+                  {"k", w.channels()}});
 }
 void validate_prefill_artifacts(const std::filesystem::path &root,
                                 WeightMode weight_mode, size_t chunk_tokens) {

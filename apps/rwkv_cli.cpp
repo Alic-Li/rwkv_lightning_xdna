@@ -3,6 +3,8 @@
 #include "rwkv/inference/model.hpp"
 #include "sampler.h"
 #include "tokenizer.h"
+#include "parallel_inference.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -40,6 +42,9 @@ void usage() {
          "intermediates in NPU BOs\n"
          "  --prefill sequence|decode|batch2|chunk4  default decode; sequence available on "
          "CPU; Batched prefill requires NPU and returns final prompt logits\n"
+         "  --concurrency N         copy prompt to N independent simultaneous requests (default 1)\n"
+         "  --unescape-prompt       convert literal \\n/\\r/\\t/\\\\ in prompt text to characters\n"
+         "  --inspect-model         print model shape JSON and exit\n"
          "  --threads N             CPU threads, default 8\n"
          "  --tokens 1,2,3 --dump-logits FILE  diagnostic: dump FP32 logits "
          "after every input token\n";
@@ -76,6 +81,7 @@ int main(int argc, char **argv) {
         {"--frequency-penalty", "0"},
         {"--penalty-decay", "0.996"},
         {"--threads", "8"},
+        {"--concurrency", "1"},
         {"--prefill", "decode"},
         {"--decode", "resident"},
         {"--model", ""},
@@ -90,6 +96,10 @@ int main(int argc, char **argv) {
         usage();
         return 0;
       }
+      if (key == "--inspect-model" || key == "--unescape-prompt") {
+        if (seen[key]) throw std::runtime_error("Duplicate option: " + key);
+        seen[key] = true; continue;
+      }
       if (!opts.count(key) || i + 1 == argc || seen[key])
         throw std::runtime_error("Unknown, duplicate or incomplete option: " +
                                  key);
@@ -98,11 +108,28 @@ int main(int argc, char **argv) {
     }
     if (opts["--model"].empty())
       throw std::runtime_error("--model is required; use --help");
+    if (seen["--inspect-model"]) {
+      rwkv::inference::Weights w(opts["--model"]);
+      size_t rank = 0;
+      for (size_t l = 0; l < w.layers(); ++l)
+        for (const auto *b : {"w", "a", "g", "v"}) {
+          if (!l && std::string(b) == "v") continue;
+          rank = std::max(rank, w.at("blocks." + std::to_string(l) + ".att." + b + "1").shape[1]);
+        }
+      std::cout << "{\"layers\":" << w.layers() << ",\"channels\":" << w.channels()
+                << ",\"heads\":" << w.heads() << ",\"head_size\":" << w.head_size()
+                << ",\"hidden\":" << w.at("blocks.0.ffn.key.weight").shape[0]
+                << ",\"vocabulary\":" << w.vocabulary() << ",\"max_rank\":" << rank << "}\n";
+      return 0;
+    }
     int sources = int(seen["--prompt"]) + int(seen["--prompt-file"]) +
                   int(seen["--tokens"]);
     if (sources != 1)
       throw std::runtime_error(
           "Specify exactly one of --prompt, --prompt-file or --tokens");
+    const long concurrency = integer(opts["--concurrency"]);
+    if (concurrency < 1 || concurrency > 64)
+      throw std::runtime_error("--concurrency must be in [1,64]");
     const long max_tokens = integer(opts["--max-tokens"]),
                topk = integer(opts["--top-k"]),
                threads = integer(opts["--threads"]),
@@ -151,6 +178,21 @@ int main(int argc, char **argv) {
           throw std::runtime_error("Cannot open prompt file");
         prompt.assign(std::istreambuf_iterator<char>(in), {});
       }
+      if (seen["--unescape-prompt"]) {
+        std::string decoded;
+        for (size_t i = 0; i < prompt.size(); ++i) {
+          if (prompt[i] == '\\' && i + 1 < prompt.size()) {
+            const char next = prompt[i + 1];
+            if (next == 'n' || next == 'r' || next == 't' || next == '\\') {
+              decoded += next == 'n' ? '\n' : next == 'r' ? '\r' : next == 't' ? '\t' : '\\';
+              ++i;
+              continue;
+            }
+          }
+          decoded += prompt[i];
+        }
+        prompt = std::move(decoded);
+      }
       if (prompt.empty())
         throw std::runtime_error("Prompt must not be empty");
       tokens = tokenizer.encode(prompt);
@@ -185,6 +227,11 @@ int main(int argc, char **argv) {
         (opts["--backend"] != "npu" ||
          !opts["--dump-logits"].empty()))
       throw std::runtime_error("Batched prefill requires NPU and cannot dump per-token logits");
+    if (concurrency > 1) {
+      if (opts["--backend"] == "cpu" && (opts["--decode"] != "graph" || opts["--prefill"] != "decode"))
+        throw std::runtime_error("Concurrent CPU reference requires --decode graph --prefill decode");
+      return parallel_inference(weights, tokenizer, tokens, opts, size_t(concurrency), diagnostic);
+    }
     rwkv::inference::Model model(weights, *backend);
     auto state = model.initial_state();
     if (opts["--decode"] != "graph" && opts["--decode"] != "resident" &&

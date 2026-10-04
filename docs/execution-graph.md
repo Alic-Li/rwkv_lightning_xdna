@@ -6,7 +6,12 @@ CPU graph 通过参考 backend 执行；NPU graph 将节点映射为固定 resid
 
 构造时一次完成 ABI 检查、权重打包、session/BO 分配和 XRT run 参数绑定。
 非首层的 recurrence 与 BF16 output projection 融合，FFN 直接读取融合输出。
-24层正常 decode 为100次提交；诊断 trace 使用保留中间结果的123次提交计划。
+C=2048 / FFN=8192 的24层正常 decode 为100次提交；诊断 trace 使用保留
+中间结果的123次提交计划。C=1024 / FFN=4096 的0.4B目前使用123次提交计划，
+不要求原来只为2048通道编译的 recurrence/output 融合内核。
+编译器和运行时根据模型形状选择同一套 tile ABI；图按实际层数展开。
+`--concurrency N` 用 N 个独立图及状态并发提交，图实例本身仍只能由单个线程操作。
+请求共享只读主机权重和 XRT program context；所有可写 BO 和 prepared run 独立。
 每次仍逐个执行可复用 `xrt::run`，没有启用 runlist 或 HRX。
 
 `load_state` 建立设备请求状态，`replay_resident` 只同步 embedding/logits，

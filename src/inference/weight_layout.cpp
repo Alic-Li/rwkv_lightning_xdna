@@ -33,69 +33,76 @@ Vector projection(const Tensor &logical, bool transposed, size_t first_output,
   return packed;
 }
 Vector channel_mix(const Tensor &key, const Tensor &value) {
-  if (key.shape != std::vector<size_t>{8192, 2048} ||
-      value.shape != std::vector<size_t>{2048, 8192})
+  const size_t c = key.shape.at(1), h = key.shape.at(0);
+  if (key.shape != std::vector<size_t>{h, c} ||
+      value.shape != std::vector<size_t>{c, h})
     throw std::invalid_argument("Invalid ChannelMix weights");
   Vector packed;
-  packed.reserve(33554432);
-  append_projection(packed, key, false, 0, 8192, 2048);
-  append_projection(packed, value, false, 0, 2048, 8192);
+  packed.reserve(2 * c * h);
+  append_projection(packed, key, false, 0, h, c);
+  append_projection(packed, value, false, 0, c, h);
   return packed;
 }
 Vector rkv(const std::array<const Tensor *, 3> &logical) {
-  Vector packed(3 * 2048 * 2048);
+  if (!logical[0] || logical[0]->shape.size() != 2)
+    throw std::invalid_argument("Invalid RKV weight");
+  const size_t c = logical[0]->shape[0];
+  Vector packed(3 * c * c);
   for (size_t projection = 0; projection < 3; ++projection) {
     const auto *matrix = logical[projection];
-    if (!matrix || matrix->shape != std::vector<size_t>{2048, 2048} ||
-        matrix->data.size() != 2048 * 2048)
+    if (!matrix || matrix->shape != std::vector<size_t>{c, c} ||
+        matrix->data.size() != c * c)
       throw std::invalid_argument("Invalid RKV weight");
-    for (size_t row = 0; row < 2048; ++row)
-      for (size_t col = 0; col < 2048; ++col) {
+    for (size_t row = 0; row < c; ++row)
+      for (size_t col = 0; col < c; ++col) {
         const size_t tile =
-            ((row / 256 * 3 + projection) * 16 + (row % 256) / 16) * 8 +
+            ((row / (c / 8) * 3 + projection) * (c / 128) + (row % (c / 8)) / 16) * (c / 256) +
             col / 256;
         packed[tile * 4096 + (row % 16) * 256 + col % 256] =
-            matrix->data[row * 2048 + col];
+            matrix->data[row * c + col];
       }
   }
   return packed;
 }
 Vector rank_batch(const std::vector<RankBranch> &branches, size_t first_workers,
                   size_t second_workers) {
+  if (branches.empty() || !branches[0].input || branches[0].input->shape.size() != 2)
+    throw std::invalid_argument("Invalid rank weights");
+  const size_t c = branches[0].input->shape[0];
   if (branches.empty() || !first_workers || !second_workers ||
-      256 % first_workers || 2048 % second_workers ||
-      (256 / first_workers) % 16 || (2048 / second_workers) % 16)
+      256 % first_workers || c % second_workers ||
+      (256 / first_workers) % 16 || (c / second_workers) % 16)
     throw std::invalid_argument("Invalid rank worker partition");
   const size_t count = branches.size(), first_stripe = 256 / first_workers,
-               second_stripe = 2048 / second_workers;
-  Vector packed(count * 2 * 256 * 2048, 0);
+               second_stripe = c / second_workers;
+  Vector packed(count * 2 * 256 * c, 0);
   for (size_t branch = 0; branch < count; ++branch) {
     const auto *first = branches[branch].input,
                *second = branches[branch].output;
     if (!first || !second || first->shape.size() != 2 ||
-        first->shape[0] != 2048 || !first->shape[1] || first->shape[1] > 256 ||
-        second->shape != std::vector<size_t>{first->shape[1], 2048} ||
-        first->data.size() != 2048 * first->shape[1] ||
+        first->shape[0] != c || !first->shape[1] || first->shape[1] > 256 ||
+        second->shape != std::vector<size_t>{first->shape[1], c} ||
+        first->data.size() != c * first->shape[1] ||
         second->data.size() != first->data.size())
       throw std::invalid_argument("Invalid rank weights");
     const size_t hidden = first->shape[1];
     for (size_t row = 0; row < hidden; ++row)
-      for (size_t col = 0; col < 2048; ++col) {
+      for (size_t col = 0; col < c; ++col) {
         const size_t tile =
             ((row / first_stripe * count + branch) * (first_stripe / 16) +
              (row % first_stripe) / 16) *
-                8 +
+                (c / 256) +
             col / 256;
         packed[tile * 4096 + (row % 16) * 256 + col % 256] =
             first->data[col * hidden + row];
       }
-    for (size_t row = 0; row < 2048; ++row)
+    for (size_t row = 0; row < c; ++row)
       for (size_t col = 0; col < hidden; ++col) {
         const size_t tile =
             (row / second_stripe * count + branch) * (second_stripe / 16) +
             (row % second_stripe) / 16;
-        packed[count * 256 * 2048 + tile * 4096 + (row % 16) * 256 + col] =
-            second->data[col * 2048 + row];
+        packed[count * 256 * c + tile * 4096 + (row % 16) * 256 + col] =
+            second->data[col * c + row];
       }
   }
   return packed;
